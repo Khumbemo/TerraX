@@ -1,4 +1,6 @@
 node_modules/
+dist/
+dist-preview/
 build/
 coverage/
 .DS_Store

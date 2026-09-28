@@ -1,0 +1,249 @@
+import { useEffect, useState, type FormEvent } from 'react';
+import { DEFAULT_MODEL } from '../lib/gemini-shared';
+import { getAiMode, getModel, getOwnKey, refreshAiStatus, setModel, setOwnKey, type AiMode } from '../lib/ai';
+import { useToast } from '../lib/toast';
+import GEEGuidance from './GEEGuidance';
+
+export interface Target {
+  lat: number;
+  lon: number;
+  name: string;
+}
+
+interface Props {
+  initialTab?: Tab;
+  target: Target;
+  onTargetChange: (t: Target) => void;
+  onAiChange: () => void;
+  onClose: () => void;
+}
+
+type Tab = 'settings' | 'guide' | 'gee' | 'about';
+
+const TABS: [Tab, string][] = [
+  ['settings', 'Settings'],
+  ['guide', 'How TerraX works'],
+  ['gee', 'Earth Engine manual'],
+  ['about', 'About'],
+];
+
+const MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+
+const AI_MODE_TEXT: Record<AiMode, string> = {
+  'own-key': 'On — using your API key from this browser',
+  server: 'On — using the TerraX server',
+  off: 'Off — statistics only',
+};
+
+export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose }: Props) {
+  const notify = useToast();
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [mode, setMode] = useState<AiMode | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [hasKey, setHasKey] = useState(Boolean(getOwnKey()));
+  const [model, setModelInput] = useState(getModel());
+  const [lat, setLat] = useState(String(target.lat));
+  const [lon, setLon] = useState(String(target.lon));
+  const [placeName, setPlaceName] = useState(target.name);
+
+  useEffect(() => {
+    getAiMode().then(setMode);
+  }, [hasKey]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const saveKey = (e: FormEvent) => {
+    e.preventDefault();
+    if (!keyInput.trim()) {
+      notify('Paste an API key first.', 'error');
+      return;
+    }
+    setOwnKey(keyInput);
+    setKeyInput('');
+    setHasKey(true);
+    refreshAiStatus();
+    onAiChange();
+    notify('API key saved in this browser.', 'success');
+  };
+
+  const removeKey = () => {
+    setOwnKey('');
+    setHasKey(false);
+    refreshAiStatus();
+    onAiChange();
+    notify('API key removed from this browser.');
+  };
+
+  const saveModel = () => {
+    setModel(model);
+    onAiChange();
+    notify(`Model set to ${model || DEFAULT_MODEL}.`, 'success');
+  };
+
+  const saveTarget = (e: FormEvent) => {
+    e.preventDefault();
+    const la = Number(lat);
+    const lo = Number(lon);
+    if (!Number.isFinite(la) || la < -90 || la > 90 || !Number.isFinite(lo) || lo < -180 || lo > 180) {
+      notify('Latitude must be between −90 and 90, and longitude between −180 and 180.', 'error');
+      return;
+    }
+    onTargetChange({ lat: la, lon: lo, name: placeName.trim() || 'Target' });
+    notify('Target location updated.', 'success');
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div className="modal-head">
+          <h2 id="settings-title">Settings & guide</h2>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="modal-tabs" role="tablist" aria-orientation="vertical">
+            {TABS.map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="modal-content">
+            {tab === 'settings' && (
+              <div className="settings-stack">
+                <section>
+                  <h3>AI interpretation (Gemini)</h3>
+                  <p className="status-line">
+                    Status: <strong>{mode ? AI_MODE_TEXT[mode] : 'Checking…'}</strong>
+                  </p>
+                  {__TERRAX_PREVIEW__ && (
+                    <p className="notice">This preview runs in a sandbox that blocks calls to Google, so AI stays off here even with a key. Run TerraX locally to use AI.</p>
+                  )}
+                  <form onSubmit={saveKey} className="field-row">
+                    <label htmlFor="api-key" className="visually-hidden">
+                      Gemini API key
+                    </label>
+                    <input
+                      id="api-key"
+                      type="password"
+                      autoComplete="off"
+                      value={keyInput}
+                      onChange={e => setKeyInput(e.target.value)}
+                      placeholder={hasKey ? 'A key is saved — paste a new one to replace it' : 'Paste your Gemini API key'}
+                    />
+                    <button type="submit" className="btn btn-primary">
+                      Save key
+                    </button>
+                    {hasKey && (
+                      <button type="button" className="btn" onClick={removeKey}>
+                        Remove
+                      </button>
+                    )}
+                  </form>
+                  <p className="field-hint">
+                    Your key is stored only in this browser's local storage and sent only to Google. Anyone with access to this browser profile can read it. To keep a key off
+                    user devices, run TerraX with <code>GEMINI_API_KEY</code> set on the server instead.
+                  </p>
+                  <div className="field-row">
+                    <label htmlFor="model" className="field-label">
+                      Model
+                    </label>
+                    <input id="model" list="model-options" value={model} onChange={e => setModelInput(e.target.value)} />
+                    <datalist id="model-options">
+                      {MODELS.map(m => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <button type="button" className="btn" onClick={saveModel}>
+                      Use model
+                    </button>
+                  </div>
+                </section>
+
+                <section>
+                  <h3>Telemetry target</h3>
+                  <form onSubmit={saveTarget} className="target-form">
+                    <label>
+                      <span>Name</span>
+                      <input id="target-name" value={placeName} maxLength={60} onChange={e => setPlaceName(e.target.value)} />
+                    </label>
+                    <label>
+                      <span>Latitude (°N)</span>
+                      <input id="target-lat" inputMode="decimal" value={lat} onChange={e => setLat(e.target.value)} />
+                    </label>
+                    <label>
+                      <span>Longitude (°E)</span>
+                      <input id="target-lon" inputMode="decimal" value={lon} onChange={e => setLon(e.target.value)} />
+                    </label>
+                    <button type="submit" className="btn btn-primary">
+                      Update target
+                    </button>
+                  </form>
+                  <p className="field-hint">Used for solar time, sun position and the map marker. Use negative values for south and west.</p>
+                </section>
+              </div>
+            )}
+
+            {tab === 'guide' && (
+              <div className="prose">
+                <h3>How TerraX works</h3>
+                <p>
+                  TerraX reads CSV, TSV, XLSX and GeoTIFF files in your browser. Files are not uploaded to a TerraX server. When AI is on and you ask for an interpretation
+                  or use an assistant, TerraX sends the computed statistics and a sample of up to 150 rows to Google's Gemini API.
+                </p>
+                <h4>Tables</h4>
+                <p>
+                  TerraX finds the date column (ISO dates, day-first or month-first dates, year-day such as 2014-043, or a year column) and the numeric columns. For
+                  each variable it reports mean, SD, median, IQR and range, runs a two-sided Mann–Kendall trend test with the Theil–Sen slope per year, and shows the
+                  mean for each calendar month when the record spans two or more years.
+                </p>
+                <h4>Value classes</h4>
+                <p>
+                  Recognised variables are classified with a stated basis: indicative USGS ranges for NDVI, IMD 24-hour categories for daily rainfall, descriptive °C
+                  bands for temperature, and indicative ranges for ET, solar radiation and humidity. Anything else is split into quartiles of the data. ET totals over
+                  multi-day intervals (such as MODIS 8-day ET) are converted to mm/day first.
+                </p>
+                <h4>GeoTIFFs</h4>
+                <p>
+                  Statistics skip no-data and NaN pixels. Rasters over 4 million pixels are resampled for statistics, and TerraX says so. The footprint is drawn on the
+                  map for WGS84, Web Mercator and WGS84 UTM files. With two or more bands you can compute NDVI = (NIR − Red) / (NIR + Red).
+                </p>
+                <h4>Limits</h4>
+                <p>
+                  The Mann–Kendall test assumes independent observations; seasonal or autocorrelated series can look significant when they are not. Class thresholds are
+                  indicative and vary by sensor, season and region.
+                </p>
+              </div>
+            )}
+
+            {tab === 'gee' && <GEEGuidance />}
+
+            {tab === 'about' && (
+              <div className="prose">
+                <h3>About TerraX</h3>
+                <p>TerraX is an Earth-observation workbench for climate, forest and land analysis.</p>
+                <h4>Data and services</h4>
+                <ul>
+                  <li>Basemap: © OpenStreetMap contributors, © CARTO. Offline outline: Natural Earth 1:110m (public domain) via world-atlas.</li>
+                  <li>Planetary K-index: NOAA Space Weather Prediction Center.</li>
+                  <li>Sun position and times: SunCalc; equation of time and declination: NOAA Solar Calculator equations.</li>
+                  <li>AI: Google Gemini API (optional).</li>
+                </ul>
+                <h4>Sample data</h4>
+                <p>
+                  The six sample series for Kohima, Nagaland are bundled for demonstration. Their original source is not documented in this project, so do not use them
+                  as research data.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

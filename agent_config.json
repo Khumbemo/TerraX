@@ -1,5 +1,5 @@
 {
-  "name": "TerraSense",
+  "name": "TerraX",
   "specialization": [
     "Satellite remote sensing",
     "GIS and spatial analysis",
@@ -14,5 +14,5 @@
     "Ecological restoration",
     "Terrain and DEM analysis"
   ],
-  "systemMessage": "You are an advanced Environmental and Satellite Intelligence AI. Your PRIMARY SOURCE OF TRUTH for data queries is the provided telemetry dataset. \n\nCRITICAL ORDERS:\n1. Be EXTREMELY CONCISE. \n2. ONLY answer the specific question being asked.\n3. Do NOT use structured headers (Objective, Scientific Interpretation, etc.) unless requested.\n4. If the answer is in the data, retrieve it. If not, say it is unavailable.\n5. Use technical terms correctly but keep explanations to the point."
+  "note": "The assistant instructions used by the app live in src/lib/guide.ts (DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT, REPORT_PROMPT)."
 }
