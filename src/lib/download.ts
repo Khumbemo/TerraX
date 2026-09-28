@@ -2,7 +2,37 @@ export function safeFilename(name: string): string {
   return name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'terrax';
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {
+interface HostDownloads {
+  save(req: { filename: string; data: Blob }): Promise<unknown>;
+}
+
+/**
+ * In the sandboxed preview build, plain download links are blocked, so
+ * files are offered through the host's download prompt when it exists.
+ */
+async function hostDownloads(): Promise<HostDownloads | null> {
+  if (!__TERRAX_PREVIEW__) return null;
+  const host = (window as unknown as { claude?: { use?: (name: string) => Promise<unknown> } }).claude;
+  if (!host?.use) return null;
+  try {
+    return (await host.use('downloads')) as HostDownloads | null;
+  } catch {
+    return null;
+  }
+}
+
+export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  const host = await hostDownloads();
+  if (host) {
+    try {
+      await host.save({ filename, data: blob });
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'declined') return;
+      throw new Error(code === 'rate_limited' ? 'A save prompt is already open. Finish it, then try again.' : 'This preview could not save the file. Run TerraX locally to download it.');
+    }
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -13,14 +43,29 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function downloadText(text: string, filename: string, type = 'text/plain;charset=utf-8'): void {
-  downloadBlob(new Blob([text], { type }), filename);
+export function downloadText(text: string, filename: string, type = 'text/plain;charset=utf-8'): Promise<void> {
+  return downloadBlob(new Blob([text], { type }), filename);
+}
+
+/** The PDF's standard font covers WinAnsi only; map other characters to ASCII. */
+function winAnsi(text: string): string {
+  return text
+    .replace(/≥/g, '>=')
+    .replace(/≤/g, '<=')
+    .replace(/−/g, '-')
+    .replace(/⁻¹/g, '^-1')
+    .replace(/⁻²/g, '^-2')
+    .replace(/→/g, '->')
+    .replace(/↑/g, 'up')
+    .replace(/↓/g, 'down')
+    .replace(/α/g, 'alpha')
+    .replace(/[^\x00-\xff–—‘’“”•…]/g, '?');
 }
 
 /** Strips Markdown syntax so report text reads cleanly in a PDF. */
 function markdownToPlain(md: string): string[] {
   return md.split('\n').map(line =>
-    line
+    winAnsi(line)
       .replace(/^#{1,6}\s+/, '')
       .replace(/\*\*(.+?)\*\*/g, '$1')
       .replace(/\*(.+?)\*/g, '$1')
@@ -51,12 +96,12 @@ export async function downloadReportPdf(title: string, subtitle: string, markdow
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
-  pdf.text(title, margin, y);
+  pdf.text(winAnsi(title), margin, y);
   y += 7;
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9);
   pdf.setTextColor(90);
-  pdf.text(subtitle, margin, y);
+  pdf.text(winAnsi(subtitle), margin, y);
   pdf.setTextColor(20);
   y += 8;
 
@@ -86,5 +131,5 @@ export async function downloadReportPdf(title: string, subtitle: string, markdow
     pdf.setTextColor(120);
     pdf.text(`TerraX · page ${p} of ${pages}`, margin, pageH - 8);
   }
-  pdf.save(filename);
+  await downloadBlob(pdf.output('blob'), filename);
 }

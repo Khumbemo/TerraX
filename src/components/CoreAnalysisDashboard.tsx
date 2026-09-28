@@ -128,6 +128,11 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
               <div className="stat-sub">
                 Sen slope {fmt(t.senSlope)}/yr · p {fmtP(t.p)}
               </div>
+              {analysis.trendCaveat && (
+                <div className="stat-caveat" title={analysis.trendCaveat}>
+                  Record under 2 years: likely seasonal
+                </div>
+              )}
             </>
           ) : (
             <div className="stat-sub">{hasTime ? 'Needs ≥ 4 dated values' : 'Needs a date column'}</div>
@@ -171,6 +176,7 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
                   <input id="toggle-trend" type="checkbox" checked={showTrend} onChange={e => setShowTrend(e.target.checked)} /> Show Theil–Sen trend line
                 </label>
               )}
+              {analysis.trendCaveat && t && <span className="caveat-text">{analysis.trendCaveat}</span>}
               {analysis.points.length > MAX_CHART_POINTS && <span>Chart shows {MAX_CHART_POINTS} evenly spaced of {analysis.points.length} values; statistics use all values.</span>}
             </div>
           </>

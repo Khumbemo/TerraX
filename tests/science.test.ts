@@ -198,9 +198,11 @@ test('bundled sample data parses cleanly', () => {
   assert.match(analyzeMetric(precip, 'precipitation').classification.basis, /India Meteorological Department/);
   const et = parseDelimited(readFileSync(new URL('../public/data/evapotranspiration_data.csv', import.meta.url), 'utf8'), 'evapotranspiration_data.csv', 1);
   close(et.intervalDays!, 8, 0.01, 'ET interval');
+  assert.match(analyzeMetric(et, 'Evapotranspiration').trendCaveat ?? '', /seasonal cycle/);
   const a = analyzeMetric(ndvi, 'NDVI');
   assert.equal(a.summary!.n, 31);
   assert.ok(a.monthly && a.monthly.length >= 10);
+  assert.equal(a.trendCaveat, null, 'NDVI spans ~2 years');
 });
 
 test('AI request validation rejects malformed bodies', () => {

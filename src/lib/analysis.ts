@@ -27,6 +27,8 @@ export interface MetricAnalysis {
   monthly: MonthlyMean[] | null;
   classification: Classification;
   classCounts: number[];
+  /** Set when the trend result should not be read as a long-term trend. */
+  trendCaveat: string | null;
   start: Date | null;
   end: Date | null;
 }
@@ -57,11 +59,15 @@ export function analyzeMetric(ds: TableDataset, column: string): MetricAnalysis 
 
   let trend: TrendResult | null = null;
   let monthly: MonthlyMean[] | null = null;
+  let trendCaveat: string | null = null;
   const start = points[0]?.time ?? null;
   const end = points[points.length - 1]?.time ?? null;
   if (ds.times && points.length >= 4) {
     trend = trendTest(points.map(p => decimalYear(p.time!)), values);
     const spanYears = start && end ? (end.getTime() - start.getTime()) / (365.25 * 86_400_000) : 0;
+    if (spanYears < 1.9) {
+      trendCaveat = `The record covers ${spanYears < 1 ? `${Math.max(1, Math.round(spanYears * 12))} month${Math.round(spanYears * 12) === 1 ? '' : 's'}` : `${spanYears.toFixed(1)} years`}, less than two seasonal cycles, so this trend mostly reflects the seasonal cycle, not a long-term change.`;
+    }
     if (spanYears >= 1.9 && (ds.intervalDays ?? 999) <= 31) {
       const sums = new Array(12).fill(0);
       const counts = new Array(12).fill(0);
@@ -74,5 +80,5 @@ export function analyzeMetric(ds: TableDataset, column: string): MetricAnalysis 
     }
   }
 
-  return { column, points, summary, trend, monthly, classification, classCounts, start, end };
+  return { column, points, summary, trend, monthly, classification, classCounts, trendCaveat, start, end };
 }

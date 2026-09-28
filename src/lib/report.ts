@@ -31,7 +31,8 @@ function trendSentence(a: MetricAnalysis): string {
     t.direction === 'no trend'
       ? `no statistically significant monotonic trend (Mann–Kendall p = ${fmtP(t.p)})`
       : `a statistically significant ${t.direction} trend (Mann–Kendall p = ${fmtP(t.p)})`;
-  return `The series shows ${verdict}. Theil–Sen slope: ${fmt(t.senSlope)}${unit} per year (least-squares slope ${fmt(t.olsSlope)}${unit} per year), n = ${t.n}.`;
+  const sentence = `The series shows ${verdict}. Theil–Sen slope: ${fmt(t.senSlope)}${unit} per year (least-squares slope ${fmt(t.olsSlope)}${unit} per year), n = ${t.n}.`;
+  return a.trendCaveat ? `${sentence} **Caution:** ${a.trendCaveat}` : sentence;
 }
 
 function metricSection(ds: TableDataset, a: MetricAnalysis): string {
@@ -58,7 +59,7 @@ function metricSection(ds: TableDataset, a: MetricAnalysis): string {
   }
   const total = a.classCounts.reduce((x, y) => x + y, 0);
   if (total) {
-    lines.push(`Class distribution (${a.classification.basis}):`, '');
+    lines.push(`Class distribution (${a.classification.basis.replace(/\.$/, '')}):`, '');
     a.classification.buckets.forEach((b, i) => {
       if (a.classCounts[i]) lines.push(`- ${b.label}: ${a.classCounts[i]} (${((a.classCounts[i] / total) * 100).toFixed(1)} %)`);
     });

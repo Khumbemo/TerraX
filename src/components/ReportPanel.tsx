@@ -38,7 +38,7 @@ export function composeReport(dataset: Dataset, focus: string | null, operator: 
 
 export async function exportReport(report: ReportRecord, kind: 'md' | 'pdf') {
   const base = `TerraX_${safeFilename(report.datasetName)}_${report.createdAt.slice(0, 10)}`;
-  if (kind === 'md') downloadText(report.content, `${base}.md`, 'text/markdown;charset=utf-8');
+  if (kind === 'md') await downloadText(report.content, `${base}.md`, 'text/markdown;charset=utf-8');
   else await downloadReportPdf(report.title, `${report.datasetName} · ${report.createdAt.slice(0, 10)}`, report.content.replace(/^# .*\n/, ''), `${base}.pdf`);
 }
 

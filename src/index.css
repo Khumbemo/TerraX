@@ -682,6 +682,15 @@ select {
   color: var(--muted);
   font-family: var(--mono);
 }
+.stat-caveat {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--warn);
+  font-family: var(--mono);
+}
+.caveat-text {
+  color: #ecd7ae;
+}
 .trend-increasing {
   color: var(--green);
 }

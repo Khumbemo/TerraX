@@ -174,9 +174,13 @@ export default function App() {
     }
   }, []);
 
-  const exportSummary = () => {
+  const exportSummary = async () => {
     if (!dataset) return;
-    downloadText(JSON.stringify(summaryJson(dataset), null, 2), `TerraX_${safeFilename(dataset.filename)}_summary.json`, 'application/json');
+    try {
+      await downloadText(JSON.stringify(summaryJson(dataset), null, 2), `TerraX_${safeFilename(dataset.filename)}_summary.json`, 'application/json');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'The download failed.', 'error');
+    }
   };
 
   const raster = dataset?.kind === 'raster' ? dataset : null;
@@ -218,7 +222,7 @@ export default function App() {
 
       {__TERRAX_PREVIEW__ && (
         <div className="preview-banner" role="note">
-          Preview build: this sandbox blocks map tiles, live space weather, AI and file downloads. Everything else works. Run TerraX locally for the full app.
+          Preview build: this sandbox blocks map tiles, live space weather and AI, and downloads ask for confirmation. Everything else works. Run TerraX locally for the full app.
         </div>
       )}
 
