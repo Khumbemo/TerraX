@@ -1122,6 +1122,24 @@ select {
   padding-left: 18px;
   font-size: 12px;
 }
+.chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chat-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: rgba(56, 189, 248, 0.06);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.chat-chip:hover {
+  border-color: var(--accent);
+}
 .typing {
   color: var(--muted);
   font-style: italic;

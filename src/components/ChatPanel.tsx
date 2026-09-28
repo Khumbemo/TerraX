@@ -5,10 +5,13 @@ import type { ChatTurn, Source } from '../lib/gemini-shared';
 export interface ChatReply {
   text: string;
   sources?: Source[];
+  /** Quick replies shown as chips under this answer. */
+  suggestions?: string[];
 }
 
 interface Message extends ChatTurn {
   sources?: Source[];
+  suggestions?: string[];
   error?: boolean;
 }
 
@@ -20,6 +23,8 @@ interface Props {
   /** Receives the question and the earlier turns (oldest first). */
   onAsk: (question: string, history: ChatTurn[]) => Promise<ChatReply>;
   variant?: 'dataset' | 'guide';
+  /** Quick replies shown under the greeting before the first message. */
+  starters?: string[];
 }
 
 const markdownComponents = {
@@ -30,7 +35,7 @@ const markdownComponents = {
   ),
 };
 
-export default function ChatPanel({ id, title, greeting, placeholder, onAsk, variant = 'dataset' }: Props) {
+export default function ChatPanel({ id, title, greeting, placeholder, onAsk, variant = 'dataset', starters = [] }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -41,9 +46,8 @@ export default function ChatPanel({ id, title, greeting, placeholder, onAsk, var
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, thinking]);
 
-  const send = async (e: FormEvent) => {
-    e.preventDefault();
-    const question = input.trim();
+  const ask = async (text: string) => {
+    const question = text.trim();
     if (!question || thinking) return;
     const history: ChatTurn[] = messages.filter(m => !m.error).map(m => ({ role: m.role, text: m.text }));
     setMessages(m => [...m, { role: 'user', text: question }]);
@@ -51,13 +55,21 @@ export default function ChatPanel({ id, title, greeting, placeholder, onAsk, var
     setThinking(true);
     try {
       const reply = await onAsk(question, history);
-      setMessages(m => [...m, { role: 'model', text: reply.text || 'No answer was returned.', sources: reply.sources }]);
+      setMessages(m => [...m, { role: 'model', text: reply.text || 'No answer was returned.', sources: reply.sources, suggestions: reply.suggestions }]);
     } catch (err) {
       setMessages(m => [...m, { role: 'model', text: err instanceof Error ? err.message : 'The assistant could not answer.', error: true }]);
     } finally {
       setThinking(false);
     }
   };
+
+  const send = (e: FormEvent) => {
+    e.preventDefault();
+    ask(input);
+  };
+
+  const last = messages[messages.length - 1];
+  const chips = thinking ? [] : messages.length === 0 ? starters : last?.role === 'model' ? (last.suggestions ?? []) : [];
 
   return (
     <section className={`chat-panel chat-${variant}`} aria-label={title}>
@@ -89,6 +101,15 @@ export default function ChatPanel({ id, title, greeting, placeholder, onAsk, var
           </div>
         ))}
         {thinking && <div className="chat-bubble bot-style typing">Thinking…</div>}
+        {chips.length > 0 && (
+          <div className="chat-chips" aria-label="Suggested questions">
+            {chips.map(c => (
+              <button key={c} type="button" className="chat-chip" onClick={() => ask(c)}>
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <form className="chat-input-area" onSubmit={send}>
         <label htmlFor={`${id}-input`} className="visually-hidden">

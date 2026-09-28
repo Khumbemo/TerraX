@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import ChatPanel, { type ChatReply } from './components/ChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import LiveTelemetryDock from './components/LiveTelemetryDock';
@@ -16,7 +16,8 @@ import { AiUnavailableError, generate, getAiMode, type AiMode } from './lib/ai';
 import { analyzeMetric, numericColumns } from './lib/analysis';
 import { downloadText, safeFilename } from './lib/download';
 import type { ChatTurn } from './lib/gemini-shared';
-import { DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT, localDataAnswer, localGuideAnswer, localResultsAnswer } from './lib/guide';
+import { OfflineAssistant, STARTER_SUGGESTIONS, type AssistantContext } from './lib/assistant/engine';
+import { DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT } from './lib/guide';
 import { loadReports, saveReports } from './lib/reports';
 import { getJSON, removeItem, setJSON } from './lib/storage';
 import { useToast } from './lib/toast';
@@ -130,6 +131,27 @@ export default function App() {
     setJSON('target', t);
   };
 
+  // Offline assistants keep short-term memory (last topic) per chat.
+  const guideBot = useRef(new OfflineAssistant('guide'));
+  const resultsBot = useRef(new OfflineAssistant('results'));
+  useEffect(() => resultsBot.current.reset(), [output?.tool, output?.name]);
+
+  const assistantContext = useCallback(
+    (): AssistantContext => ({
+      operator: session?.operator,
+      target,
+      results: output ? { toolName: toolInfo(output.tool).name, name: output.name, markdown: output.markdown, dataset: output.dataset, focus: output.focus } : undefined,
+    }),
+    [session, target, output],
+  );
+
+  /** Offline answer, noting when AI was on but failed. */
+  const offline = (bot: OfflineAssistant, question: string, aiError?: unknown): ChatReply => {
+    const r = bot.reply(question, assistantContext());
+    const note = aiError ? `_The AI request failed (${aiError instanceof Error ? aiError.message : 'unknown error'}), so this is the offline answer._\n\n` : '';
+    return { text: note + r.text, suggestions: r.suggestions };
+  };
+
   const askData = useCallback(
     async (question: string, history: ChatTurn[]): Promise<ChatReply> => {
       try {
@@ -142,14 +164,11 @@ export default function App() {
         });
         return { text: result.text, sources: result.sources };
       } catch (err) {
-        if (err instanceof AiUnavailableError) {
-          if (output?.dataset) return { text: localDataAnswer(question, output.dataset, output.focus ?? null) };
-          return { text: output ? localResultsAnswer(output.markdown) : 'Run a tool first.' };
-        }
-        throw err;
+        return offline(resultsBot.current, question, err instanceof AiUnavailableError ? undefined : err);
       }
     },
-    [output],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [output, assistantContext],
   );
 
   const askGuide = useCallback(async (question: string, history: ChatTurn[]): Promise<ChatReply> => {
@@ -157,10 +176,10 @@ export default function App() {
       const result = await generate({ systemInstruction: GUIDE_SYSTEM_PROMPT, turns: [...history.slice(-8), { role: 'user', text: question }], useSearch: true });
       return { text: result.text, sources: result.sources };
     } catch (err) {
-      if (err instanceof AiUnavailableError) return { text: localGuideAnswer(question) };
-      throw err;
+      return offline(guideBot.current, question, err instanceof AiUnavailableError ? undefined : err);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantContext]);
 
   const exportSummary = async () => {
     if (!output?.dataset) return;
@@ -278,6 +297,7 @@ export default function App() {
                         greeting={`Ask about these ${info.name.toLowerCase()} results for ${output.name}.${aiMode === 'off' ? ' AI is off, so answers come from the computed results.' : ''}`}
                         placeholder="Ask about these results"
                         onAsk={askData}
+                        starters={['Summarise the results', 'How was this calculated?', 'How reliable is this?']}
                       />
                     </>
                   )}
@@ -292,9 +312,10 @@ export default function App() {
             id="guide-chat"
             variant="guide"
             title="OS Guide"
-            greeting="Ask how to use TerraX, for example “How do I estimate forest loss?” or “How do I measure a plot?”"
+            greeting={`Hi${session.operator ? ` ${session.operator.split(/\s+/)[0]}` : ''}! I’m the TerraX assistant. Ask me about the tools, remote-sensing terms, area units or sun times${aiMode === 'off' ? '. I work offline; add a Gemini key in Settings for open-ended questions' : ''}.`}
             placeholder="Ask about TerraX"
             onAsk={askGuide}
+            starters={STARTER_SUGGESTIONS}
           />
           <LiveTelemetryDock />
         </aside>
