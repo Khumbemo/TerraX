@@ -229,7 +229,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                 <p>TerraX is an Earth-observation workbench for climate, forest and land analysis.</p>
                 <h4>Data and services</h4>
                 <ul>
-                  <li>Basemap: © OpenStreetMap contributors, © CARTO. Offline outline: Natural Earth 1:110m (public domain) via world-atlas.</li>
+                  <li>Basemap: © OpenStreetMap contributors, © CARTO. Globe coastlines: Natural Earth 1:110m (public domain) via world-atlas.</li>
                   <li>Planetary K-index: NOAA Space Weather Prediction Center.</li>
                   <li>Sun position and times: SunCalc; equation of time and declination: NOAA Solar Calculator equations.</li>
                   <li>AI: Google Gemini API (optional).</li>

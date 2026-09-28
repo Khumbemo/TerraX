@@ -6,7 +6,7 @@ import type { Dataset } from './types';
 
 export const APP_GUIDE = `TerraX is a browser-based Earth-observation workbench.
 Features:
-- Explore view: a map (OpenStreetMap-based dark basemap with an offline world outline), a file uploader and six built-in sample datasets from Kohima, Nagaland (NDVI/EVI, land surface temperature, rainfall, temperature & humidity, evapotranspiration, solar radiation).
+- Explore view: a dark OpenStreetMap-based map (CARTO) that zooms to a loaded GeoTIFF and outlines its footprint, a file uploader and six built-in sample datasets from Kohima, Nagaland (NDVI/EVI, land surface temperature, rainfall, temperature & humidity, evapotranspiration, solar radiation).
 - Supported uploads: CSV, TSV, XLSX (first sheet) and GeoTIFF (.tif/.tiff). Files are parsed in the browser.
 - Tables: TerraX finds the date column and numeric columns, charts any column over time, runs a Mann–Kendall trend test with a Theil–Sen slope, shows a monthly seasonal cycle, classifies values (e.g. NDVI ranges, IMD rainfall categories) and shows the raw values.
 - GeoTIFFs: per-band statistics, histogram, a viridis preview, the footprint on the map (WGS84, Web Mercator or UTM), and NDVI computed from red and near-infrared bands.
