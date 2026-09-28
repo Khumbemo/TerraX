@@ -499,7 +499,7 @@ select {
   }
 }
 .leaflet-container {
-  background: #04101d;
+  background: #080d14;
   font-family: var(--sans);
 }
 .leaflet-container .leaflet-control-attribution {
