@@ -9,7 +9,7 @@
     "preview": "vite preview --port 3001",
     "clean": "rm -rf dist dist-preview",
     "lint": "tsc --noEmit",
-    "build:preview": "vite build --mode preview-artifact",
+    "build:preview": "vite build --mode preview-artifact && node scripts/encode-preview-samples.mjs",
     "start": "tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts"
   },
