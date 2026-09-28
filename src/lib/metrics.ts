@@ -5,7 +5,7 @@
 import type { Spacing } from './dates';
 import { quantileSorted } from './stats';
 
-export type MetricId = 'ndvi' | 'evi' | 'lst' | 'airTemp' | 'precip' | 'et' | 'solar' | 'humidity' | 'generic';
+export type MetricId = 'ndvi' | 'evi' | 'lst' | 'airTemp' | 'precip' | 'et' | 'solar' | 'humidity' | 'soilMoisture' | 'generic';
 
 interface ClassDef {
   /** Values strictly below this bound fall in the class (the last class uses Infinity). */
@@ -107,6 +107,19 @@ const PROFILES: Record<Exclude<MetricId, 'generic'>, Profile> = {
       { upTo: Infinity, label: 'Very high (≥ 24)', color: HEAT[5] },
     ],
   },
+  soilMoisture: {
+    id: 'soilMoisture',
+    name: 'Soil moisture',
+    unit: 'm³/m³',
+    basis: 'Indicative volumetric soil-moisture ranges; field capacity and wilting point depend on soil texture.',
+    classes: [
+      { upTo: 0.1, label: 'Very dry (< 0.10 m³/m³)', color: HEAT[5] },
+      { upTo: 0.2, label: 'Dry (0.10–0.20)', color: HEAT[4] },
+      { upTo: 0.3, label: 'Moderate (0.20–0.30)', color: HEAT[3] },
+      { upTo: 0.4, label: 'Moist (0.30–0.40)', color: WET[2] },
+      { upTo: Infinity, label: 'Wet / near saturation (≥ 0.40)', color: WET[4] },
+    ],
+  },
   humidity: {
     id: 'humidity',
     name: 'Relative humidity',
@@ -151,6 +164,7 @@ export function detectMetric(columnName: string): MetricId {
   if (starts('precip', 'rain', 'prcp') || has('pr', 'ppt')) return 'precip';
   if (starts('evapo') || has('et', 'aet', 'pet', 'eto', 'et0')) return 'et';
   if (starts('solar', 'irradian', 'radiation') || has('srad', 'ssrd', 'ghi', 'rs')) return 'solar';
+  if (has('soil', 'sm', 'swc', 'vwc', 'moisture') || starts('soilmoist')) return 'soilMoisture';
   if (starts('humid') || has('rh')) return 'humidity';
   if (starts('temp') || has('t2m', 'tmean', 'tmax', 'tmin', 'tavg')) return 'airTemp';
   return 'generic';
@@ -251,6 +265,9 @@ export function buildClassification(columnName: string, values: number[], spacin
       return fromProfile(PROFILES.solar, v => v, null);
     case 'humidity':
       return fromProfile(PROFILES.humidity, v => v, null);
+    case 'soilMoisture':
+      if (median > 1) return fromProfile(PROFILES.soilMoisture, v => v / 100, 'Values look like percent and were divided by 100 to get m³/m³.');
+      return fromProfile(PROFILES.soilMoisture, v => v, null);
     default:
       break;
   }

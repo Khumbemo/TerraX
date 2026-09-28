@@ -3,6 +3,8 @@
 // is added as a separate, clearly labelled section.
 import { analyzeMetric, numericColumns, type MetricAnalysis } from './analysis';
 import { formatDate } from './dates';
+import { indexDef } from './indices';
+import { rainfallMarkdown, rainfallSummary } from './tools/climate';
 import { fmt, fmtP } from './stats';
 import type { Dataset, RasterDataset, TableDataset } from './types';
 
@@ -51,6 +53,8 @@ function metricSection(ds: TableDataset, a: MetricAnalysis): string {
   if (ds.times) lines.push(`| Period | ${formatDate(a.start)} to ${formatDate(a.end)} |`);
   lines.push('');
   if (ds.times) lines.push(trendSentence(a), '');
+  const rain = rainfallSummary(a, ds.minIntervalDays);
+  if (rain) lines.push(rainfallMarkdown(rain, a.start, a.end));
   if (a.monthly && a.monthly.length >= 6) {
     const valid = a.monthly.filter(m => Number.isFinite(m.mean));
     const hi = valid.reduce((x, y) => (y.mean > x.mean ? y : x));
@@ -89,7 +93,7 @@ function tableReport(ds: TableDataset, focus: string | null): string {
 
 function rasterReport(ds: RasterDataset): string {
   const s = ds.stats;
-  const layer = ds.view.mode === 'ndvi' ? `NDVI from bands ${ds.view.red + 1} (red) and ${ds.view.nir + 1} (NIR)` : `band ${ds.view.band + 1} of ${ds.bands}`;
+  const layer = ds.view.mode === 'index' ? `${indexDef(ds.view.index).name} computed from the assigned bands` : `band ${ds.view.band + 1} of ${ds.bands}`;
   const lines = [
     `## Dataset`,
     '',
@@ -113,7 +117,7 @@ function rasterReport(ds: RasterDataset): string {
       `| Range | ${fmt(s.min)} to ${fmt(s.max)} |`,
       '',
     );
-    if (ds.view.mode === 'ndvi') {
+    if (ds.view.mode === 'index' && ds.view.index === 'ndvi') {
       const bins = ds.histogram;
       const share = (lo: number, hi: number) => bins.filter(b => (b.x0 + b.x1) / 2 >= lo && (b.x0 + b.x1) / 2 < hi).reduce((n, b) => n + b.count, 0);
       const total = Math.max(1, ds.validPixels);

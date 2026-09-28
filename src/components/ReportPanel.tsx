@@ -5,30 +5,29 @@ import type { AiMode } from '../lib/ai';
 import { generate } from '../lib/ai';
 import { downloadReportPdf, downloadText, safeFilename } from '../lib/download';
 import { REPORT_PROMPT } from '../lib/guide';
-import { buildAiContext, buildLocalReport } from '../lib/report';
+import { toolInfo, type ToolOutput } from '../lib/tools/registry';
 import { useToast } from '../lib/toast';
-import type { Dataset, ReportRecord } from '../lib/types';
+import type { ReportRecord } from '../lib/types';
 
 interface Props {
-  dataset: Dataset;
-  focus: string | null;
+  output: ToolOutput;
   aiMode: AiMode | null;
   operator: string;
   onSave: (report: ReportRecord) => void;
   onOpenSettings: () => void;
 }
 
-export function composeReport(dataset: Dataset, focus: string | null, operator: string, ai: { text: string; model: string } | null): ReportRecord {
+export function composeReport(output: ToolOutput, operator: string, ai: { text: string; model: string } | null): ReportRecord {
   const createdAt = new Date();
-  const title = `TerraX report · ${dataset.filename}`;
+  const title = `TerraX ${toolInfo(output.tool).name} report · ${output.name}`;
   const meta = [`Created ${createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`, operator && `by ${operator}`].filter(Boolean).join(' ');
   const parts = [`# ${title}`, '', `_${meta}_`, ''];
   if (ai) parts.push(`## Interpretation (AI, ${ai.model})`, '', ai.text.trim(), '', '_AI-generated from the statistics below; check it against the data._', '');
-  parts.push(buildLocalReport(dataset, focus));
+  parts.push(output.markdown);
   return {
     id: `${createdAt.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     title,
-    datasetName: dataset.filename,
+    datasetName: output.name,
     createdAt: createdAt.toISOString(),
     source: ai ? 'ai' : 'local',
     model: ai?.model,
@@ -42,28 +41,28 @@ export async function exportReport(report: ReportRecord, kind: 'md' | 'pdf') {
   else await downloadReportPdf(report.title, `${report.datasetName} · ${report.createdAt.slice(0, 10)}`, report.content.replace(/^# .*\n/, ''), `${base}.pdf`);
 }
 
-export default function ReportPanel({ dataset, focus, aiMode, operator, onSave, onOpenSettings }: Props) {
+export default function ReportPanel({ output, aiMode, operator, onSave, onOpenSettings }: Props) {
   const notify = useToast();
   const [ai, setAi] = useState<{ text: string; model: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  // A new dataset or variable invalidates the previous interpretation.
+  // New results invalidate the previous interpretation.
   useEffect(() => {
     setAi(null);
     setError(null);
     setSaved(false);
-  }, [dataset, focus]);
+  }, [output.markdown]);
 
-  const report = useMemo(() => composeReport(dataset, focus, operator, ai), [dataset, focus, operator, ai]);
+  const report = useMemo(() => composeReport(output, operator, ai), [output, operator, ai]);
 
   const interpret = async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await generate({
-        turns: [{ role: 'user', text: `${REPORT_PROMPT}\n\n${buildAiContext(dataset, focus)}` }],
+        turns: [{ role: 'user', text: `${REPORT_PROMPT}\n\nTool: ${toolInfo(output.tool).name}\n\n${output.extraContext ?? output.markdown}` }],
         temperature: 0.3,
       });
       if (!result.text.trim()) throw new Error('Gemini returned an empty answer. Try again.');

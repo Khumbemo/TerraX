@@ -98,3 +98,60 @@ export function bboxToLatLng(bbox: [number, number, number, number], epsg: numbe
     [Math.max(...lats), Math.max(...lons)],
   ];
 }
+
+/** Forward UTM (WGS84), Krüger series to n⁴ (Karney 2011): sub-millimetre within a zone. */
+export function latLonToUtm(lat: number, lon: number, forceZone?: number): { zone: number; south: boolean; easting: number; northing: number; k: number } {
+  const zone = forceZone ?? Math.min(60, Math.floor((lon + 180) / 6) + 1);
+  const lon0 = ((zone - 1) * 6 - 180 + 3) * (Math.PI / 180);
+  const f = WGS84_F;
+  const n = f / (2 - f);
+  const A = (WGS84_A / (1 + n)) * (1 + (n * n) / 4 + n ** 4 / 64);
+  const alpha = [n / 2 - (2 / 3) * n * n + (5 / 16) * n ** 3 + (41 / 180) * n ** 4, (13 / 48) * n * n - (3 / 5) * n ** 3 + (557 / 1440) * n ** 4, (61 / 240) * n ** 3 - (103 / 140) * n ** 4, (49561 / 161280) * n ** 4];
+  const e = Math.sqrt(f * (2 - f));
+  const phi = lat * (Math.PI / 180);
+  const L = lon * (Math.PI / 180) - lon0;
+  const t = Math.sinh(Math.atanh(Math.sin(phi)) - e * Math.atanh(e * Math.sin(phi)));
+  const xi = Math.atan(t / Math.cos(L));
+  const eta = Math.atanh(Math.sin(L) / Math.sqrt(1 + t * t));
+  let E = eta;
+  let N = xi;
+  for (let j = 0; j < 4; j++) {
+    const i = j + 1;
+    E += alpha[j] * Math.cos(2 * i * xi) * Math.sinh(2 * i * eta);
+    N += alpha[j] * Math.sin(2 * i * xi) * Math.cosh(2 * i * eta);
+  }
+  const k0 = 0.9996;
+  const easting = k0 * A * E + 500000;
+  const south = lat < 0;
+  const northing = k0 * A * N + (south ? 10000000 : 0);
+  // Point scale factor, second-order approximation (adequate for area/length correction).
+  const x = (easting - 500000) / (k0 * 6371000);
+  const k = k0 * (1 + (x * x) / 2);
+  return { zone, south, easting, northing, k };
+}
+
+/** Initial great-circle bearing from point 1 to point 2, degrees clockwise from true north. */
+export function initialBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const r = Math.PI / 180;
+  const y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r);
+  return ((Math.atan2(y, x) / r) + 360) % 360;
+}
+
+export function toDms(deg: number, pos: string, neg: string): string {
+  const hemi = deg >= 0 ? pos : neg;
+  let a = Math.abs(deg);
+  let d = Math.floor(a);
+  let m = Math.floor((a - d) * 60);
+  let s = Math.round(((a - d) * 60 - m) * 60 * 100) / 100;
+  if (s >= 60) {
+    s -= 60;
+    m += 1;
+  }
+  if (m >= 60) {
+    m -= 60;
+    d += 1;
+  }
+  a = d;
+  return `${a}°${String(m).padStart(2, '0')}′${s.toFixed(2).padStart(5, '0')}″ ${hemi}`;
+}

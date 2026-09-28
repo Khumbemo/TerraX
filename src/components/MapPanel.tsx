@@ -1,12 +1,16 @@
+import L from 'leaflet';
 import { useEffect, useState } from 'react';
 import { GeoJSON, MapContainer, Pane, Rectangle, TileLayer, useMap } from 'react-leaflet';
 import type { FeatureCollection, MultiLineString } from 'geojson';
 import 'leaflet/dist/leaflet.css';
-import type { RasterDataset } from '../lib/types';
+import type { LatLngBounds } from '../lib/geo';
 
 interface Props {
-  raster: RasterDataset | null;
   target: { lat: number; lon: number; name: string };
+  /** Area to fly to and outline (e.g. a raster footprint). */
+  bounds: LatLngBounds | null;
+  /** Vector features to draw (e.g. a surveyed plot). */
+  geojson: FeatureCollection | null;
 }
 
 interface Basemap {
@@ -46,8 +50,7 @@ function FitToBounds({ bounds }: { bounds: [[number, number], [number, number]] 
 // city scale, so open at a regional view there.
 const START_ZOOM = __TERRAX_PREVIEW__ ? 5 : 10;
 
-export default function MapPanel({ raster, target }: Props) {
-  const bounds = raster?.latLngBounds ?? null;
+export default function MapPanel({ target, bounds, geojson }: Props) {
   const [basemap, setBasemap] = useState<Basemap | null>(null);
 
   useEffect(() => {
@@ -78,7 +81,15 @@ export default function MapPanel({ raster, target }: Props) {
             maxZoom={19}
           />
         )}
-        {bounds && <Rectangle bounds={bounds} pathOptions={{ color: '#5ab0f0', weight: 2, fillOpacity: 0.2 }} />}
+        {bounds && !geojson && <Rectangle bounds={bounds} pathOptions={{ color: '#5ab0f0', weight: 2, fillOpacity: 0.2 }} />}
+        {geojson && (
+          <GeoJSON
+            key={JSON.stringify(bounds)}
+            data={geojson}
+            style={{ color: '#5ab0f0', weight: 2, fillColor: '#5ab0f0', fillOpacity: 0.18 }}
+            pointToLayer={(_f, latlng) => L.circleMarker(latlng, { radius: 5, color: '#5ab0f0', weight: 2, fillOpacity: 0.6 })}
+          />
+        )}
         <FitToBounds bounds={bounds} />
       </MapContainer>
     </div>

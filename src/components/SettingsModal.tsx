@@ -193,8 +193,24 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
               <div className="prose">
                 <h3>How TerraX works</h3>
                 <p>
-                  TerraX reads CSV, TSV, XLSX and GeoTIFF files in your browser. Files are not uploaded to a TerraX server. When AI is on and you ask for an interpretation
-                  or use an assistant, TerraX sends the computed statistics and a sample of up to 150 rows to Google's Gemini API.
+                  TerraX is a set of tools: Forest loss, Land survey, Weather &amp; climate, Satellite imagery, Terrain, and Space &amp; aerial photos. Each reads your GIS
+                  files in the browser; files are not uploaded to a TerraX server. When AI is on and you ask for an interpretation or use an assistant, TerraX sends the
+                  computed results (and for tables a sample of up to 150 rows) to Google's Gemini API.
+                </p>
+                <h4>Forest loss</h4>
+                <p>
+                  Two-date NDVI change: forest is NDVI above your threshold on the earlier image, loss is a drop in NDVI beyond your threshold. Areas use real ground
+                  units for the file's CRS. Hansen Global Forest Change lossyear tiles are summarised by year, optionally inside a treecover2000 baseline.
+                </p>
+                <h4>Land survey</h4>
+                <p>
+                  Boundaries and tracks are measured on the WGS84 ellipsoid through UTM with scale-factor correction. Bearings are true (great-circle) bearings; magnetic
+                  bearings differ by the local declination.
+                </p>
+                <h4>Terrain and imagery</h4>
+                <p>
+                  Slope and aspect use Horn's method. Spectral indices use published formulas with the bands you assign; indices that need absolute reflectance detect
+                  values scaled by 10,000. Ordinary photos only support visible-band estimates (ExG, VARI).
                 </p>
                 <h4>Tables</h4>
                 <p>

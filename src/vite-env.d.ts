@@ -15,3 +15,8 @@ declare module 'world-atlas/countries-50m.json' {
   const topology: import('topojson-specification').Topology;
   export default topology;
 }
+declare module 'shpjs' {
+  import type { FeatureCollection } from 'geojson';
+  type Out = FeatureCollection & { fileName?: string };
+  export default function shp(input: ArrayBuffer | string): Promise<Out | Out[]>;
+}

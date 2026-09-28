@@ -47,7 +47,12 @@ export interface HistogramBin {
   count: number;
 }
 
-export type RasterMode = { mode: 'band'; band: number } | { mode: 'ndvi'; red: number; nir: number };
+export type SpectralIndex = 'ndvi' | 'evi' | 'savi' | 'ndwi' | 'ndmi' | 'nbr' | 'ndbi';
+export type BandRole = 'blue' | 'green' | 'red' | 'nir' | 'swir1' | 'swir2';
+/** 0-based band index for each spectral role the user has assigned. */
+export type BandMap = Partial<Record<BandRole, number>>;
+
+export type RasterMode = { mode: 'band'; band: number } | { mode: 'index'; index: SpectralIndex; bands: BandMap };
 
 export interface RasterDataset {
   kind: 'raster';

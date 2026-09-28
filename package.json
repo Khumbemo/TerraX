@@ -28,6 +28,7 @@
     "read-excel-file": "^9.3.10",
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
+    "shpjs": "^6.2.0",
     "suncalc": "^1.9.0",
     "topojson-client": "^3.1.0",
     "tsx": "^4.23.15",

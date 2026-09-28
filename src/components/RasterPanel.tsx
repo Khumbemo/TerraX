@@ -1,22 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { VIRIDIS_CSS, paintGrid } from '../lib/colormap';
+import { BAND_ROLES, INDICES, guessBandMap, indexDef } from '../lib/indices';
+import { readComposite } from '../lib/raster';
+import type { OpenRaster } from '../lib/rasterio';
 import { formatBytes } from '../lib/report';
 import { fmt } from '../lib/stats';
-import type { RasterDataset, RasterMode } from '../lib/types';
+import { useToast } from '../lib/toast';
+import type { BandMap, BandRole, RasterDataset, RasterMode, SpectralIndex } from '../lib/types';
+import RgbaCanvas from './RgbaCanvas';
 
 interface Props {
   dataset: RasterDataset;
+  raster: OpenRaster | null;
   busy: boolean;
   onChangeView: (view: RasterMode) => void;
 }
 
 const AXIS = { stroke: '#4a6580', fontSize: 10, fontFamily: 'Space Mono, monospace' };
 
-export default function RasterPanel({ dataset: ds, busy, onChangeView }: Props) {
+export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }: Props) {
+  const notify = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [red, setRed] = useState(ds.view.mode === 'ndvi' ? ds.view.red : 0);
-  const [nir, setNir] = useState(ds.view.mode === 'ndvi' ? ds.view.nir : Math.min(1, ds.bands - 1));
+  const [bands, setBands] = useState<BandMap>(() => (ds.view.mode === 'index' ? ds.view.bands : guessBandMap(ds.bands)));
+  const [index, setIndex] = useState<SpectralIndex>(ds.view.mode === 'index' ? ds.view.index : 'ndvi');
+  const [layerKind, setLayerKind] = useState<'band' | 'index'>(ds.view.mode);
+  const [composite, setComposite] = useState<{ rgba: Uint8ClampedArray; width: number; height: number; label: string } | null>(null);
+  const [compositeBusy, setCompositeBusy] = useState(false);
 
   useEffect(() => {
     if (canvasRef.current && ds.stats) paintGrid(canvasRef.current, ds.preview.data, ds.preview.width, ds.preview.height, ds.stats.min, ds.stats.max);
@@ -25,6 +35,40 @@ export default function RasterPanel({ dataset: ds, busy, onChangeView }: Props) 
   const bandOptions = Array.from({ length: ds.bands }, (_, i) => i);
   const histData = ds.histogram.map(b => ({ x: (b.x0 + b.x1) / 2, count: b.count, range: `${fmt(b.x0)} to ${fmt(b.x1)}` }));
   const s = ds.stats;
+  const def = indexDef(index);
+  const available = INDICES.filter(i => i.needs.length <= ds.bands);
+
+  const showComposite = async (kind: 'true' | 'false') => {
+    if (!raster) return;
+    const rgb: (number | undefined)[] = kind === 'true' ? [bands.red, bands.green, bands.blue] : [bands.nir, bands.red, bands.green];
+    if (rgb.some(v => v === undefined)) {
+      notify(kind === 'true' ? 'Assign red, green and blue bands first.' : 'Assign NIR, red and green bands first.', 'error');
+      return;
+    }
+    setCompositeBusy(true);
+    try {
+      const c = await readComposite(raster, rgb as [number, number, number]);
+      setComposite({ ...c, label: kind === 'true' ? 'True colour (R G B)' : 'False colour (NIR R G): vegetation appears red' });
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not build the composite.', 'error');
+    } finally {
+      setCompositeBusy(false);
+    }
+  };
+
+  const roleSelect = (role: BandRole, label: string) => (
+    <label key={role} className="inline-select">
+      <span>{label}</span>
+      <select id={`band-${role}`} value={bands[role] ?? ''} disabled={busy} onChange={e => setBands(b => ({ ...b, [role]: e.target.value === '' ? undefined : Number(e.target.value) }))}>
+        <option value="">—</option>
+        {bandOptions.map(b => (
+          <option key={b} value={b}>
+            Band {b + 1}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 
   return (
     <section className="core-analysis-module" aria-label="Raster analysis">
@@ -35,14 +79,17 @@ export default function RasterPanel({ dataset: ds, busy, onChangeView }: Props) 
 
       <div className="raster-controls">
         <label className="inline-select">
-          <span>Layer</span>
+          <span>Show</span>
           <select
-            id="raster-band"
+            id="raster-layer"
             disabled={busy}
-            value={ds.view.mode === 'band' ? String(ds.view.band) : 'ndvi'}
+            value={layerKind === 'band' && ds.view.mode === 'band' ? String(ds.view.band) : 'index'}
             onChange={e => {
-              if (e.target.value !== 'ndvi') onChangeView({ mode: 'band', band: Number(e.target.value) });
-              else if (ds.bands >= 2) onChangeView({ mode: 'ndvi', red, nir });
+              if (e.target.value === 'index') setLayerKind('index');
+              else {
+                setLayerKind('band');
+                onChangeView({ mode: 'band', band: Number(e.target.value) });
+              }
             }}
           >
             {bandOptions.map(b => (
@@ -50,38 +97,70 @@ export default function RasterPanel({ dataset: ds, busy, onChangeView }: Props) 
                 Band {b + 1}
               </option>
             ))}
-            {ds.bands >= 2 && <option value="ndvi">NDVI (computed)</option>}
+            {ds.bands >= 2 && <option value="index">Spectral index…</option>}
           </select>
         </label>
-        {ds.bands >= 2 && (
-          <div className="ndvi-controls">
-            <label className="inline-select">
-              <span>Red</span>
-              <select id="raster-red" value={red} disabled={busy} onChange={e => setRed(Number(e.target.value))}>
-                {bandOptions.map(b => (
-                  <option key={b} value={b}>
-                    Band {b + 1}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="inline-select">
-              <span>NIR</span>
-              <select id="raster-nir" value={nir} disabled={busy} onChange={e => setNir(Number(e.target.value))}>
-                {bandOptions.map(b => (
-                  <option key={b} value={b}>
-                    Band {b + 1}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" className="btn btn-small btn-primary" disabled={busy || red === nir} onClick={() => onChangeView({ mode: 'ndvi', red, nir })}>
-              Compute NDVI
-            </button>
-          </div>
-        )}
         {busy && <span className="muted">Reading raster…</span>}
       </div>
+
+      {ds.bands >= 2 && (
+        <details className="band-setup" open={layerKind === 'index'}>
+          <summary>Band roles and spectral indices</summary>
+          <p className="field-hint">
+            Tell TerraX which band is which. Sentinel-2: B2 blue, B3 green, B4 red, B8 NIR, B11 SWIR1, B12 SWIR2. Landsat 8/9: B2–B4 visible, B5 NIR, B6 SWIR1, B7 SWIR2.
+            The guess below assumes bands were exported in wavelength order.
+          </p>
+          <div className="ndvi-controls">{BAND_ROLES.map(r => roleSelect(r.role, r.label))}</div>
+          <div className="ndvi-controls">
+            <label className="inline-select">
+              <span>Index</span>
+              <select id="raster-index" value={index} onChange={e => setIndex(e.target.value as SpectralIndex)}>
+                {available.map(i => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn btn-small btn-primary"
+              disabled={busy}
+              onClick={() => {
+                setLayerKind('index');
+                onChangeView({ mode: 'index', index, bands });
+              }}
+            >
+              Compute {def.name.split(' —')[0]}
+            </button>
+          </div>
+          <p className="field-hint">
+            {def.formula} · {def.reference}. Needs: {def.needs.map(r => BAND_ROLES.find(b => b.role === r)!.label).join(', ')}.
+          </p>
+          {ds.bands >= 3 && (
+            <div className="button-row">
+              <button type="button" className="btn btn-small" disabled={compositeBusy || !raster} onClick={() => showComposite('true')}>
+                True colour
+              </button>
+              <button type="button" className="btn btn-small" disabled={compositeBusy || !raster} onClick={() => showComposite('false')}>
+                False colour (NIR)
+              </button>
+              {composite && (
+                <button type="button" className="btn btn-small" onClick={() => setComposite(null)}>
+                  Hide composite
+                </button>
+              )}
+            </div>
+          )}
+        </details>
+      )}
+
+      {composite && (
+        <figure className="raster-figure">
+          <RgbaCanvas rgba={composite.rgba} width={composite.width} height={composite.height} label={composite.label} />
+          <figcaption className="field-hint">{composite.label}; 2–98 % stretch per channel.</figcaption>
+        </figure>
+      )}
 
       <div className="raster-grid">
         <figure className="raster-figure">
@@ -91,7 +170,7 @@ export default function RasterPanel({ dataset: ds, busy, onChangeView }: Props) 
               <div className="legend-bar" style={{ background: VIRIDIS_CSS }} />
               <div className="legend-labels">
                 <span>{fmt(s.min)}</span>
-                <span>viridis</span>
+                <span>{ds.view.mode === 'index' ? indexDef(ds.view.index).name.split(' —')[0] : `Band ${ds.view.band + 1}`}</span>
                 <span>{fmt(s.max)}</span>
               </div>
             </figcaption>
