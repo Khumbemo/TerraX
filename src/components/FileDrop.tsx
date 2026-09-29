@@ -10,9 +10,11 @@ interface Props {
   loaded?: string | null;
   onFile: (file: File) => void;
   compact?: boolean;
+  /** Accept several files at once; they are passed to onFiles. */
+  onFiles?: (files: File[]) => void;
 }
 
-export default function FileDrop({ id, label, accept, hint, busy, loaded, onFile, compact }: Props) {
+export default function FileDrop({ id, label, accept, hint, busy, loaded, onFile, compact, onFiles }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
 
@@ -36,8 +38,13 @@ export default function FileDrop({ id, label, accept, hint, busy, loaded, onFile
       onDrop={e => {
         onDrag(e);
         setDrag(false);
+        if (busy) return;
+        if (onFiles) {
+          if (e.dataTransfer.files.length) onFiles(Array.from(e.dataTransfer.files));
+          return;
+        }
         const f = e.dataTransfer.files[0];
-        if (f && !busy) onFile(f);
+        if (f) onFile(f);
       }}
       onClick={() => !busy && inputRef.current?.click()}
       onKeyDown={e => {
@@ -52,11 +59,14 @@ export default function FileDrop({ id, label, accept, hint, busy, loaded, onFile
         id={id}
         type="file"
         accept={accept}
+        multiple={Boolean(onFiles)}
         hidden
         onChange={e => {
-          const f = e.target.files?.[0];
+          const files = Array.from(e.target.files ?? []);
           e.target.value = '';
-          if (f) onFile(f);
+          if (onFiles) {
+            if (files.length) onFiles(files);
+          } else if (files[0]) onFile(files[0]);
         }}
       />
       {busy ? (
@@ -67,7 +77,7 @@ export default function FileDrop({ id, label, accept, hint, busy, loaded, onFile
       ) : (
         <>
           <p className="drop-label">{label}</p>
-          <p className="drop-file">{loaded ? `✓ ${loaded}` : 'Drop a file or click to browse'}</p>
+          <p className="drop-file">{loaded ? `✓ ${loaded}` : onFiles ? 'Drop files or click to browse' : 'Drop a file or click to browse'}</p>
           {hint && <p className="upload-formats">{hint}</p>}
         </>
       )}

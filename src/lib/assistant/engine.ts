@@ -304,7 +304,7 @@ export class OfflineAssistant {
     if (RE.capabilities.test(norm) && !hasTopic) {
       return {
         text:
-          'Here’s what I can help with, even offline:\n\n- **Tools:** forest loss, carbon & biomass, land survey (upload or draw a plot), weather & climate, satellite imagery, terrain, photos\n- **Explain terms:** NDVI, EVI, NDWI, NBR, UTM/CRS, Mann–Kendall trends, IMD rainfall categories, hypsometric integral…\n- **Your results:** “summarise the results”, “what is the peak?”, “is there a trend?”\n- **Quick answers:** “convert 3 acres to hectares”, “when is sunrise?”, “what time is it?”\n- **Troubleshooting** upload errors\n\nJust ask in your own words.',
+          'Here’s what I can help with, even offline:\n\n- **Tools:** forest loss and burn severity, carbon & biomass, land survey (upload or draw a plot), weather & climate, satellite imagery, land cover, terrain and hydrology, photos\n- **Explain terms:** NDVI, EVI, NDWI, NBR, UTM/CRS, Mann–Kendall trends, IMD rainfall categories, hypsometric integral…\n- **Your results:** “summarise the results”, “what is the peak?”, “is there a trend?”\n- **Quick answers:** “convert 3 acres to hectares”, “when is sunrise?”, “what time is it?”\n- **Troubleshooting** upload errors\n\nJust ask in your own words.',
         suggestions: STARTER_SUGGESTIONS.slice(1),
       };
     }

@@ -14,6 +14,10 @@ import { measureSurvey, parseCoordinateCsv } from '../src/lib/tools/survey';
 import { analyzeTerrain } from '../src/lib/tools/terrain';
 import { drawnPolygon, editableVertices, makeBoundary, polygonFeatures, toGpx, toKml } from '../src/lib/vector';
 import { boundaryMask, clipToBoundary, type Boundary } from '../src/lib/zonal';
+import { dateFromFilename, isMasked } from '../src/lib/qa';
+import { analyzeStack } from '../src/lib/stack';
+import { classifyLandCover, kmeans } from '../src/lib/tools/landcover';
+import { readRaster } from '../src/lib/raster';
 import type { GeoMeta, Grid } from '../src/lib/rasterio';
 
 const close = (a: number, b: number, tol: number, msg?: string) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} expected ${b} ± ${tol}, got ${a}`);
@@ -355,4 +359,86 @@ test('minimum mapping unit removes small loss patches, also per Hansen year', as
   const lons = ring.map(p => p[0]);
   const spanM = (Math.max(...lons) - Math.min(...lons)) * 111_320 * Math.cos(lat * RAD);
   close(spanM, 240, 3);
+});
+
+// ── Quality masks and multi-date series ────────────────────────────────────
+
+test('quality masks: Sentinel-2 SCL classes and Landsat QA_PIXEL bits', () => {
+  for (const c of [0, 1, 3, 8, 9, 10, 11]) assert.equal(isMasked('scl', c), true, `SCL ${c}`);
+  for (const c of [2, 4, 5, 6, 7]) assert.equal(isMasked('scl', c), false, `SCL ${c}`);
+  assert.equal(isMasked('landsat', 21824), false); // clear land: bits 6, 8, 10, 12, 14
+  assert.equal(isMasked('landsat', 1 << 3), true); // cloud
+  assert.equal(isMasked('landsat', 1 << 4), true); // cloud shadow
+  assert.equal(isMasked('landsat', 1 << 7), false); // water only
+  assert.equal(isMasked('scl', NaN), true);
+});
+
+test('dates in file names', () => {
+  const iso = (n: string) => dateFromFilename(n)?.toISOString().slice(0, 10) ?? null;
+  assert.equal(iso('S2_2024-03-15_ndvi.tif'), '2024-03-15');
+  assert.equal(iso('LC09_L2SP_135042_20240315_02_T1.tif'), '2024-03-15');
+  assert.equal(iso('ndvi_2024_075.tif'), '2024-03-15');
+  assert.equal(iso('scene.tif'), null);
+  assert.equal(iso('ndvi_20241399.tif'), null);
+});
+
+test('QA mask removes cloudy pixels before statistics', async () => {
+  const w = 10, h = 10;
+  const v = new Float32Array(w * h), scl = new Float32Array(w * h).fill(4);
+  for (let k = 0; k < w * h; k++) v[k] = k < 50 ? 1 : 100;
+  for (let k = 50; k < 100; k++) scl[k] = 9; // cloud high probability on the second half
+  const r = await tif('qa.tif', w, h, [v, scl]);
+  const ds = await readRaster(new File([], 'qa.tif'), { mode: 'band', band: 0, qa: { band: 1, kind: 'scl' } }, r);
+  assert.equal(ds.validPixels, 50);
+  assert.equal(ds.stats!.mean, 1);
+  assert.ok(ds.hints.some(x => /removed 50.0 %/.test(x)));
+});
+
+test('multi-date series: sample images show a significant decline', async () => {
+  const dates = ['2019-03-10', '2020-03-14', '2021-03-09', '2022-03-12', '2023-03-15', '2024-03-11'];
+  const items = await Promise.all(
+    dates.map(async d => {
+      const name = `series_ndvi_${d}_synthetic.tif`;
+      const buf = readFileSync(new URL(`../public/data/samples/${name}`, import.meta.url));
+      return { raster: await openGeoTiff(new File([buf], name)) };
+    }),
+  );
+  const r = await analyzeStack(items.reverse(), { index: 'ndvi', bands: {} });
+  assert.deepEqual(r.rows.map(x => x.date.toISOString().slice(0, 10)), dates);
+  for (let i = 1; i < r.rows.length; i++) assert.ok(r.rows[i].mean < r.rows[i - 1].mean);
+  assert.equal(r.trend!.direction, 'decreasing');
+  assert.ok(r.trend!.p < 0.05);
+  assert.equal(r.trend!.s, -15);
+  await assert.rejects(analyzeStack([items[0], { raster: await tif('nodate.tif', 4, 4, [new Float32Array(16)]) }], { index: null, bands: {} }), /No date found in: nodate.tif/);
+});
+
+// ── Land cover (k-means) ───────────────────────────────────────────────────
+
+test('k-means recovers separated clusters deterministically', () => {
+  const centres = [[0, 0], [10, 0], [0, 10]];
+  const pts: number[] = [];
+  let seed = 3;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5);
+  centres.forEach(([x, y], c) => { for (let i = 0; i < 50 + c * 25; i++) pts.push(x + rnd(), y + rnd()); });
+  const a = kmeans(Float64Array.from(pts), 2, 3, 5);
+  const b = kmeans(Float64Array.from(pts), 2, 3, 5);
+  assert.deepEqual(Array.from(a.centroids), Array.from(b.centroids));
+  const found = [0, 1, 2].map(j => [a.centroids[j * 2], a.centroids[j * 2 + 1]]).sort((p, q) => Math.round(p[0]) - Math.round(q[0]) || Math.round(p[1]) - Math.round(q[1]));
+  const want = [[0, 0], [0, 10], [10, 0]];
+  found.forEach((p, i) => { close(p[0], want[i][0], 0.2); close(p[1], want[i][1], 0.2); });
+  assert.throws(() => kmeans(new Float64Array(2), 2, 3), /Only 1 valid pixels/);
+});
+
+test('land-cover classes on the synthetic scene: areas add up and water is found', async () => {
+  const buf = readFileSync(new URL('../public/data/samples/satellite_4band_synthetic.tif', import.meta.url));
+  const r = await openGeoTiff(new File([buf], 'satellite_4band_synthetic.tif'));
+  const res = await classifyLandCover(r, { bands: [0, 1, 2, 3], k: 4, roles: { blue: 0, green: 1, red: 2, nir: 3 } });
+  assert.equal(res.stats.length, 4);
+  close(res.stats.reduce((a, c) => a + c.share, 0), 1, 1e-9);
+  close(res.stats.reduce((a, c) => a + c.ha!, 0), 240 * 200 * 0.09, 1e-6);
+  // Sorted by NDVI: the first class is the river (NIR below red).
+  assert.ok(res.stats[0].ndvi! < 0, `lowest NDVI ${res.stats[0].ndvi}`);
+  assert.equal(res.stats[0].suggestion, 'Water');
+  assert.ok(res.stats[3].ndvi! > 0.5);
+  assert.equal(res.classes.filter(c => c === 0).length, 0);
 });

@@ -551,6 +551,29 @@ select {
   padding-top: 6px;
   border-top: 1px solid var(--line);
 }
+.band-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px 6px;
+  font-size: 13px;
+}
+.band-checks legend {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 4px;
+}
+.label-input {
+  width: 100%;
+  min-width: 140px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text);
+}
 .sub-panel {
   display: flex;
   flex-direction: column;
@@ -1717,6 +1740,7 @@ select {
 .tool-survey { --tool: #f5b84b; }
 .tool-weather { --tool: #38bdf8; }
 .tool-satellite { --tool: #a78bfa; }
+.tool-landcover { --tool: #f472b6; }
 .tool-terrain { --tool: #e0a458; }
 .tool-photo { --tool: #5eead4; }
 .tool-mark {

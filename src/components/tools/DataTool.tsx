@@ -15,6 +15,7 @@ import FileDrop from '../FileDrop';
 
 const CoreAnalysisDashboard = lazy(() => import('../CoreAnalysisDashboard'));
 const RasterPanel = lazy(() => import('../RasterPanel'));
+const StackPanel = lazy(() => import('../StackPanel'));
 
 interface Props {
   variant: Extract<ToolId, 'weather' | 'satellite'>;
@@ -208,6 +209,11 @@ export default function DataTool({ variant, onOutput, boundary }: Props) {
             )}
           </Suspense>
         </>
+      )}
+      {variant === 'satellite' && (
+        <Suspense fallback={<div className="loading-block">Loading…</div>}>
+          <StackPanel onOutput={onOutput} boundary={boundary} />
+        </Suspense>
       )}
     </div>
   );

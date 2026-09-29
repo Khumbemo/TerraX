@@ -1,8 +1,9 @@
 import { indexDef, missingBands } from './indices';
 import { openGeoTiff, type Grid, type OpenRaster } from './rasterio';
 import { histogram, quantileSorted, summarize } from './stats';
+import { applyQa } from './qa';
 import { clipToBoundary, type Boundary } from './zonal';
-import type { BandRole, RasterDataset, RasterMode } from './types';
+import type { BandRole, QaMaskRef, RasterDataset, RasterMode } from './types';
 
 const PREVIEW_MAX_SIDE = 512;
 
@@ -112,15 +113,19 @@ export async function readRaster(file: File, view: RasterMode = { mode: 'band', 
   const { meta } = raster;
   if (view.mode === 'band' && (view.band < 0 || view.band >= meta.bands)) view = { mode: 'band', band: 0 };
 
+  if (view.qa && (view.qa.band < 0 || view.qa.band >= meta.bands)) view = { ...view, qa: undefined };
+
   if (view.mode === 'index') {
     const { grid, notes } = await computeIndexGrid(raster, view);
+    if (view.qa) notes.push((await applyQa(raster, [grid], view.qa)).note);
     const clip = clipToBoundary(meta, grid, boundary);
     return datasetFromGrid(raster, grid, view, clip ? [clip, ...notes] : notes);
   }
 
   const [grid] = await raster.readBands([view.band]);
+  const qaNote = view.qa ? (await applyQa(raster, [grid], view.qa)).note : null;
   const clip = clipToBoundary(meta, grid, boundary);
-  const ds = datasetFromGrid(raster, grid, view, clip ? [clip] : []);
+  const ds = datasetFromGrid(raster, grid, view, [clip, qaNote].filter((x): x is string => Boolean(x)));
   const s = ds.stats;
   if (s) {
     if (s.min >= -1 && s.max <= 1) ds.hints.push('Values lie between −1 and 1, consistent with a normalised index such as NDVI.');
@@ -130,16 +135,23 @@ export async function readRaster(file: File, view: RasterMode = { mode: 'band', 
 }
 
 /**
- * Renders an RGB composite with a 2–98 % percentile stretch per channel.
- * Returns RGBA bytes for a canvas; no-data pixels are transparent.
+ * Renders an RGB composite with a percentile stretch per channel (default
+ * 2–98 %). Returns RGBA bytes for a canvas; no-data and masked pixels are
+ * transparent.
  */
-export async function readComposite(raster: OpenRaster, rgb: [number, number, number]): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
+export async function readComposite(
+  raster: OpenRaster,
+  rgb: [number, number, number],
+  stretch: [number, number] = [0.02, 0.98],
+  qa?: QaMaskRef,
+): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
   const grids = await raster.readBands(rgb);
+  if (qa) await applyQa(raster, grids, qa);
   const previews = grids.map(previewGrid);
   const { width, height } = previews[0];
   const ranges = previews.map(p => {
     const vals = Array.from(p.data).filter(v => !Number.isNaN(v)).sort((a, b) => a - b);
-    return vals.length ? [quantileSorted(vals, 0.02), quantileSorted(vals, 0.98)] : [0, 1];
+    return vals.length ? [quantileSorted(vals, stretch[0]), quantileSorted(vals, stretch[1])] : [0, 1];
   });
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let i = 0; i < width * height; i++) {

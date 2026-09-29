@@ -52,7 +52,13 @@ export type BandRole = 'blue' | 'green' | 'red' | 'nir' | 'swir1' | 'swir2';
 /** 0-based band index for each spectral role the user has assigned. */
 export type BandMap = Partial<Record<BandRole, number>>;
 
-export type RasterMode = { mode: 'band'; band: number } | { mode: 'index'; index: SpectralIndex; bands: BandMap };
+/** Optional cloud/quality mask applied to a layer. */
+export interface QaMaskRef {
+  band: number;
+  kind: 'scl' | 'landsat';
+}
+
+export type RasterMode = { mode: 'band'; band: number; qa?: QaMaskRef } | { mode: 'index'; index: SpectralIndex; bands: BandMap; qa?: QaMaskRef };
 
 export interface RasterDataset {
   kind: 'raster';

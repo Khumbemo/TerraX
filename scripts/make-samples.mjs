@@ -104,6 +104,30 @@ for (let y = 0; y < H; y++)
 await writeTif('burn_nbr_pre_synthetic.tif', [pre]);
 await writeTif('burn_nbr_post_synthetic.tif', [post]);
 
+// ── Series: six dated NDVI images (same March season) with slow canopy loss ──
+{
+  const SW = 60, SH = 50;
+  const sn = noiseField(SW, SH, 8, 31);
+  const dates = ['2019-03-10', '2020-03-14', '2021-03-09', '2022-03-12', '2023-03-15', '2024-03-11'];
+  for (let t = 0; t < dates.length; t++) {
+    const r = rng(40 + t);
+    const band = new Float32Array(SW * SH);
+    for (let k = 0; k < band.length; k++) {
+      const x = k % SW;
+      // A clearing front advances from the east edge ~4 px per year.
+      const cleared = x > SW - 4 - 4 * t;
+      band[k] = (cleared ? 0.25 : 0.72) + (sn[k] - 0.5) * 0.12 + (r() - 0.5) * 0.04;
+    }
+    const buf = await writeArrayBuffer(band, {
+      width: SW, height: SH, ModelPixelScale: [RES, RES, 0], ModelTiepoint: [0, 0, 0, E0, N0, 0],
+      GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32646, GDAL_NODATA: '-9999',
+      SamplesPerPixel: 1, BitsPerSample: [32], SampleFormat: [3], PlanarConfiguration: 1,
+    });
+    writeFileSync(new URL(`series_ndvi_${dates[t]}_synthetic.tif`, OUT), Buffer.from(buf));
+  }
+  console.log('wrote 6 series_ndvi_*_synthetic.tif');
+}
+
 // ── Satellite: 4-band surface reflectance ×10,000 (B2 blue, B3 green, B4 red, B8 NIR) ──
 const blue = new Float32Array(W * H), green = new Float32Array(W * H), red = new Float32Array(W * H), nir = new Float32Array(W * H);
 for (let k = 0; k < W * H; k++) {

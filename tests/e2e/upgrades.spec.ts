@@ -83,3 +83,44 @@ test('photos: EXIF location on the map and comparing two photos', async ({ page 
   await expect(page.locator('.report-card')).toContainText('Compared with later.jpg');
   expect(errors).toEqual([]);
 });
+
+test('satellite: pixel inspector, stretch and a multi-date series', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Satellite imagery');
+  await page.click('button.chip:has-text("Synthetic 4-band scene")');
+  const preview = page.locator('.raster-grid canvas.raster-canvas');
+  await expect(preview).toBeVisible();
+  await preview.click({ position: { x: 20, y: 20 } });
+  await expect(page.locator('#pixel-inspector')).toContainText('B4');
+  await expect(page.locator('#pixel-inspector')).toContainText('25.');
+  await page.locator('summary', { hasText: 'Band roles' }).click();
+  await page.click('button:has-text("True colour")');
+  await expect(page.locator('figcaption', { hasText: 'True colour' })).toContainText('2–98 %');
+  await page.fill('#stretch-lo', '5');
+  await page.fill('#stretch-hi', '95');
+  await page.click('button:has-text("Apply stretch")');
+  await expect(page.locator('figcaption', { hasText: 'True colour' })).toContainText('5–95 %');
+  await expect(page.locator('#qa-band')).toBeVisible();
+
+  await page.click('button:has-text("Try synthetic 6-date series")');
+  await expect(page.locator('#stack-trend')).toContainText('decreasing');
+  await expect(page.locator('.report-card')).toContainText('6 images, 2019-03-10 to 2024-03-11');
+  expect(errors).toEqual([]);
+});
+
+test('land cover: classify, rename a class and export', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Land cover');
+  await page.click('button:has-text("Try synthetic scene")');
+  await expect(page.locator('.tabular-view tbody tr')).toHaveCount(5);
+  await expect(page.locator('#landcover-label-1')).toHaveValue('Water (suggested)');
+  await page.fill('#landcover-label-1', 'River');
+  await expect(page.locator('.report-card table')).toContainText('River');
+  await page.fill('#landcover-k', '3');
+  await page.click('#landcover-run');
+  await expect(page.locator('.tabular-view tbody tr')).toHaveCount(3);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export class table")')]);
+  expect(dl.suggestedFilename()).toBe('satellite_4band_synthetic_landcover_classes.csv');
+  await expect(page.locator('img.leaflet-image-layer')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});

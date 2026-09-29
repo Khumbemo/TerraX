@@ -84,6 +84,48 @@ export const TOPICS: Topic[] = [
     suggestions: ['How do I clip an analysis to my plot?', 'How accurate is the area?'],
   },
   {
+    id: 'hydrology',
+    title: 'Streams, watersheds and contours',
+    keywords: { stream: 3, streams: 3, river: 2, drainage: 3, watershed: 4, catchment: 4, basin: 2, contour: 4, contours: 4, strahler: 4, flow: 2, accumulation: 3 },
+    phrases: [/watershed|catchment|drainage (basin|network|density)/, /contour/, /stream (order|network)/, /flow (direction|accumulation)/],
+    phraseBoost: 5,
+    answer:
+      'In **Terrain**, load a DEM and choose **Compute flow & streams**. TerraX fills depressions (Priority-Flood, Barnes et al. 2014), routes flow downhill with **D8**, and marks channels where the draining area exceeds your threshold (default 0.5 km²), with **Strahler** order.\n\nThen switch to **Flow & streams** and click a stream to outline its **watershed** (area, mean slope); you can use it as the analysis boundary or export it. **Contours** at your interval can be shown on the map and exported as GeoJSON.',
+    more: 'The channel threshold is a modelling choice: smaller values draw more, shorter streams. D8 sends all flow to one neighbour, so it draws parallel lines on smooth planar slopes, and results depend on DEM quality (SRTM and Copernicus GLO-30 are surface models that include tree canopy and buildings).',
+    suggestions: ['What is the hypsometric integral?', 'How do I clip an analysis to my plot?'],
+  },
+  {
+    id: 'landcover',
+    title: 'Land-cover classification',
+    keywords: { 'land cover': 5, landcover: 5, classify: 3, classification: 3, cluster: 3, clusters: 3, kmeans: 4, 'k means': 4, unsupervised: 3, 'land use': 3 },
+    phrases: [/land ?(cover|use)/, /classif/, /k ?-?means/, /cluster/],
+    phraseBoost: 5,
+    answer:
+      '**Land cover** (Tools → Land cover) groups pixels with similar spectra using **k-means** (k-means++ seeding) on the bands you choose, maps the clusters and reports each one’s area and share. Name each cluster in the table; TerraX suggests names only from mean NDVI (water, bare/built-up, sparse vegetation, dense vegetation).\n\nTry **Try synthetic scene** first.',
+    more: 'Clusters are spectral groups, not verified classes. Before reporting areas, check the map against reference points and use a stratified sample to estimate accuracy and area (Olofsson et al. 2014, Remote Sensing of Environment).',
+    suggestions: ['What is NDVI?', 'How do I mask clouds?'],
+  },
+  {
+    id: 'cloudmask',
+    title: 'Cloud masks',
+    keywords: { cloud: 4, clouds: 4, cloudy: 3, mask: 2, scl: 4, 'qa pixel': 4, qa: 2, shadow: 2, cirrus: 3 },
+    phrases: [/cloud/, /\bscl\b/, /qa[_ ]?pixel/],
+    phraseBoost: 4,
+    answer:
+      'Export the scene with its quality band, then in **Satellite imagery → Band roles** set **Cloud / quality band** and its type:\n\n- **Sentinel-2 SCL**: masks classes 0, 1, 3, 8, 9, 10, 11 (no data, defective, cloud shadow, clouds, cirrus, snow).\n- **Landsat QA_PIXEL**: masks bits 0–5 (fill, dilated cloud, cirrus, cloud, cloud shadow, snow).\n\nMasked pixels are left out of statistics, indices and composites; the report states the share removed.',
+    suggestions: ['How do I export from earth engine', 'What is NDVI?'],
+  },
+  {
+    id: 'mmu',
+    title: 'Minimum mapping unit',
+    keywords: { 'minimum mapping unit': 6, mmu: 5, patch: 3, patches: 3, 'small patches': 4, speckle: 3, noise: 1 },
+    phrases: [/minimum mapping unit|\bmmu\b/, /small (patches|clearings)/, /(salt|speckle)/],
+    phraseBoost: 5,
+    answer:
+      'In **Forest loss**, **Min. patch (ha)** ignores loss (or burned) patches smaller than that size. Pixels touching on any side or corner form one patch. 0 keeps every pixel; the FAO forest definition uses **0.5 ha**. The report lists how many patches were removed and their area, and **Export loss polygons** saves the remaining patches as GeoJSON.',
+    suggestions: ['How do I estimate forest loss?', 'burn severity'],
+  },
+  {
     id: 'survey',
     title: 'Measure a plot (Land survey)',
     keywords: { survey: 3, area: 2, measure: 2, perimeter: 2, coordinates: 1, bearing: 2, distance: 1, boundary: 2, hectare: 1, acre: 1 },

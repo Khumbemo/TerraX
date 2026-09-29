@@ -30,6 +30,7 @@ const ForestLossTool = lazy(() => import('./components/tools/ForestLossTool'));
 const CarbonTool = lazy(() => import('./components/tools/CarbonTool'));
 const SurveyTool = lazy(() => import('./components/tools/SurveyTool'));
 const DataTool = lazy(() => import('./components/tools/DataTool'));
+const LandCoverTool = lazy(() => import('./components/tools/LandCoverTool'));
 const TerrainTool = lazy(() => import('./components/tools/TerrainTool'));
 const PhotoTool = lazy(() => import('./components/tools/PhotoTool'));
 const ReportsView = lazy(() => import('./components/ReportsView'));
@@ -322,6 +323,7 @@ export default function App() {
                       {tool === 'carbon' && <CarbonTool onOutput={setOutput} />}
                       {tool === 'survey' && <SurveyTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} drawPoints={drawPts} onDraw={setDrawPts} />}
                       {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
                     </Suspense>

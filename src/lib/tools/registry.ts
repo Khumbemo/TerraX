@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import type { LatLngBounds } from '../geo';
 import type { Dataset } from '../types';
 
-export type ToolId = 'forest' | 'carbon' | 'survey' | 'weather' | 'satellite' | 'terrain' | 'photo';
+export type ToolId = 'forest' | 'carbon' | 'survey' | 'weather' | 'satellite' | 'landcover' | 'terrain' | 'photo';
 
 export interface ToolInfo {
   id: ToolId;
@@ -22,7 +22,7 @@ export const TOOLS: ToolInfo[] = [
     name: 'Forest loss',
     group: 'Forestry',
     summary: 'Estimate where and how much forest was lost between two dates.',
-    measures: ['Forest area and loss in hectares', 'Loss share and regrowth', 'Hansen loss by year'],
+    measures: ['Forest area, loss and regrowth in hectares', 'Hansen loss by year · dNBR burn severity', 'Minimum mapping unit and loss polygons'],
     formats: 'Two NDVI or Red/NIR GeoTIFFs · Hansen lossyear GeoTIFF',
     mark: 'Fo',
   },
@@ -58,16 +58,25 @@ export const TOOLS: ToolInfo[] = [
     name: 'Satellite imagery',
     group: 'Remote sensing',
     summary: 'Explore multispectral scenes and compute spectral indices.',
-    measures: ['True and false-colour composites', 'NDVI, EVI, SAVI, NDWI, NDMI, NBR, NDBI', 'Vegetation-index time series'],
+    measures: ['Composites, stretch and pixel inspector', 'NDVI, EVI, SAVI, NDWI, NDMI, NBR, NDBI with cloud masks', 'Multi-date index series and trend'],
     formats: 'Multiband GeoTIFF · index time series CSV/XLSX',
     mark: 'Si',
+  },
+  {
+    id: 'landcover',
+    name: 'Land cover',
+    group: 'Remote sensing',
+    summary: 'Group pixels into spectral classes, name them and measure their areas.',
+    measures: ['k-means clusters on chosen bands', 'Area and share per class', 'Editable class names and CSV export'],
+    formats: 'Multiband GeoTIFF',
+    mark: 'Lc',
   },
   {
     id: 'terrain',
     name: 'Terrain',
     group: 'Elevation',
     summary: 'Derive slope, aspect and relief from an elevation model.',
-    measures: ['Slope classes and aspect', 'Hillshade', 'Relief and hypsometric integral'],
+    measures: ['Slope, aspect, hillshade and relief', 'Streams, Strahler order and watersheds', 'Contours (GeoJSON)'],
     formats: 'DEM GeoTIFF (SRTM, ASTER, Copernicus)',
     mark: 'Te',
   },
@@ -76,7 +85,7 @@ export const TOOLS: ToolInfo[] = [
     name: 'Space & aerial photos',
     group: 'Imagery',
     summary: 'Estimate green cover in images from satellites, drones or the ISS.',
-    measures: ['Vegetation cover (ExG + Otsu)', 'VARI greenness', 'Colour and brightness statistics'],
+    measures: ['Vegetation cover (ExG + Otsu) and VARI', 'EXIF GPS location on the map', 'Compare two photos'],
     formats: 'JPG · PNG · WebP',
     mark: 'Ph',
   },

@@ -56,6 +56,13 @@ test('questions route to the right topic, typos included', () => {
     ['can I draw a polygon on the map', 'draw'],
     ['export my boundary as kml', 'draw'],
     ['how much forest was lost', 'forest'],
+    ['how do I delineate a watershed', 'hydrology'],
+    ['can you draw contour lines', 'hydrology'],
+    ['classify land cover from my image', 'landcover'],
+    ['how do I remove clouds', 'cloudmask'],
+    ['what is a minimum mapping unit', 'mmu'],
+    ['what is ndvi', 'ndvi'],
+    ['burn severity', 'nbr'],
   ];
   for (const [q, id] of cases) assert.equal(new OfflineAssistant('guide').reply(q, ctx).topic, id, q);
 });
