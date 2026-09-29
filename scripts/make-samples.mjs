@@ -98,7 +98,8 @@ for (let k = 0; k < W * H; k++) {
 }
 await writeTif('satellite_4band_synthetic.tif', [blue, green, red, nir]);
 
-// ── Survey: a fictional plot boundary (GeoJSON) and a GPX walk ──
+// ── Survey: a fictional plot boundary (GeoJSON) around the largest clearing,
+// inside the forest rasters so it can be used as an analysis boundary ──
 const plot = {
   type: 'FeatureCollection',
   features: [
@@ -107,7 +108,7 @@ const plot = {
       properties: { name: 'Sample plot A (fictional)' },
       geometry: {
         type: 'Polygon',
-        coordinates: [[[94.1052, 25.6712], [94.1071, 25.6716], [94.1079, 25.6703], [94.1068, 25.6691], [94.1049, 25.6697], [94.1052, 25.6712]]],
+        coordinates: [[[94.05731, 25.68768], [94.05167, 25.68095], [94.04299, 25.68286], [94.04373, 25.69222], [94.05166, 25.6941], [94.05731, 25.68768]]],
       },
     },
   ],

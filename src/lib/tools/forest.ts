@@ -7,6 +7,7 @@
 //     optional "treecover2000" layer to define the baseline forest.
 import { groundGeometry, sameGrid, type Grid, type OpenRaster } from '../rasterio';
 import { computeIndexGrid } from '../raster';
+import { boundaryMask, applyMask, type Boundary } from '../zonal';
 import { fmt } from '../stats';
 import type { BandMap } from '../types';
 
@@ -95,7 +96,7 @@ function checkNdviRange(grid: Grid, name: string): string | null {
   return n && out / n > 0.01 ? `${name} has values outside −1…1, so it does not look like NDVI. For multi-band imagery, assign the red and NIR bands.` : null;
 }
 
-export async function analyzeNdviChange(before: ImageInput, after: ImageInput, forestThreshold: number, lossThreshold: number): Promise<NdviChangeResult> {
+export async function analyzeNdviChange(before: ImageInput, after: ImageInput, forestThreshold: number, lossThreshold: number, boundary?: Boundary | null): Promise<NdviChangeResult> {
   if (!sameGrid(before.raster.meta, after.raster.meta)) {
     throw new Error(
       `The two images are on different grids (${before.raster.meta.width}×${before.raster.meta.height} vs ${after.raster.meta.width}×${after.raster.meta.height}, or different extents or CRS). Export both dates with the same region, scale and CRS so pixels line up.`,
@@ -112,6 +113,13 @@ export async function analyzeNdviChange(before: ImageInput, after: ImageInput, f
     if (problem) throw new Error(problem);
   }
 
+  let clipNote: string | null = null;
+  if (boundary) {
+    const { mask, inside } = boundaryMask(before.raster.meta, b.grid, boundary);
+    applyMask(b.grid, mask);
+    applyMask(a.grid, mask);
+    clipNote = `Limited to the analysis boundary “${boundary.name}” (${(boundary.areaM2 / 10_000).toFixed(2)} ha; ${inside.toLocaleString()} grid cells inside).`;
+  }
   const { width, height } = b.grid;
   const acc = areaAccumulator(before.raster, b.grid);
   const classes = new Uint8Array(width * height);
@@ -150,6 +158,7 @@ export async function analyzeNdviChange(before: ImageInput, after: ImageInput, f
     `Forest is NDVI ≥ ${forestThreshold} on the earlier image; loss is a drop of ${Math.abs(lossThreshold)} or more (ΔNDVI ≤ ${lossThreshold}); gain is a rise of at least ${Math.abs(lossThreshold)} on non-forest.`,
     'NDVI thresholds are a proxy for forest: they do not apply the FAO definition (≥ 10 % canopy cover, trees ≥ 5 m, ≥ 0.5 ha). Seasonal leaf fall, clouds, haze or different sensors can look like loss, so compare images from the same season and check hotspots against high-resolution imagery.',
   ];
+  if (clipNote) notes.unshift(clipNote);
   if (acc.geo) notes.push(acc.geo.note);
   else notes.push('The CRS has no ground units TerraX can use, so results are in pixels only.');
   if (b.grid.resampleFactor > 1) notes.push(`Areas were computed on a resampled grid (each cell = ${fmt(b.grid.resampleFactor, 3)} original pixels); cell areas were scaled to match.`);
@@ -171,7 +180,7 @@ export async function analyzeNdviChange(before: ImageInput, after: ImageInput, f
 }
 
 /** Hansen GFC: lossyear values 1–N mean loss in year 2000 + N; 0 means no loss. */
-export async function analyzeHansen(lossYear: OpenRaster, treeCover: OpenRaster | null, canopyThreshold: number): Promise<HansenResult> {
+export async function analyzeHansen(lossYear: OpenRaster, treeCover: OpenRaster | null, canopyThreshold: number, boundary?: Boundary | null): Promise<HansenResult> {
   if (treeCover && !sameGrid(lossYear.meta, treeCover.meta)) {
     throw new Error('The lossyear and treecover2000 files are on different grids. Download the same Hansen tile for both.');
   }
@@ -189,6 +198,13 @@ export async function analyzeHansen(lossYear: OpenRaster, treeCover: OpenRaster 
   }
   if (nonInt > 0) throw new Error(`${lossYear.meta.filename} does not look like a Hansen lossyear layer (values should be whole numbers 0–${new Date().getUTCFullYear() - 2000}).`);
 
+  let clipNote: string | null = null;
+  if (boundary) {
+    const { mask, inside } = boundaryMask(lossYear.meta, ly, boundary);
+    applyMask(ly, mask);
+    if (tc) applyMask(tc, mask);
+    clipNote = `Limited to the analysis boundary “${boundary.name}” (${(boundary.areaM2 / 10_000).toFixed(2)} ha; ${inside.toLocaleString()} grid cells inside).`;
+  }
   const acc = areaAccumulator(lossYear, ly);
   const classes = new Uint8Array(width * height);
   const perYear = new Map<number, { m2: number; px: number }>();
@@ -228,6 +244,7 @@ export async function analyzeHansen(lossYear: OpenRaster, treeCover: OpenRaster 
       : 'No treecover2000 layer was given, so every lossyear pixel counts and no baseline forest area or percentage is reported.',
     '"Loss" includes harvest, fire, storm and disease, not only deforestation; year-to-year comparisons across the whole record are affected by algorithm updates (see the GFC version notes).',
   ];
+  if (clipNote) notes.unshift(clipNote);
   if (acc.geo) notes.push(acc.geo.note);
   else notes.push('The CRS has no ground units TerraX can use, so results are in pixels only.');
   if (ly.resampleFactor > 1) notes.push(`Areas were computed on a resampled grid (each cell = ${fmt(ly.resampleFactor, 3)} original pixels).`);

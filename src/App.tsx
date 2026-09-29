@@ -6,7 +6,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import ChatPanel, { type ChatReply } from './components/ChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import LiveTelemetryDock from './components/LiveTelemetryDock';
-import MapPanel from './components/MapPanel';
+import MapPanel, { type DrawState } from './components/MapPanel';
 import PlanetaryTelemetry from './components/PlanetaryTelemetry';
 import ReportPanel from './components/ReportPanel';
 import SessionGate from './components/SessionGate';
@@ -23,6 +23,7 @@ import { getJSON, removeItem, setJSON } from './lib/storage';
 import { useToast } from './lib/toast';
 import { toolInfo, type ToolId, type ToolOutput } from './lib/tools/registry';
 import type { Dataset, ReportRecord } from './lib/types';
+import type { Boundary } from './lib/zonal';
 
 // Tools and rarely needed views load on demand to keep the first load small.
 const ForestLossTool = lazy(() => import('./components/tools/ForestLossTool'));
@@ -81,6 +82,23 @@ export default function App() {
 
   const [tool, setTool] = useState<ToolId | null>(null);
   const [output, setOutput] = useState<ToolOutput | null>(null);
+  const [boundary, setBoundaryState] = useState<Boundary | null>(() => getJSON('boundary', null));
+  const [drawPts, setDrawPts] = useState<[number, number][] | null>(null);
+
+  const setBoundary = (b: Boundary | null) => {
+    setBoundaryState(b);
+    if (b) setJSON('boundary', b);
+    else removeItem('boundary');
+  };
+
+  const draw: DrawState | null = drawPts
+    ? {
+        points: drawPts,
+        onAdd: p => setDrawPts(pts => (pts ? [...pts, p] : pts)),
+        onMove: (i, p) => setDrawPts(pts => (pts ? pts.map((q, j) => (j === i ? p : q)) : pts)),
+        onRemove: i => setDrawPts(pts => (pts ? pts.filter((_, j) => j !== i) : pts)),
+      }
+    : null;
 
   const [reports, setReports] = useState<ReportRecord[]>(() => loadReports());
   const [openReportId, setOpenReportId] = useState<string | null>(null);
@@ -101,11 +119,13 @@ export default function App() {
     setSession(null);
     setTool(null);
     setOutput(null);
+    setDrawPts(null);
     setView('explore');
   };
 
   const openTool = (id: ToolId | null) => {
     setTool(id);
+    setDrawPts(null);
     setOutput(null);
     setView('explore');
   };
@@ -256,7 +276,14 @@ export default function App() {
           ) : (
             <>
               <ErrorBoundary area="Map" inline>
-                <MapPanel target={target} bounds={output?.map?.bounds ?? null} geojson={output?.map?.geojson ?? null} />
+                <MapPanel
+                  target={target}
+                  bounds={output?.map?.bounds ?? null}
+                  geojson={drawPts ? null : (output?.map?.geojson ?? null)}
+                  image={output?.map?.image ?? null}
+                  boundary={boundary}
+                  draw={draw}
+                />
               </ErrorBoundary>
 
               {!tool || !info ? (
@@ -278,11 +305,22 @@ export default function App() {
                         </button>
                       )}
                     </div>
+                    {boundary && tool !== 'photo' && (
+                      <div className="boundary-banner" role="status">
+                        <span>
+                          Analysis boundary: <strong>{boundary.name}</strong> ({(boundary.areaM2 / 10_000).toFixed(2)} ha).{' '}
+                          {tool === 'survey' ? 'Raster tools count only the pixels inside it.' : tool === 'weather' ? 'Applies to GeoTIFF grids, not to tables.' : 'Only pixels inside it are analysed.'}
+                        </span>
+                        <button type="button" id="boundary-clear" className="btn btn-small push-right" onClick={() => setBoundary(null)}>
+                          Clear boundary
+                        </button>
+                      </div>
+                    )}
                     <Suspense fallback={<Loading />}>
-                      {tool === 'forest' && <ForestLossTool onOutput={setOutput} />}
-                      {tool === 'survey' && <SurveyTool onOutput={setOutput} />}
-                      {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} />}
-                      {tool === 'terrain' && <TerrainTool onOutput={setOutput} />}
+                      {tool === 'forest' && <ForestLossTool onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'survey' && <SurveyTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} drawPoints={drawPts} onDraw={setDrawPts} />}
+                      {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
                     </Suspense>
                   </section>

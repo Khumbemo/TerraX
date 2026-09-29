@@ -11,7 +11,7 @@ const R_AUTHALIC = 6371007.2;
 const ACRE_M2 = 4046.8564224;
 const RAD = Math.PI / 180;
 
-export type SurveyFormat = 'GeoJSON' | 'KML' | 'GPX' | 'CSV' | 'Shapefile';
+export type SurveyFormat = 'GeoJSON' | 'KML' | 'GPX' | 'CSV' | 'Shapefile' | 'Drawn on map';
 
 export interface Leg {
   from: number;

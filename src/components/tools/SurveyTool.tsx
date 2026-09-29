@@ -1,34 +1,45 @@
 import { useState } from 'react';
+import { downloadText, safeFilename } from '../../lib/download';
 import { toDms } from '../../lib/geo';
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
 import type { ToolOutput } from '../../lib/tools/registry';
 import { formatAreaM2, formatLength, measureSurvey, parseSurveyFile, surveyMarkdown, type SurveyResult } from '../../lib/tools/survey';
+import { drawnPolygon, editableVertices, makeBoundary, toGpx, toKml } from '../../lib/vector';
+import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import { Stat } from './ForestLossTool';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
+  boundary: Boundary | null;
+  onBoundary: (b: Boundary | null) => void;
+  /** Vertices being drawn on the map ([lat, lon]), or null when not drawing. */
+  drawPoints: [number, number][] | null;
+  onDraw: (pts: [number, number][] | null) => void;
 }
 
 const ACCEPT = '.geojson,.json,.kml,.gpx,.csv,.txt,.zip';
 
-export default function SurveyTool({ onOutput }: Props) {
+export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints, onDraw }: Props) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
   const [closeRing, setCloseRing] = useState(true);
   const [result, setResult] = useState<SurveyResult | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
 
+  const show = (r: SurveyResult) => {
+    setResult(r);
+    onOutput({ tool: 'survey', name: r.filename, markdown: surveyMarkdown(r), map: { bounds: r.bounds, geojson: r.geojson } });
+  };
+
   const analyse = async (file: File, close = closeRing) => {
     setBusy(true);
     try {
       const { fc, format, warnings } = await parseSurveyFile(file, close);
-      const r = measureSurvey(file.name, format, fc, warnings);
-      setResult(r);
+      show(measureSurvey(file.name, format, fc, warnings));
       setLastFile(file);
-      onOutput({ tool: 'survey', name: file.name, markdown: surveyMarkdown(r), map: { bounds: r.bounds, geojson: r.geojson } });
     } catch (err) {
       notify(err instanceof Error ? err.message : `Could not read ${file.name}.`, 'error');
     } finally {
@@ -36,8 +47,60 @@ export default function SurveyTool({ onOutput }: Props) {
     }
   };
 
+  const finishDrawing = () => {
+    if (!drawPoints || drawPoints.length < 3) {
+      notify('Click at least three points on the map to make a polygon.', 'error');
+      return;
+    }
+    try {
+      const name = result?.format === 'Drawn on map' ? result.filename : 'Drawn plot';
+      show(measureSurvey(name, 'Drawn on map', drawnPolygon(drawPoints, name), []));
+      setLastFile(null);
+      onDraw(null);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not measure the drawn polygon.', 'error');
+    }
+  };
+
+  const editVertices = result ? editableVertices(result.geojson) : null;
+  const polygonArea = result ? result.features.reduce((a, f) => a + (f.kind === 'Polygon' && f.area !== null ? f.area : 0), 0) : 0;
+  const base = result ? safeFilename(result.filename) : 'survey';
+
+  const polys = result ? result.features.filter(f => f.kind === 'Polygon') : [];
+  const boundaryName = polys.length === 1 ? polys[0].name : (result?.filename ?? '');
+  const isBoundary = Boolean(result && boundary?.name === boundaryName && Math.abs(boundary.areaM2 - polygonArea) < 1e-6);
+
+  const useAsBoundary = () => {
+    if (!result) return;
+    const b = makeBoundary(boundaryName, result.geojson, polygonArea);
+    if (!b) {
+      notify('Only polygons can be used as an analysis boundary.', 'error');
+      return;
+    }
+    onBoundary(b);
+    notify(`“${boundaryName}” is now the analysis boundary. Forest, terrain and satellite tools will analyse only pixels inside it.`, 'success');
+  };
+
   return (
     <div className="tool-body">
+      {drawPoints && (
+        <div className="draw-bar" role="region" aria-label="Drawing">
+          <span>
+            <strong>Drawing:</strong> click the map to add points ({drawPoints.length} so far). Drag a point to move it; double-click it to delete.
+          </span>
+          <div className="button-row push-right">
+            <button type="button" className="btn btn-small" onClick={() => onDraw(drawPoints.slice(0, -1))} disabled={!drawPoints.length}>
+              Undo
+            </button>
+            <button type="button" className="btn btn-small" onClick={() => onDraw(null)}>
+              Cancel
+            </button>
+            <button type="button" id="draw-finish" className="btn btn-small btn-primary" onClick={finishDrawing} disabled={drawPoints.length < 3}>
+              Finish polygon
+            </button>
+          </div>
+        </div>
+      )}
       <p className="tool-intro">
         Upload a plot boundary, a walked traverse or survey points. Coordinates must be WGS84 longitude/latitude (shapefiles are reprojected from their .prj). The
         boundary is drawn on the map.
@@ -57,6 +120,9 @@ export default function SurveyTool({ onOutput }: Props) {
           CSV points form a closed boundary
         </label>
         <div className="button-row push-right">
+          <button type="button" id="draw-start" className="btn" disabled={busy || Boolean(drawPoints)} onClick={() => onDraw([])}>
+            Draw on map
+          </button>
           <button
             type="button"
             className="btn"
@@ -76,6 +142,28 @@ export default function SurveyTool({ onOutput }: Props) {
 
       {result && (
         <div className="result-block">
+          <div className="button-row">
+            {polygonArea > 0 && (
+              <button type="button" id="use-boundary" className="btn btn-primary" onClick={useAsBoundary} disabled={isBoundary}>
+                {isBoundary ? 'Is the analysis boundary' : 'Use as analysis boundary'}
+              </button>
+            )}
+            {editVertices && editVertices.length >= 3 && !drawPoints && (
+              <button type="button" id="edit-vertices" className="btn" onClick={() => onDraw(editVertices)}>
+                Edit on map
+              </button>
+            )}
+            <span className="push-right muted">Export:</span>
+            <button type="button" className="btn btn-small" onClick={() => downloadText(JSON.stringify(result.geojson, null, 2), `${base}.geojson`, 'application/geo+json')}>
+              GeoJSON
+            </button>
+            <button type="button" className="btn btn-small" onClick={() => downloadText(toKml(result.geojson, result.filename), `${base}.kml`, 'application/vnd.google-earth.kml+xml')}>
+              KML
+            </button>
+            <button type="button" className="btn btn-small" onClick={() => downloadText(toGpx(result.geojson, result.filename), `${base}.gpx`, 'application/gpx+xml')}>
+              GPX
+            </button>
+          </div>
           {result.warnings.length > 0 && (
             <ul className="data-notes">
               {result.warnings.map(w => (

@@ -1,17 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { viridis } from '../../lib/colormap';
+import { mapImage } from '../../lib/overlay';
 import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
 import type { ToolOutput } from '../../lib/tools/registry';
 import { ASPECTS, SLOPE_CLASSES, analyzeTerrain, gridToRgba, terrainMarkdown, type TerrainResult } from '../../lib/tools/terrain';
+import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import RgbaCanvas from '../RgbaCanvas';
 import { Stat } from './ForestLossTool';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
+  boundary: Boundary | null;
 }
 
 type Layer = 'hillshade' | 'slope' | 'elevation';
@@ -21,24 +24,35 @@ function hexRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-export default function TerrainTool({ onOutput }: Props) {
+function slopeRgba(t: TerrainResult): Uint8ClampedArray {
+  const colors = SLOPE_CLASSES.map(c => hexRgb(c.color));
+  return gridToRgba(t.slopeGrid, v => colors[SLOPE_CLASSES.findIndex(c => v < c.upTo)]);
+}
+
+export default function TerrainTool({ onOutput, boundary }: Props) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
   const [raster, setRaster] = useState<OpenRaster | null>(null);
   const [result, setResult] = useState<TerrainResult | null>(null);
   const [layer, setLayer] = useState<Layer>('hillshade');
 
-  const analyse = async (file: File) => {
+  const analyse = async (file: File | OpenRaster) => {
     setBusy(true);
     try {
-      const r = await openGeoTiff(file);
-      if (r.meta.bands > 1) notify(`${file.name} has ${r.meta.bands} bands; band 1 was read as elevation.`);
-      const t = await analyzeTerrain(r);
+      const r = file instanceof File ? await openGeoTiff(file) : file;
+      const name = r.meta.filename;
+      if (file instanceof File && r.meta.bands > 1) notify(`${name} has ${r.meta.bands} bands; band 1 was read as elevation.`);
+      const t = await analyzeTerrain(r, boundary);
       setRaster(r);
       setResult(t);
-      onOutput({ tool: 'terrain', name: file.name, markdown: terrainMarkdown(t, r.meta) + (r.meta.warnings.length ? `\n\n## Data quality\n\n${r.meta.warnings.map(w => `- ${w}`).join('\n')}` : ''), map: { bounds: r.meta.latLngBounds } });
+      onOutput({
+        tool: 'terrain',
+        name,
+        markdown: terrainMarkdown(t, r.meta) + (r.meta.warnings.length ? `\n\n## Data quality\n\n${r.meta.warnings.map(w => `- ${w}`).join('\n')}` : ''),
+        map: { bounds: r.meta.latLngBounds, image: mapImage(slopeRgba(t), t.width, t.height, r.meta.latLngBounds, 'Slope classes', SLOPE_CLASSES.map(c => ({ color: c.color, label: c.label }))) },
+      });
     } catch (err) {
-      notify(err instanceof Error ? err.message : `Could not read ${file.name}.`, 'error');
+      notify(err instanceof Error ? err.message : `Could not read ${file instanceof File ? file.name : file.meta.filename}.`, 'error');
     } finally {
       setBusy(false);
     }
@@ -47,13 +61,18 @@ export default function TerrainTool({ onOutput }: Props) {
   const image = useMemo(() => {
     if (!result) return null;
     if (layer === 'hillshade') return gridToRgba(result.hillshade, v => [v * 235 + 10, v * 240 + 12, v * 245 + 18]);
-    if (layer === 'slope') {
-      const colors = SLOPE_CLASSES.map(c => hexRgb(c.color));
-      return gridToRgba(result.slopeGrid, v => colors[SLOPE_CLASSES.findIndex(c => v < c.upTo)]);
-    }
+    if (layer === 'slope') return slopeRgba(result);
     const { min, max } = result.elevation;
     return gridToRgba(result.elevationGrid, v => viridis((v - min) / (max - min || 1)));
   }, [result, layer]);
+
+  const lastBoundary = useRef(boundary);
+  useEffect(() => {
+    if (lastBoundary.current === boundary) return;
+    lastBoundary.current = boundary;
+    if (raster) analyse(raster);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundary]);
 
   const slopeTotal = result ? result.slopeClassCounts.reduce((a, b) => a + b, 0) || 1 : 1;
   const aspTotal = result ? result.aspectCounts.reduce((a, b) => a + b, 0) || 1 : 1;

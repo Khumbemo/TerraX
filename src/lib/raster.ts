@@ -1,6 +1,7 @@
 import { indexDef, missingBands } from './indices';
 import { openGeoTiff, type Grid, type OpenRaster } from './rasterio';
 import { histogram, quantileSorted, summarize } from './stats';
+import { clipToBoundary, type Boundary } from './zonal';
 import type { BandRole, RasterDataset, RasterMode } from './types';
 
 const PREVIEW_MAX_SIDE = 512;
@@ -106,18 +107,20 @@ export function datasetFromGrid(raster: OpenRaster, grid: Grid, view: RasterMode
  * Reads a GeoTIFF band (or a spectral index computed from several bands),
  * computes statistics over valid pixels, and prepares a preview grid.
  */
-export async function readRaster(file: File, view: RasterMode = { mode: 'band', band: 0 }, opened?: OpenRaster): Promise<RasterDataset> {
+export async function readRaster(file: File, view: RasterMode = { mode: 'band', band: 0 }, opened?: OpenRaster, boundary?: Boundary | null): Promise<RasterDataset> {
   const raster = opened ?? (await openGeoTiff(file));
   const { meta } = raster;
   if (view.mode === 'band' && (view.band < 0 || view.band >= meta.bands)) view = { mode: 'band', band: 0 };
 
   if (view.mode === 'index') {
     const { grid, notes } = await computeIndexGrid(raster, view);
-    return datasetFromGrid(raster, grid, view, notes);
+    const clip = clipToBoundary(meta, grid, boundary);
+    return datasetFromGrid(raster, grid, view, clip ? [clip, ...notes] : notes);
   }
 
   const [grid] = await raster.readBands([view.band]);
-  const ds = datasetFromGrid(raster, grid, view, []);
+  const clip = clipToBoundary(meta, grid, boundary);
+  const ds = datasetFromGrid(raster, grid, view, clip ? [clip] : []);
   const s = ds.stats;
   if (s) {
     if (s.min >= -1 && s.max <= 1) ds.hints.push('Values lie between −1 and 1, consistent with a normalised index such as NDVI.');

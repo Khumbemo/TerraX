@@ -89,5 +89,13 @@ export interface ToolOutput {
   /** Present for table/raster datasets so assistants can answer from statistics offline. */
   dataset?: Dataset;
   focus?: string | null;
-  map?: { bounds?: LatLngBounds | null; geojson?: FeatureCollection | null };
+  map?: { bounds?: LatLngBounds | null; geojson?: FeatureCollection | null; image?: MapImage | null };
+}
+
+/** A result picture placed on the map over the raster footprint. */
+export interface MapImage {
+  url: string;
+  bounds: LatLngBounds;
+  label: string;
+  legend: { color: string; label: string }[];
 }

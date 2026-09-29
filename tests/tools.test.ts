@@ -12,6 +12,9 @@ import { rainfallSummary } from '../src/lib/tools/climate';
 import { analyzeHansen, analyzeNdviChange } from '../src/lib/tools/forest';
 import { measureSurvey, parseCoordinateCsv } from '../src/lib/tools/survey';
 import { analyzeTerrain } from '../src/lib/tools/terrain';
+import { drawnPolygon, editableVertices, makeBoundary, polygonFeatures, toGpx, toKml } from '../src/lib/vector';
+import { boundaryMask, clipToBoundary, type Boundary } from '../src/lib/zonal';
+import type { GeoMeta, Grid } from '../src/lib/rasterio';
 
 const close = (a: number, b: number, tol: number, msg?: string) => assert.ok(Math.abs(a - b) <= tol, `${msg ?? ''} expected ${b} ± ${tol}, got ${a}`);
 const rel = (a: number, b: number, tolRel: number, msg?: string) => close(a, b, Math.abs(b) * tolRel, msg);
@@ -216,4 +219,85 @@ test('synthetic sample rasters load and analyse', async () => {
   assert.equal(s.meta.bands, 4);
   const [lat] = utmToLatLon(603000, 2846000, 46, false);
   assert.ok(lat > 25.6 && lat < 25.8);
+});
+
+// ── Analysis boundary (zonal statistics) ───────────────────────────────────
+
+function utmBoundary(name: string, e0: number, e1: number, n0: number, n1: number, zone = 46): Boundary {
+  const ring = [[e0, n0], [e1, n0], [e1, n1], [e0, n1], [e0, n0]].map(([e, n]) => {
+    const [lat, lon] = utmToLatLon(e, n, zone, false);
+    return [lon, lat];
+  });
+  return { name, areaM2: (e1 - e0) * (n1 - n0), geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } }] } };
+}
+
+test('boundary mask: geographic grid, cell centres and holes', () => {
+  const meta: GeoMeta = { filename: 'g.tif', sizeBytes: 0, width: 100, height: 100, bands: 1, noData: null, bbox: [94, 25, 95, 26], epsg: 4326, geographic: true, latLngBounds: [[25, 94], [26, 95]], pixelSize: [0.01, 0.01], warnings: [] };
+  const grid: Grid = { width: 100, height: 100, data: new Float32Array(10_000).fill(1), resampleFactor: 1 };
+  const sq = (x0: number, x1: number, y0: number, y1: number) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+  const b: Boundary = { name: 'sq', areaM2: 1, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [sq(94.2, 94.5, 25.3, 25.6)] } }] } };
+  assert.equal(boundaryMask(meta, grid, b).inside, 900); // 30 × 30 cells
+  const holed: Boundary = { ...b, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [sq(94.2, 94.5, 25.3, 25.6), sq(94.3, 94.4, 25.4, 25.5)] } }] } };
+  assert.equal(boundaryMask(meta, grid, holed).inside, 800);
+  const note = clipToBoundary(meta, grid, holed);
+  assert.match(note!, /800 grid cells/);
+  assert.equal(Array.from(grid.data).filter(v => !Number.isNaN(v)).length, 800);
+  const far: Boundary = { ...b, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [sq(10, 11, 10, 11)] } }] } };
+  assert.throws(() => boundaryMask(meta, grid, far), /does not overlap/);
+  assert.throws(() => boundaryMask({ ...meta, geographic: false, epsg: 27700 }, grid, b), /EPSG:27700/);
+  assert.equal(clipToBoundary(meta, grid, null), null);
+});
+
+test('boundary clipping: NDVI loss counted only inside a UTM plot', async () => {
+  const w = 50, h = 40;
+  const before = new Float32Array(w * h).fill(0.8);
+  const after = new Float32Array(w * h).fill(0.8);
+  for (let y = 10; y < 20; y++) for (let x = 5; x < 15; x++) after[y * w + x] = 0.2; // 100 px cleared
+  const rb = await tif('b.tif', w, h, [before]);
+  const ra = await tif('a.tif', w, h, [after]);
+  // Plot = exactly the cleared 10 × 10 block (tie point 603000 E, 2846000 N; 30 m pixels).
+  const plot = utmBoundary('plot', 603150, 603450, 2845400, 2845700);
+  const r = await analyzeNdviChange({ raster: rb, bands: {} }, { raster: ra, bands: {} }, 0.5, -0.2, plot);
+  assert.equal(r.loss.pixels, 100);
+  assert.equal(r.forestBefore.pixels, 100);
+  assert.match(r.notes[0], /analysis boundary “plot”/);
+  // Left half of the clearing plus uncleared forest to its west.
+  const half = utmBoundary('half', 603000, 603300, 2845400, 2845700);
+  const r2 = await analyzeNdviChange({ raster: rb, bands: {} }, { raster: ra, bands: {} }, 0.5, -0.2, half);
+  assert.equal(r2.loss.pixels, 50);
+  assert.equal(r2.forestBefore.pixels, 100);
+});
+
+test('boundary clipping: Hansen and terrain', async () => {
+  const w = 20, h = 10;
+  const ly = new Float32Array(w * h).fill(10);
+  const r = await analyzeHansen(await tif('ly.tif', w, h, [ly]), null, 30, utmBoundary('p', 603000, 603150, 2845850, 2846000));
+  assert.equal(r.totalLoss.pixels, 25); // 5 × 5 cells
+  const dem = new Float32Array(30 * 20);
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 30; x++) dem[y * 30 + x] = 1000 + 3 * x;
+  const t = await analyzeTerrain(await tif('dem.tif', 30, 20, [dem]), utmBoundary('p', 603000 + 5 * 30, 603000 + 15 * 30, 2846000 - 15 * 30, 2846000 - 5 * 30));
+  assert.equal(t.elevation.n, 100);
+  close(t.slope.mean, Math.atan(0.1) / RAD, 1e-4);
+  // Interior cells only have a full 3 × 3 neighbourhood: 8 × 8.
+  assert.equal(t.slope.n, 64);
+});
+
+test('vector exports and drawn polygons', () => {
+  const fc = drawnPolygon([[25.6, 94.1], [25.6, 94.2], [25.7, 94.2]], 'Plot <A>');
+  const ring = (fc.features[0].geometry as { coordinates: number[][][] }).coordinates[0];
+  assert.deepEqual(ring[0], ring[ring.length - 1]);
+  assert.deepEqual(ring[0], [94.1, 25.6]);
+  assert.deepEqual(editableVertices(fc), [[25.6, 94.1], [25.6, 94.2], [25.7, 94.2]]);
+  assert.throws(() => drawnPolygon([[1, 2], [3, 4]], 'x'), /three points/);
+  const kml = toKml(fc, 'Plot <A>');
+  assert.match(kml, /<name>Plot &lt;A&gt;<\/name>/);
+  assert.match(kml, /<outerBoundaryIs><LinearRing><coordinates>94.1,25.6 94.2,25.6 94.2,25.7 94.1,25.6<\/coordinates>/);
+  const gpx = toGpx({ type: 'FeatureCollection', features: [...fc.features, { type: 'Feature', properties: { name: 'W1' }, geometry: { type: 'Point', coordinates: [94.15, 25.65, 1200] } }] }, 'x');
+  assert.match(gpx, /<wpt lat="25.65" lon="94.15"><ele>1200<\/ele><name>W1<\/name><\/wpt>/);
+  assert.equal((gpx.match(/<trkpt /g) ?? []).length, 4);
+  const m = measureSurvey('d', 'Drawn on map', fc, []);
+  const b = makeBoundary('d', fc, m.features[0].area!)!;
+  assert.equal(b.geojson.features.length, 1);
+  assert.equal(makeBoundary('pts', { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [0, 0] } }] }, 0), null);
+  assert.equal(polygonFeatures({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'GeometryCollection', geometries: [fc.features[0].geometry] } }] }).features.length, 1);
 });

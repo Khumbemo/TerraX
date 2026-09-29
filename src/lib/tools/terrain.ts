@@ -3,6 +3,7 @@
 // hypsometric integral (Strahler 1952).
 import { groundGeometry, type Grid, type OpenRaster } from '../rasterio';
 import { fmt, summarize } from '../stats';
+import { clipToBoundary, type Boundary } from '../zonal';
 import type { NumericSummary } from '../types';
 
 export const SLOPE_CLASSES = [
@@ -33,8 +34,9 @@ export interface TerrainResult {
   notes: string[];
 }
 
-export async function analyzeTerrain(raster: OpenRaster): Promise<TerrainResult> {
+export async function analyzeTerrain(raster: OpenRaster, boundary?: Boundary | null): Promise<TerrainResult> {
   const [dem] = await raster.readBands([0]);
+  const clipNote = clipToBoundary(raster.meta, dem, boundary);
   const geo = groundGeometry(raster.meta, dem);
   if (!geo) throw new Error('The DEM has no ground units TerraX can use (supported: WGS84, Web Mercator, WGS84 UTM), so slope cannot be computed.');
   const { width: w, height: h, data: z } = dem;
@@ -91,6 +93,7 @@ export async function analyzeTerrain(raster: OpenRaster): Promise<TerrainResult>
     'Hypsometric integral HI = (mean − min) / (max − min) (Strahler 1952): above ~0.6 suggests a youthful, less eroded landscape; below ~0.35 a mature one.',
     `Elevation values are assumed to be metres. ${geo.note}`,
   ];
+  if (clipNote) notes.unshift(clipNote);
   if (dem.resampleFactor > 1) notes.push('The DEM was resampled for analysis; slopes on a coarser grid are gentler than at full resolution.');
   if (elevation.max > 9000 || elevation.min < -500) notes.push('Some elevations are outside −500 to 9,000 m; check the file for unmasked no-data values.');
 

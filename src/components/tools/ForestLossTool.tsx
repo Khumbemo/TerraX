@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { guessBandMap } from '../../lib/indices';
+import { mapImage } from '../../lib/overlay';
 import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
@@ -8,11 +9,13 @@ import { useToast } from '../../lib/toast';
 import { CHANGE_CLASSES, analyzeHansen, analyzeNdviChange, forestMarkdown, formatArea, type ForestResult } from '../../lib/tools/forest';
 import type { ToolOutput } from '../../lib/tools/registry';
 import type { BandMap } from '../../lib/types';
+import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import RgbaCanvas from '../RgbaCanvas';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
+  boundary: Boundary | null;
 }
 
 type Mode = 'ndvi' | 'hansen';
@@ -48,7 +51,7 @@ function BandPicker({ slot, onChange, prefix }: { slot: Slot; onChange: (b: Band
   );
 }
 
-export default function ForestLossTool({ onOutput }: Props) {
+export default function ForestLossTool({ onOutput, boundary }: Props) {
   const notify = useToast();
   const [mode, setMode] = useState<Mode>('ndvi');
   const [a, setA] = useState<Slot | null>(null);
@@ -97,15 +100,20 @@ export default function ForestLossTool({ onOutput }: Props) {
     try {
       const r =
         m === 'ndvi'
-          ? await analyzeNdviChange(sa, sb!, fThr, lThr)
-          : await analyzeHansen(sa.raster, sb?.raster ?? null, cThr);
+          ? await analyzeNdviChange(sa, sb!, fThr, lThr, boundary)
+          : await analyzeHansen(sa.raster, sb?.raster ?? null, cThr, boundary);
       setResult(r);
+      const classes = CHANGE_CLASSES.filter(c => m === 'ndvi' || c.id !== 4);
+      const rgba = changeRgba(r);
       const names = [sa.raster.meta.filename, sb?.raster.meta.filename].filter((n): n is string => Boolean(n));
       onOutput({
         tool: 'forest',
         name: names.join(' vs '),
         markdown: forestMarkdown(r, names.map((n, i) => (m === 'ndvi' ? `${i === 0 ? 'Earlier' : 'Later'} image: ${n}` : i === 0 ? `Loss year: ${n}` : `Tree cover 2000: ${n}`))),
-        map: { bounds: sa.raster.meta.latLngBounds },
+        map: {
+          bounds: sa.raster.meta.latLngBounds,
+          image: mapImage(rgba, r.width, r.height, sa.raster.meta.latLngBounds, 'Forest change', classes.map(c => ({ color: `rgb(${c.color.join(',')})`, label: c.label }))),
+        },
       });
     } catch (err) {
       notify(err instanceof Error ? err.message : 'The analysis failed.', 'error');
@@ -132,16 +140,16 @@ export default function ForestLossTool({ onOutput }: Props) {
     }
   };
 
-  const changeImage = useMemo(() => {
-    if (!result) return null;
-    const rgba = new Uint8ClampedArray(result.width * result.height * 4);
-    for (let i = 0; i < result.classes.length; i++) {
-      const c = CHANGE_CLASSES.find(x => x.id === result.classes[i]);
-      if (!c) continue;
-      rgba.set([...c.color, 255], i * 4);
-    }
-    return rgba;
-  }, [result]);
+  const changeImage = useMemo(() => (result ? changeRgba(result) : null), [result]);
+
+  // Re-run with the new boundary when it changes after an analysis.
+  const lastBoundary = useRef(boundary);
+  useEffect(() => {
+    if (lastBoundary.current === boundary) return;
+    lastBoundary.current = boundary;
+    if (result) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundary]);
 
   const ready = mode === 'ndvi' ? Boolean(a && b) : Boolean(a);
 
@@ -267,6 +275,16 @@ export default function ForestLossTool({ onOutput }: Props) {
       )}
     </div>
   );
+}
+
+function changeRgba(result: ForestResult): Uint8ClampedArray {
+  const rgba = new Uint8ClampedArray(result.width * result.height * 4);
+  for (let i = 0; i < result.classes.length; i++) {
+    const c = CHANGE_CLASSES.find(x => x.id === result.classes[i]);
+    if (!c) continue;
+    rgba.set([...c.color, 255], i * 4);
+  }
+  return rgba;
 }
 
 export function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {

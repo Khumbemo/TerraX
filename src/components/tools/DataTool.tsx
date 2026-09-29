@@ -1,4 +1,7 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { viridis } from '../../lib/colormap';
+import { mapImage } from '../../lib/overlay';
+import { gridToRgba } from '../../lib/tools/terrain';
 import { checkSize, isGeoTiff, parseTableFile } from '../../lib/parseFile';
 import { readRaster } from '../../lib/raster';
 import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
@@ -7,6 +10,7 @@ import { fetchSample } from '../../lib/samples';
 import { useToast } from '../../lib/toast';
 import type { ToolId, ToolOutput } from '../../lib/tools/registry';
 import type { Dataset, RasterMode } from '../../lib/types';
+import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 
 const CoreAnalysisDashboard = lazy(() => import('../CoreAnalysisDashboard'));
@@ -15,6 +19,7 @@ const RasterPanel = lazy(() => import('../RasterPanel'));
 interface Props {
   variant: Extract<ToolId, 'weather' | 'satellite'>;
   onOutput: (out: ToolOutput | null) => void;
+  boundary: Boundary | null;
 }
 
 const VARIANTS = {
@@ -45,7 +50,19 @@ const VARIANTS = {
   },
 };
 
-export default function DataTool({ variant, onOutput }: Props) {
+function rasterImage(ds: Extract<Dataset, { kind: 'raster' }>) {
+  if (!ds.stats) return null;
+  const { min, max } = ds.stats;
+  const rgba = gridToRgba(ds.preview.data, v => viridis((v - min) / (max - min || 1)));
+  const fmtV = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toPrecision(3));
+  return mapImage(rgba, ds.preview.width, ds.preview.height, ds.latLngBounds, ds.view.mode === 'index' ? `${ds.view.index.toUpperCase()} layer` : `Band ${ds.view.band + 1}`, [
+    { color: 'rgb(68,1,84)', label: `Low (${fmtV(min)})` },
+    { color: 'rgb(33,145,140)', label: 'Middle' },
+    { color: 'rgb(253,231,37)', label: `High (${fmtV(max)})` },
+  ]);
+}
+
+export default function DataTool({ variant, onOutput, boundary }: Props) {
   const notify = useToast();
   const v = VARIANTS[variant];
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -59,7 +76,7 @@ export default function DataTool({ variant, onOutput }: Props) {
       checkSize(file);
       if (isGeoTiff(file)) {
         const r = await openGeoTiff(file);
-        const ds = await readRaster(file, { mode: 'band', band: 0 }, r);
+        const ds = await readRaster(file, { mode: 'band', band: 0 }, r, boundary);
         setRaster(r);
         setDataset(ds);
         setMetric(null);
@@ -81,7 +98,7 @@ export default function DataTool({ variant, onOutput }: Props) {
     if (!raster || !dataset) return;
     setBusy(true);
     try {
-      setDataset(await readRaster(new File([], dataset.filename), mode, raster));
+      setDataset(await readRaster(new File([], dataset.filename), mode, raster, boundary));
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not compute that layer.', 'error');
     } finally {
@@ -102,10 +119,19 @@ export default function DataTool({ variant, onOutput }: Props) {
       extraContext: buildAiContext(dataset, metric),
       dataset,
       focus: metric,
-      map: { bounds: dataset.kind === 'raster' ? dataset.latLngBounds : null },
+      map: dataset.kind === 'raster' ? { bounds: dataset.latLngBounds, image: rasterImage(dataset) } : { bounds: null },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataset, metric]);
+
+  // Re-read the current layer when the analysis boundary changes.
+  const lastBoundary = useRef(boundary);
+  useEffect(() => {
+    if (lastBoundary.current === boundary) return;
+    lastBoundary.current = boundary;
+    if (dataset?.kind === 'raster') changeView(dataset.view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundary]);
 
   const typeLabel = dataset
     ? dataset.kind === 'raster'

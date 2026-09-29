@@ -492,8 +492,106 @@ select {
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--line);
+  position: relative;
+}
+.map-layers {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: calc(100% - 70px);
+}
+.map-layers-toggle {
+  background: rgba(5, 10, 20, 0.88);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: 600 12px var(--sans);
+  cursor: pointer;
+}
+.map-layers-toggle:hover,
+.map-layers-toggle[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+.map-layers-panel {
+  background: rgba(5, 10, 20, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  width: 250px;
+  max-width: 100%;
+  max-height: 300px;
+  overflow: auto;
+}
+.map-layers-panel .field-hint {
+  margin: 4px 0 0;
+}
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.range-row input {
+  flex: 1;
+  min-width: 0;
+}
+.map-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.pixelated-overlay {
+  image-rendering: pixelated;
+}
+.leaflet-container.drawing {
+  cursor: crosshair;
+}
+.vertex-handle {
+  background: #f5b83d;
+  border: 2px solid #0b1520;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #f5b83d;
+}
+.boundary-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px dashed #f5b83d;
+  border-radius: var(--radius);
+  background: rgba(245, 184, 61, 0.08);
+  font-size: 13px;
+}
+.boundary-banner strong {
+  color: #f5b83d;
+}
+.draw-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #f5b83d;
+  border-radius: var(--radius);
+  background: rgba(245, 184, 61, 0.06);
 }
 @media (max-width: 600px) {
+  .map-layers-panel {
+    max-height: 200px;
+    width: 220px;
+  }
   .map-container {
     height: 280px;
   }
