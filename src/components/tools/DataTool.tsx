@@ -3,6 +3,7 @@ import { viridis } from '../../lib/colormap';
 import { mapImage } from '../../lib/overlay';
 import { gridToRgba } from '../../lib/tools/terrain';
 import { checkSize, isGeoTiff, parseTableFile } from '../../lib/parseFile';
+import { parseDelimited } from '../../lib/table';
 import { readRaster } from '../../lib/raster';
 import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
 import { buildAiContext, buildLocalReport, formatBytes } from '../../lib/report';
@@ -16,11 +17,14 @@ import FileDrop from '../FileDrop';
 const CoreAnalysisDashboard = lazy(() => import('../CoreAnalysisDashboard'));
 const RasterPanel = lazy(() => import('../RasterPanel'));
 const StackPanel = lazy(() => import('../StackPanel'));
+const LiveDataPanel = lazy(() => import('../LiveDataPanel'));
+const SentinelSearchPanel = lazy(() => import('../SentinelSearchPanel'));
 
 interface Props {
   variant: Extract<ToolId, 'weather' | 'satellite'>;
   onOutput: (out: ToolOutput | null) => void;
   boundary: Boundary | null;
+  target: { lat: number; lon: number; name: string };
 }
 
 const VARIANTS = {
@@ -32,6 +36,7 @@ const VARIANTS = {
     accept: '.csv,.tsv,.txt,.xlsx,.tif,.tiff',
     samples: [
       { file: 'precipitation_data.csv', label: 'Rainfall' },
+      { file: 'samples/monthly_climate_1990_2024_synthetic.csv', label: 'Monthly climate 1990–2024' },
       { file: 'temp_humidity_data.csv', label: 'Temperature & humidity' },
       { file: 'evapotranspiration_data.csv', label: 'Evapotranspiration' },
       { file: 'solar_radiation_data.csv', label: 'Solar radiation' },
@@ -63,7 +68,7 @@ function rasterImage(ds: Extract<Dataset, { kind: 'raster' }>) {
   ]);
 }
 
-export default function DataTool({ variant, onOutput, boundary }: Props) {
+export default function DataTool({ variant, onOutput, boundary, target }: Props) {
   const notify = useToast();
   const v = VARIANTS[variant];
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -90,6 +95,35 @@ export default function DataTool({ variant, onOutput, boundary }: Props) {
       notify(`Loaded ${file.name}.`, 'success');
     } catch (err) {
       notify(err instanceof Error ? err.message : `Could not read ${file.name}.`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const loadTable = (csv: string, filename: string, note: string) => {
+    try {
+      const ds = parseDelimited(csv, filename, csv.length);
+      ds.warnings.unshift(`Source: ${note}`);
+      setRaster(null);
+      setDataset(ds);
+      setMetric(ds.defaultMetric);
+      notify(`Loaded ${ds.rows.length.toLocaleString()} days of data.`, 'success');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not read the downloaded data.', 'error');
+    }
+  };
+
+  const loadLiveRaster = async (r: OpenRaster, notes: string[]) => {
+    setBusy(true);
+    try {
+      const ds = await readRaster(new File([], r.meta.filename), { mode: 'index', index: 'ndvi', bands: { blue: 0, green: 1, red: 2, nir: 3 }, qa: { band: 4, kind: 'scl' } }, r, boundary);
+      ds.hints.unshift(...notes);
+      setRaster(r);
+      setDataset(ds);
+      setMetric(null);
+      notify(`Loaded ${r.meta.filename}.`, 'success');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not read the scene.', 'error');
     } finally {
       setBusy(false);
     }
@@ -212,7 +246,13 @@ export default function DataTool({ variant, onOutput, boundary }: Props) {
       )}
       {variant === 'satellite' && (
         <Suspense fallback={<div className="loading-block">Loading…</div>}>
+          <SentinelSearchPanel target={target} boundary={boundary} onRaster={loadLiveRaster} />
           <StackPanel onOutput={onOutput} boundary={boundary} />
+        </Suspense>
+      )}
+      {variant === 'weather' && (
+        <Suspense fallback={<div className="loading-block">Loading…</div>}>
+          <LiveDataPanel target={target} onTable={loadTable} />
         </Suspense>
       )}
     </div>

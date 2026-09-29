@@ -118,7 +118,7 @@ export function missingBands(id: SpectralIndex, map: BandMap): BandRole[] {
  */
 export function guessBandMap(bands: number): BandMap {
   if (bands === 2) return { red: 0, nir: 1 }; // e.g. Sentinel-2 B4, B8 (TerraX GEE manual)
-  if (bands === 4) return { blue: 0, green: 1, red: 2, nir: 3 }; // B2, B3, B4, B8
+  if (bands === 4 || bands === 5) return { blue: 0, green: 1, red: 2, nir: 3 }; // B2, B3, B4, B8 (+ a quality band)
   if (bands >= 6) return { blue: 0, green: 1, red: 2, nir: 3, swir1: 4, swir2: 5 }; // B2, B3, B4, B8, B11, B12
   if (bands === 3) return { red: 0, green: 1, blue: 2 };
   return {};

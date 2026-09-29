@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { analyzeMetric, numericColumns } from '../lib/analysis';
-import { decimalYear, formatDate } from '../lib/dates';
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { SPI_SCALES, analyzeMetric, numericColumns } from '../lib/analysis';
+import { spiClass } from '../lib/climate-stats';
+import { MONTHS, decimalYear, formatDate } from '../lib/dates';
 import { fmt, fmtP, quantileSorted, sampleIndices } from '../lib/stats';
 import type { TableDataset } from '../lib/types';
 
@@ -11,7 +12,7 @@ interface Props {
   onMetricChange: (column: string) => void;
 }
 
-type Tab = 'series' | 'season' | 'classes' | 'table';
+type Tab = 'series' | 'season' | 'anomalies' | 'spi' | 'classes' | 'table';
 const PAGE_SIZE = 50;
 const MAX_CHART_POINTS = 1500;
 const AXIS = { stroke: '#4a6580', fontSize: 11, fontFamily: 'Space Mono, monospace' };
@@ -35,6 +36,7 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
   const [tab, setTab] = useState<Tab>('series');
   const [page, setPage] = useState(0);
   const [showTrend, setShowTrend] = useState(true);
+  const [spiScale, setSpiScale] = useState(3);
   const columns = numericColumns(dataset);
   const analysis = useMemo(() => analyzeMetric(dataset, metric), [dataset, metric]);
   const hasTime = Boolean(dataset.times);
@@ -68,6 +70,8 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'series', label: hasTime ? 'Time series' : 'Series', show: true },
     { id: 'season', label: 'Seasonal cycle', show: Boolean(analysis.monthly) },
+    { id: 'anomalies', label: 'Anomalies', show: Boolean(analysis.climate?.anomalies.length) },
+    { id: 'spi', label: 'Drought (SPI)', show: Boolean(analysis.climate?.spi || analysis.climate?.spiNote) },
     { id: 'classes', label: 'Classes', show: true },
     { id: 'table', label: 'Values', show: true },
   ];
@@ -194,6 +198,90 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
               </BarChart>
             </ResponsiveContainer>
             <div className="chart-foot">Mean of all values in each calendar month.</div>
+          </>
+        )}
+
+        {tab === 'anomalies' && analysis.climate && (
+          <>
+            {analysis.climate.seasonalKendall && (
+              <p className="field-hint" id="seasonal-kendall">
+                Seasonal Kendall ({analysis.climate.seasonalKendall.seasons} months, n = {analysis.climate.seasonalKendall.n}):{' '}
+                <strong>{analysis.climate.seasonalKendall.direction === 'no trend' ? 'no significant trend' : `${analysis.climate.seasonalKendall.direction} trend`}</strong>, slope{' '}
+                {fmt(analysis.climate.seasonalKendall.slope)}/yr, p {fmtP(analysis.climate.seasonalKendall.p)}. It compares each month with the same month in other years, so the
+                seasonal cycle is not mistaken for a trend.
+              </p>
+            )}
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={analysis.climate.anomalies.map(a => ({ label: `${MONTHS[a.month]} ${a.year}`, anomaly: a.anomaly }))} margin={{ top: 10, right: 16, bottom: 4, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#16283c" />
+                <XAxis dataKey="label" {...AXIS} minTickGap={40} />
+                <YAxis {...AXIS} width={56} tickFormatter={v => fmt(v, 3)} />
+                <ReferenceLine y={0} stroke="#4a6580" />
+                <Tooltip content={<ChartTooltip time={false} />} />
+                <Bar dataKey="anomaly" name="Anomaly" isAnimationActive={false}>
+                  {analysis.climate.anomalies.map((a, i) => (
+                    <Cell key={i} fill={a.anomaly >= 0 ? '#38bdf8' : '#f59e0b'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="chart-foot">Monthly mean minus the mean of the same calendar month over the whole record.</div>
+          </>
+        )}
+
+        {tab === 'spi' && analysis.climate && (
+          <>
+            {analysis.climate.spi ? (
+              <>
+                <div className="param-row">
+                  <label className="inline-select">
+                    <span>Time scale</span>
+                    <select id="spi-scale" value={spiScale} onChange={e => setSpiScale(Number(e.target.value))}>
+                      {SPI_SCALES.map(k => (
+                        <option key={k} value={k}>
+                          SPI-{k} ({k} month{k === 1 ? '' : 's'})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {(() => {
+                  const r = analysis.climate!.spi!.find(x => x.scale === spiScale)!;
+                  const rows = r.rows.filter(x => x.spi !== null);
+                  const last = rows[rows.length - 1];
+                  return (
+                    <>
+                      <ResponsiveContainer width="100%" height={280}>
+                        <BarChart data={rows.map(x => ({ label: `${MONTHS[x.month]} ${x.year}`, spi: x.spi }))} margin={{ top: 10, right: 16, bottom: 4, left: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#16283c" />
+                          <XAxis dataKey="label" {...AXIS} minTickGap={40} />
+                          <YAxis {...AXIS} width={40} domain={[-3, 3]} />
+                          <ReferenceLine y={-1} stroke="#f59e0b" strokeDasharray="4 4" />
+                          <ReferenceLine y={1} stroke="#38bdf8" strokeDasharray="4 4" />
+                          <Tooltip content={<ChartTooltip time={false} />} />
+                          <Bar dataKey="spi" name={`SPI-${spiScale}`} isAnimationActive={false}>
+                            {rows.map((x, i) => (
+                              <Cell key={i} fill={x.spi! < 0 ? '#f59e0b' : '#38bdf8'} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                      <p className="field-hint" id="spi-latest">
+                        Latest: SPI-{spiScale} = {last ? `${fmt(last.spi!, 2)} in ${MONTHS[last.month]} ${last.year} (${spiClass(last.spi!)})` : '—'}. {rows.filter(x => x.spi! <= -1).length} of {rows.length} months were moderately dry or
+                        worse (≤ −1).
+                      </p>
+                      <ul className="hint-list">
+                        {r.notes.map(n => (
+                          <li key={n}>{n}</li>
+                        ))}
+                      </ul>
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              <p className="notice">{analysis.climate.spiNote}</p>
+            )}
           </>
         )}
 

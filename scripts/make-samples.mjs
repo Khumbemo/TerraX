@@ -159,6 +159,28 @@ const plot = {
 writeFileSync(new URL('survey_plot_synthetic.geojson', OUT), JSON.stringify(plot, null, 2));
 console.log('wrote survey_plot_synthetic.geojson');
 
+// ── Climate: 35 years of monthly rainfall and temperature (1990–2024) ──
+{
+  const r = rng(1990);
+  // Monsoon climatology loosely shaped like north-east India (mm per month).
+  const rainMean = [15, 30, 70, 150, 250, 380, 420, 350, 260, 130, 30, 12];
+  const tMean = [13.5, 15.5, 19, 21.5, 23, 24.5, 25, 25, 24, 21.5, 18, 14.5];
+  const rows = ['date,precipitation_mm,temperature_c'];
+  for (let y = 1990; y <= 2024; y++) {
+    // A weak monsoon in some years (drought-like), independent of the warming trend.
+    const monsoonFactor = [2002, 2005, 2009, 2014, 2023].includes(y) ? 0.6 : 1;
+    for (let m = 0; m < 12; m++) {
+      const mean = rainMean[m] * (m >= 5 && m <= 8 ? monsoonFactor : 1);
+      // Gamma(shape 2) totals: sum of two exponentials with mean/2 each.
+      const rain = -(mean / 2) * (Math.log(1 - r()) + Math.log(1 - r()));
+      const temp = tMean[m] + 0.025 * (y - 1990) + (r() - 0.5) * 1.6;
+      rows.push(`${y}-${String(m + 1).padStart(2, '0')}-15,${rain.toFixed(1)},${temp.toFixed(2)}`);
+    }
+  }
+  writeFileSync(new URL('monthly_climate_1990_2024_synthetic.csv', OUT), rows.join('\n') + '\n');
+  console.log('wrote monthly_climate_1990_2024_synthetic.csv');
+}
+
 // ── Photo: a synthetic aerial RGB image (PNG) with forest, fields and a river ──
 function png(w, h, rgb) {
   const crcTable = Array.from({ length: 256 }, (_, n) => {

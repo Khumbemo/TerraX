@@ -2,7 +2,8 @@
 // report comes from these calculations; an AI interpretation, when present,
 // is added as a separate, clearly labelled section.
 import { analyzeMetric, numericColumns, type MetricAnalysis } from './analysis';
-import { formatDate } from './dates';
+import { spiClass, type Anomaly } from './climate-stats';
+import { MONTHS, formatDate } from './dates';
 import { indexDef } from './indices';
 import { rainfallMarkdown, rainfallSummary } from './tools/climate';
 import { fmt, fmtP } from './stats';
@@ -37,6 +38,38 @@ function trendSentence(a: MetricAnalysis): string {
   return a.trendCaveat ? `${sentence} **Caution:** ${a.trendCaveat}` : sentence;
 }
 
+function climateMarkdown(a: MetricAnalysis): string {
+  const c = a.climate!;
+  const out: string[] = [];
+  const sk = c.seasonalKendall;
+  if (sk) {
+    out.push(
+      `Seasonal Kendall test on ${sk.n} monthly values (${sk.seasons} calendar months; Hirsch et al. 1982): ${sk.direction === 'no trend' ? 'no significant trend' : `${sk.direction} trend`}, seasonal Theil–Sen slope ${fmt(sk.slope)} per year, ${fmtP(sk.p).startsWith('<') ? `p ${fmtP(sk.p)}` : `p = ${fmtP(sk.p)}`}. Unlike the plain Mann–Kendall test, it compares each month only with the same month in other years, so the seasonal cycle cannot pose as a trend. Serial correlation between months is not corrected for.`,
+    );
+  }
+  const withZ = c.anomalies.filter(x => x.z !== null);
+  if (withZ.length) {
+    const hi = withZ.reduce((x, y) => (y.z! > x.z! ? y : x));
+    const lo = withZ.reduce((x, y) => (y.z! < x.z! ? y : x));
+    const years = new Set(c.monthly.map(m => m.year)).size;
+    const name = (x: Anomaly) => `${MONTHS[x.month]} ${x.year}`;
+    out.push(
+      '',
+      `Monthly anomalies against this record’s own ${years}-year monthly means: largest positive ${name(hi)} (${fmt(hi.anomaly)}, ${fmt(hi.z!, 2)} SD), largest negative ${name(lo)} (${fmt(lo.anomaly)}, ${fmt(lo.z!, 2)} SD).${years < 30 ? ' The WMO climate normal period is 30 years; a shorter baseline makes anomalies less stable.' : ''}`,
+    );
+  }
+  if (c.spi) {
+    out.push('', '| SPI scale | Latest value | Months ≤ −1 (moderately dry or worse) | Months ≤ −2 |', '|---|---|---|---|');
+    for (const r of c.spi) {
+      const vals = r.rows.filter(x => x.spi !== null);
+      const last = vals[vals.length - 1];
+      out.push(`| SPI-${r.scale} | ${last ? `${fmt(last.spi!, 2)} (${MONTHS[last.month]} ${last.year}, ${spiClass(last.spi!)})` : '—'} | ${vals.filter(x => x.spi! <= -1).length} | ${vals.filter(x => x.spi! <= -2).length} |`);
+    }
+    out.push('', ...c.spi[0].notes.slice(1).map(n => `- ${n}`), `- SPI method: ${c.spi[0].notes[0].replace(/^SPI-1: /, '')}`);
+  } else if (c.spiNote) out.push('', c.spiNote);
+  return out.join('\n');
+}
+
 function metricSection(ds: TableDataset, a: MetricAnalysis): string {
   const s = a.summary;
   if (!s) return `### ${a.column}\n\nNo numeric values.\n`;
@@ -61,6 +94,7 @@ function metricSection(ds: TableDataset, a: MetricAnalysis): string {
     const lo = valid.reduce((x, y) => (y.mean < x.mean ? y : x));
     lines.push(`Seasonal cycle: highest mean in ${hi.label} (${fmt(hi.mean)}), lowest in ${lo.label} (${fmt(lo.mean)}).`, '');
   }
+  if (a.climate) lines.push(climateMarkdown(a), '');
   const total = a.classCounts.reduce((x, y) => x + y, 0);
   if (total) {
     lines.push(`Class distribution (${a.classification.basis.replace(/\.$/, '')}):`, '');

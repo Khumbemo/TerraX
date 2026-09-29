@@ -63,6 +63,11 @@ test('questions route to the right topic, typos included', () => {
     ['what is a minimum mapping unit', 'mmu'],
     ['what is ndvi', 'ndvi'],
     ['burn severity', 'nbr'],
+    ['can I download rainfall data from era5', 'livedata'],
+    ['find sentinel scenes for my area', 'livedata'],
+    ['what does spi mean for drought', 'spi'],
+    ['explain the seasonal kendall test', 'seasonalkendall'],
+    ['monthly anomalies', 'seasonalkendall'],
   ];
   for (const [q, id] of cases) assert.equal(new OfflineAssistant('guide').reply(q, ctx).topic, id, q);
 });

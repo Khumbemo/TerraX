@@ -126,6 +126,36 @@ export const TOPICS: Topic[] = [
     suggestions: ['How do I estimate forest loss?', 'burn severity'],
   },
   {
+    id: 'livedata',
+    title: 'Fetch weather or Sentinel-2 data',
+    keywords: { download: 2, fetch: 3, online: 2, internet: 2, 'open meteo': 5, openmeteo: 5, era5: 5, 'nasa power': 5, power: 1, stac: 4, 'earth search': 5, scene: 2, scenes: 2 },
+    phrases: [/(fetch|download|get|find|search).{0,30}(weather|rain|climate|data|scenes?|images?|sentinel)/, /open-?meteo|era5|nasa power|earth search|stac/, /without (a )?file/],
+    phraseBoost: 5,
+    answer:
+      'You can fetch data instead of uploading files (needs internet):\n\n- **Weather & climate → Fetch data for a location**: daily rainfall, temperature, humidity, ET₀ or radiation from **Open-Meteo** (ERA5 reanalysis, 1940 onward) or **NASA POWER** (1981 onward) for any latitude/longitude.\n- **Satellite imagery → Search Sentinel-2 scenes**: finds Level-2A scenes over your analysis boundary (or a square around the target) and loads just that window (B2, B3, B4, B8 and the SCL cloud mask) as NDVI.\n\nThese are gridded model or satellite products, not station measurements.',
+    suggestions: ['What is SPI?', 'How do I mask clouds?'],
+  },
+  {
+    id: 'spi',
+    title: 'Standardized Precipitation Index',
+    keywords: { spi: 5, drought: 4, 'standardized precipitation': 5, dry: 1, wet: 1 },
+    phrases: [/\bspi\b/, /drought/, /standardi[sz]ed precipitation/],
+    phraseBoost: 5,
+    answer:
+      'The **SPI** (McKee et al. 1993) expresses rainfall over 1, 3, 6 or 12 months as a standard normal value: 0 is the median for that time of year, −1 to −1.5 moderately dry, −1.5 to −2 severely dry, ≤ −2 extremely dry (and the same bands positive for wet).\n\nIn **Weather & climate**, a precipitation series of at least 10 years at monthly or daily spacing shows a **Drought (SPI)** tab. TerraX fits a gamma distribution for each calendar month; WMO guidance asks for 30+ years, so shorter records are marked indicative.',
+    suggestions: ['What is the seasonal Kendall test?', 'Fetch weather data'],
+  },
+  {
+    id: 'seasonalkendall',
+    title: 'Seasonal Kendall test and anomalies',
+    keywords: { 'seasonal kendall': 6, anomaly: 4, anomalies: 4, seasonal: 2, climatology: 3, deseasonalise: 3 },
+    phrases: [/seasonal kendall/, /anomal/, /climatolog/],
+    phraseBoost: 5,
+    answer:
+      'The **Seasonal Kendall test** (Hirsch et al. 1982) checks for a trend by comparing each month only with the same month in other years, so a strong seasonal cycle cannot pose as a trend. TerraX reports it with a seasonal Theil–Sen slope under **Anomalies** for series spanning two or more years.\n\n**Anomalies** are each month’s mean minus the mean of that calendar month over the record. The WMO climate normal is 30 years, so short baselines give less stable anomalies.',
+    suggestions: ['What does the mann kendall p value mean', 'What is SPI?'],
+  },
+  {
     id: 'survey',
     title: 'Measure a plot (Land survey)',
     keywords: { survey: 3, area: 2, measure: 2, perimeter: 2, coordinates: 1, bearing: 2, distance: 1, boundary: 2, hectare: 1, acre: 1 },
