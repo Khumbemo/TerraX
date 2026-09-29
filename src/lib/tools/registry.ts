@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import type { LatLngBounds } from '../geo';
 import type { Dataset } from '../types';
 
-export type ToolId = 'forest' | 'carbon' | 'survey' | 'weather' | 'satellite' | 'landcover' | 'terrain' | 'photo';
+export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'terrain' | 'photo';
 
 export interface ToolInfo {
   id: ToolId;
@@ -43,6 +43,15 @@ export const TOOLS: ToolInfo[] = [
     measures: ['Area (m², ha, acres) and perimeter', 'Leg distances and bearings', 'UTM and DMS coordinates'],
     formats: 'GeoJSON · KML · GPX · CSV (lat/lon) · zipped Shapefile',
     mark: 'Ls',
+  },
+  {
+    id: 'residential',
+    name: 'Residential plot',
+    group: 'Property',
+    summary: 'Compare past and current images of your plot to spot encroachment and neighbouring expansion.',
+    measures: ['Past vs current swipe view on your boundary', 'Changes crossing the boundary: area and depth', 'Year-by-year timeline and GeoJSON export'],
+    formats: 'GeoTIFF images + boundary · or same-view JPG/PNG',
+    mark: 'Rp',
   },
   {
     id: 'weather',

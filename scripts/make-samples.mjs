@@ -181,6 +181,82 @@ console.log('wrote survey_plot_synthetic.geojson');
   console.log('wrote monthly_climate_1990_2024_synthetic.csv');
 }
 
+// ── Residential plot: three dated 0.5 m RGB images (2019, 2021, 2024) and the plot boundary ──
+{
+  const RE = 608000, RN = 2842500, RES_R = 0.5, SZ = 200; // 100 m × 100 m, UTM 46N
+  const pip = (poly, x, y) => {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  const segDist = (x, y, [ax, ay], [bx, by]) => {
+    const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)));
+    return Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay));
+  };
+  // Plot corners (easting, northing): about 32 m × 40 m, slightly rotated.
+  const plot = [[RE + 30, RN - 30], [RE + 62, RN - 26], [RE + 58, RN - 66], [RE + 26, RN - 70]];
+  const house = [[RE + 34, RN - 36], [RE + 48, RN - 34], [RE + 46, RN - 50], [RE + 32, RN - 52]];
+  const neighbourHouse = [[RE + 70, RN - 34], [RE + 86, RN - 32], [RE + 84, RN - 50], [RE + 68, RN - 52]];
+  const trees = [[RE + 40, RN - 60, 3], [RE + 52, RN - 58, 2.5], [RE + 15, RN - 20, 4], [RE + 90, RN - 75, 5], [RE + 20, RN - 85, 3.5]];
+  const east = t => [plot[1][0] + (plot[2][0] - plot[1][0]) * t, plot[1][1] + (plot[2][1] - plot[1][1]) * t]; // point on the east edge
+  // Neighbour's shed/extension: from x = 68 westwards, reaching `depth` m across the east boundary, between 45 % and 70 % down the edge.
+  const extension = depth => {
+    const a = east(0.45), b = east(0.7);
+    return [[RE + 70, a[1] + 0.4], [a[0] - depth, a[1] - 0.4], [b[0] - depth, b[1] - 0.4], [RE + 70, b[1] + 0.4]];
+  };
+  const carport = [[RE + 36, RN - 54], [RE + 44, RN - 53], [RE + 43.5, RN - 60], [RE + 35.5, RN - 61]];
+  const scenes = [
+    { year: 2019, date: '2019-02-10', ext: 0, carport: false, gain: 1, tint: [0, 0, 0], shift: 0, seed: 71 },
+    { year: 2021, date: '2021-02-14', ext: 2.5, carport: false, gain: 1.04, tint: [4, 2, -3], shift: 0, seed: 72 },
+    { year: 2024, date: '2024-02-08', ext: 5, carport: true, gain: 1.12, tint: [8, 4, -6], shift: 0.5, seed: 73 },
+  ];
+  for (const sc of scenes) {
+    const r = rng(sc.seed);
+    const tex = noiseField(SZ, SZ, 6, 80); // same ground texture every year
+    const data = new Uint8Array(SZ * SZ * 3);
+    for (let row = 0; row < SZ; row++)
+      for (let col = 0; col < SZ; col++) {
+        const e = RE + (col + 0.5) * RES_R - sc.shift, n = RN - (row + 0.5) * RES_R; // shift mimics misregistration
+        const t = tex[row * SZ + col];
+        let c = [86 + 30 * t, 118 + 30 * t, 62 + 20 * t]; // grass
+        if (n < RN - 92) c = [96, 94, 92]; // road along the south
+        if (pip(plot, e, n)) c = [96 + 24 * t, 132 + 26 * t, 70 + 18 * t]; // owner's lawn
+        if (pip(house, e, n)) c = [148, 70, 60]; // red roof
+        if (pip(neighbourHouse, e, n)) c = [120, 128, 140]; // grey roof
+        for (const [te, tn, rad] of trees) if (Math.hypot(e - te, n - tn) < rad) c = [40 + 20 * t, 72 + 20 * t, 38 + 10 * t];
+        if (sc.ext && pip(extension(sc.ext), e, n)) c = [176, 172, 166]; // new concrete/tin roof
+        if (sc.carport && pip(carport, e, n)) c = [70, 90, 120]; // owner's blue carport
+        // Fence along the plot boundary (thin brown line).
+        for (let i = 0; i < 4; i++) if (segDist(e, n, plot[i], plot[(i + 1) % 4]) < 0.3) c = [120, 96, 70];
+        for (let b = 0; b < 3; b++) data[(row * SZ + col) * 3 + b] = Math.max(0, Math.min(255, Math.round(c[b] * sc.gain + sc.tint[b] + (r() - 0.5) * 10)));
+      }
+    const buf = await writeArrayBuffer(data, {
+      width: SZ, height: SZ, SamplesPerPixel: 3, BitsPerSample: [8, 8, 8], SampleFormat: [1, 1, 1], PlanarConfiguration: 1, PhotometricInterpretation: 2,
+      ModelPixelScale: [RES_R, RES_R, 0], ModelTiepoint: [0, 0, 0, RE, RN, 0], GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32646,
+    });
+    writeFileSync(new URL(`plot_${sc.date}_synthetic.tif`, OUT), Buffer.from(buf));
+  }
+  // Boundary as WGS84 GeoJSON (inverse UTM, same formulas as TerraX).
+  const k0 = 0.9996, a = 6378137, f = 1 / 298.257223563, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  const toLL = (E, N) => {
+    const lon0 = (46 * 6 - 183) * (Math.PI / 180);
+    const M = N / k0, mu = M / (a * (1 - e2 / 4 - (3 * e2 * e2) / 64 - (5 * e2 ** 3) / 256));
+    const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+    const phi1 = mu + ((3 * e1) / 2 - (27 * e1 ** 3) / 32) * Math.sin(2 * mu) + ((21 * e1 * e1) / 16 - (55 * e1 ** 4) / 32) * Math.sin(4 * mu) + ((151 * e1 ** 3) / 96) * Math.sin(6 * mu) + ((1097 * e1 ** 4) / 512) * Math.sin(8 * mu);
+    const N1 = a / Math.sqrt(1 - e2 * Math.sin(phi1) ** 2), T1 = Math.tan(phi1) ** 2, C1 = ep2 * Math.cos(phi1) ** 2;
+    const R1 = (a * (1 - e2)) / (1 - e2 * Math.sin(phi1) ** 2) ** 1.5, D = (E - 500000) / (N1 * k0);
+    const lat = phi1 - ((N1 * Math.tan(phi1)) / R1) * ((D * D) / 2 - ((5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4) / 24 + ((61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D ** 6) / 720);
+    const lon = lon0 + (D - ((1 + 2 * T1 + C1) * D ** 3) / 6 + ((5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5) / 120) / Math.cos(phi1);
+    return [Number(((lon * 180) / Math.PI).toFixed(7)), Number(((lat * 180) / Math.PI).toFixed(7))];
+  };
+  const ring = [...plot, plot[0]].map(([E, N]) => toLL(E, N));
+  writeFileSync(new URL('plot_boundary_synthetic.geojson', OUT), JSON.stringify({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Sample residential plot (fictional)' }, geometry: { type: 'Polygon', coordinates: [ring] } }] }, null, 2));
+  console.log('wrote plot_*_synthetic.tif and plot_boundary_synthetic.geojson');
+}
+
 // ── Photo: a synthetic aerial RGB image (PNG) with forest, fields and a river ──
 function png(w, h, rgb) {
   const crcTable = Array.from({ length: 256 }, (_, n) => {

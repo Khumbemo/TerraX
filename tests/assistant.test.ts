@@ -68,6 +68,10 @@ test('questions route to the right topic, typos included', () => {
     ['what does spi mean for drought', 'spi'],
     ['explain the seasonal kendall test', 'seasonalkendall'],
     ['monthly anomalies', 'seasonalkendall'],
+    ['my neighbour built on my land', 'encroachment'],
+    ['how to detect encroachment on my plot', 'encroachment'],
+    ['illegal construction next to my property', 'encroachment'],
+    ['measure my plot', 'survey'],
   ];
   for (const [q, id] of cases) assert.equal(new OfflineAssistant('guide').reply(q, ctx).topic, id, q);
 });

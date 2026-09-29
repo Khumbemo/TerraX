@@ -29,6 +29,7 @@ import type { Boundary } from './lib/zonal';
 
 // Tools and rarely needed views load on demand to keep the first load small.
 const ForestLossTool = lazy(() => import('./components/tools/ForestLossTool'));
+const ResidentialPlotTool = lazy(() => import('./components/tools/ResidentialPlotTool'));
 const CarbonTool = lazy(() => import('./components/tools/CarbonTool'));
 const SurveyTool = lazy(() => import('./components/tools/SurveyTool'));
 const DataTool = lazy(() => import('./components/tools/DataTool'));
@@ -401,6 +402,7 @@ export default function App() {
                     <Suspense fallback={<Loading />}>
                       {tool === 'forest' && <ForestLossTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'carbon' && <CarbonTool onOutput={setOutput} />}
+                      {tool === 'residential' && <ResidentialPlotTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'survey' && <SurveyTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} drawPoints={drawPts} onDraw={setDrawPts} />}
                       {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} boundary={boundary} target={target} />}
                       {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}

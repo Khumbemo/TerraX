@@ -4,7 +4,7 @@ import { backToTools, chat, openTool, shapefileZip, start } from './helpers';
 test('tool hub lists every tool', async ({ page }) => {
   const errors = await start(page);
   await expect(page.locator('.tool-card')).toHaveCount(await page.locator('.tool-card').count());
-  for (const name of ['Forest loss', 'Carbon & biomass', 'Land survey', 'Weather & climate', 'Satellite imagery', 'Land cover', 'Terrain', 'Space & aerial photos']) {
+  for (const name of ['Forest loss', 'Carbon & biomass', 'Land survey', 'Residential plot', 'Weather & climate', 'Satellite imagery', 'Land cover', 'Terrain', 'Space & aerial photos']) {
     await expect(page.locator('.tool-card', { hasText: name })).toBeVisible();
   }
   expect(errors).toEqual([]);

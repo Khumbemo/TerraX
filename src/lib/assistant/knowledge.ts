@@ -156,6 +156,18 @@ export const TOPICS: Topic[] = [
     suggestions: ['What does the mann kendall p value mean', 'What is SPI?'],
   },
   {
+    id: 'encroachment',
+    title: 'Residential plot and encroachment',
+    keywords: { encroachment: 6, encroach: 5, encroached: 5, neighbour: 3, neighbor: 3, trespass: 4, 'illegal construction': 5, 'boundary dispute': 5, property: 2, plot: 1, expansion: 2, 'my land': 3 },
+    phrases: [/encroach/, /neighbou?r.{0,30}(built|build|extend|expan|mov|took|taking|land|field|wall|fence)/, /(illegal|unauthori[sz]ed) (entry|construction|occupation)/, /boundary dispute/, /(someone|neighbou?r).{0,20}(my|our) (land|plot|property)/],
+    phraseBoost: 6,
+    answer:
+      '**Residential plot** (Tools → Residential plot) compares images of your property from different years:\n\n1. Load your **plot boundary** (from a survey file, or draw it in Land survey and use it as the analysis boundary).\n2. Upload **GeoTIFF images** from different years (or same-view **JPG/PNG** screenshots, then trace the plot on the latest one).\n3. **Compare images**: swipe between past and present, and see changes coloured by where they are. Pink patches **cross your boundary line**, the typical sign of a neighbouring structure, wall or field extended onto your land. TerraX gives their area inside your plot and how deep they reach.\n\nTry **Try synthetic plot** first.',
+    more:
+      'How to read it responsibly:\n\n- It shows **change**, not ownership. Use the boundary from your registered survey or land record.\n- Images are often misaligned by 1–5 m; thin strips along the line are reported separately as likely misalignment.\n- Shadows, vehicles, seasons and tall roofs viewed at an angle also cause change. Check each patch on the images.\n- For a dispute, a licensed surveyor’s demarcation on the ground is what counts; the TerraX PDF report can support that conversation.',
+    suggestions: ['How do I measure a plot?', 'Can I draw a polygon on the map', 'How do I mask clouds?'],
+  },
+  {
     id: 'survey',
     title: 'Measure a plot (Land survey)',
     keywords: { survey: 3, area: 2, measure: 2, perimeter: 2, coordinates: 1, bearing: 2, distance: 1, boundary: 2, hectare: 1, acre: 1 },
