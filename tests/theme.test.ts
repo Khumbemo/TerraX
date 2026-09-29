@@ -25,7 +25,8 @@ test('text colours meet WCAG AA contrast in both themes', () => {
   assert.ok(Math.abs(contrast('#000000', '#ffffff') - 21) < 1e-9);
   const dark = tokens(':root');
   const light = { ...dark, ...tokens(":root[data-theme='light']") };
-  for (const [name, t] of [['dark', dark], ['light', light]] as const) {
+  const galaxy = { ...dark, ...tokens(":root[data-theme='galaxy']") };
+  for (const [name, t] of [['dark', dark], ['light', light], ['galaxy', galaxy]] as const) {
     for (const bg of ['bg', 'panel', 'panel-2']) {
       for (const fg of ['text', 'muted', 'dim', 'accent']) {
         const c = contrast(t[fg], t[bg]);

@@ -38,6 +38,7 @@ const PhotoTool = lazy(() => import('./components/tools/PhotoTool'));
 const ReportsView = lazy(() => import('./components/ReportsView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
 const Tour = lazy(() => import('./components/Tour'));
+import SpaceBackground from './components/SpaceBackground';
 
 const AI_MODE_TEXT: Record<AiMode, string> = {
   'own-key': 'AI on: using your API key from this browser',
@@ -259,13 +260,19 @@ export default function App() {
     }
   };
 
-  if (!session) return <SessionGate onStart={startSession} />;
+  if (!session)
+    return (
+      <>
+        <SpaceBackground target={target} />
+        <SessionGate onStart={startSession} />
+      </>
+    );
 
   const info = tool ? toolInfo(tool) : null;
 
   return (
     <div className="terrax-app">
-      <div className="earth-background" aria-hidden="true" />
+      <SpaceBackground target={target} />
       <header className="top-navbar">
         <div className="brand">TERRAX</div>
         <nav className="nav-links" aria-label="Main">

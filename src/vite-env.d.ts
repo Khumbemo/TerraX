@@ -20,3 +20,8 @@ declare module 'shpjs' {
   type Out = FeatureCollection & { fileName?: string };
   export default function shp(input: ArrayBuffer | string): Promise<Out | Out[]>;
 }
+
+declare module 'world-atlas/land-50m.json' {
+  const topology: import('topojson-specification').Topology;
+  export default topology;
+}

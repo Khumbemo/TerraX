@@ -115,3 +115,33 @@ test('installed app works offline after one visit', async ({ page, context }) =>
   await context.setOffline(false);
   expect(errors).toEqual([]);
 });
+
+test('space background: Earth by default, galaxy, off, and the galaxy theme', async ({ page }) => {
+  const errors = await start(page);
+  await expect(page.locator('.space-background.bg-earth canvas.space-canvas')).toBeAttached();
+  await expect(page.locator('html')).toHaveAttribute('data-bg', 'on');
+  // The Earth canvas is actually drawn (not blank): sample its pixels.
+  await expect.poll(async () => page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('.space-canvas')!;
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    let bright = 0;
+    for (let i = 0; i < d.length; i += 400) if (d[i + 2] > 60) bright++;
+    return bright;
+  }), { timeout: 15_000 }).toBeGreaterThan(100);
+  await page.click('#nav-settings');
+  await page.selectOption('#pref-background', 'galaxy');
+  await expect(page.locator('.space-background.bg-galaxy canvas')).toBeAttached();
+  await page.selectOption('#pref-theme', 'galaxy');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'galaxy');
+  await page.selectOption('#pref-background', 'custom');
+  await expect(page.locator('label[for="pref-bg-file"]')).toBeVisible();
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  await page.setInputFiles('#pref-bg-file', { name: 'mine.png', mimeType: 'image/png', buffer: png });
+  await expect(page.locator('.space-custom')).toBeAttached();
+  await page.selectOption('#pref-background', 'off');
+  await expect(page.locator('html')).toHaveAttribute('data-bg', 'off');
+  await expect(page.locator('.space-background')).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-bg', 'off');
+  expect(errors).toEqual([]);
+});

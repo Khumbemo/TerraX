@@ -2,7 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { DEFAULT_MODEL } from '../lib/gemini-shared';
 import { getAiMode, getModel, getOwnKey, refreshAiStatus, setModel, setOwnKey, type AiMode } from '../lib/ai';
 import { useToast } from '../lib/toast';
-import { usePrefs, type Theme } from '../lib/prefs';
+import { idbSet } from '../lib/idb';
+import { usePrefs, type Background, type Theme } from '../lib/prefs';
 import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
 import GEEGuidance from './GEEGuidance';
@@ -129,8 +130,44 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                       <select id="pref-theme" value={prefs.theme} onChange={e => prefs.setTheme(e.target.value as Theme)}>
                         <option value="dark">{prefs.t('prefs.dark')}</option>
                         <option value="light">{prefs.t('prefs.light')}</option>
+                        <option value="galaxy">{prefs.t('prefs.galaxy')}</option>
                       </select>
                     </label>
+                    <label className="inline-select">
+                      <span>{prefs.t('prefs.background')}</span>
+                      <select id="pref-background" value={prefs.background} onChange={e => prefs.setBackground(e.target.value as Background)}>
+                        <option value="earth">{prefs.t('prefs.bg.earth')}</option>
+                        <option value="galaxy">{prefs.t('prefs.bg.galaxy')}</option>
+                        <option value="custom">{prefs.t('prefs.bg.custom')}</option>
+                        <option value="off">{prefs.t('prefs.bg.off')}</option>
+                      </select>
+                    </label>
+                    {prefs.background === 'custom' && (
+                      <>
+                        <label className="btn btn-small" htmlFor="pref-bg-file">
+                          {prefs.t('prefs.bg.choose')}
+                        </label>
+                        <input
+                          id="pref-bg-file"
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          hidden
+                          onChange={async e => {
+                            const f = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!f) return;
+                            if (f.size > 15 * 1024 * 1024) {
+                              notify('Choose an image under 15 MB.', 'error');
+                              return;
+                            }
+                            if (await idbSet('background', f)) {
+                              prefs.bumpCustomBg();
+                              notify('Background image saved in this browser.', 'success');
+                            } else notify('This browser could not store the image.', 'error');
+                          }}
+                        />
+                      </>
+                    )}
                     <label className="inline-select">
                       <span>{prefs.t('prefs.units')}</span>
                       <select id="pref-units" value={prefs.units} onChange={e => prefs.setUnits(e.target.value as Units)}>
@@ -152,6 +189,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                     )}
                   </div>
                   <p className="field-hint">{prefs.t('prefs.unitsNote')}</p>
+                  <p className="field-hint">{prefs.t('prefs.bgNote')}</p>
                 </section>
                 <section>
                   <h3>AI interpretation (Gemini)</h3>
