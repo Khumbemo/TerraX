@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { downloadText, safeFilename } from '../../lib/download';
 import { toDms } from '../../lib/geo';
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
+import { usePrefs } from '../../lib/prefs';
+import { areaHa, elevationM, lengthM } from '../../lib/units';
 import type { ToolOutput } from '../../lib/tools/registry';
-import { formatAreaM2, formatLength, measureSurvey, parseSurveyFile, surveyMarkdown, type SurveyResult } from '../../lib/tools/survey';
+import { elevationProfile, formatAreaM2, formatLength, magneticBearing, measureSurvey, parseSurveyFile, surveyMarkdown, type SurveyResult } from '../../lib/tools/survey';
+import { getJSON, setJSON } from '../../lib/storage';
 import { drawnPolygon, editableVertices, makeBoundary, toGpx, toKml } from '../../lib/vector';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
@@ -24,14 +28,24 @@ const ACCEPT = '.geojson,.json,.kml,.gpx,.csv,.txt,.zip';
 
 export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints, onDraw }: Props) {
   const notify = useToast();
+  const { units } = usePrefs();
   const [busy, setBusy] = useState(false);
   const [closeRing, setCloseRing] = useState(true);
   const [result, setResult] = useState<SurveyResult | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
+  const [declText, setDeclText] = useState<string>(() => getJSON<string>('declination', ''));
+  const declNum = Number(declText);
+  const declination = declText.trim() !== '' && Number.isFinite(declNum) && Math.abs(declNum) <= 90 ? declNum : null;
+
+  useEffect(() => {
+    setJSON('declination', declText);
+    if (result) onOutput({ tool: 'survey', name: result.filename, markdown: surveyMarkdown(result, declination), map: { bounds: result.bounds, geojson: result.geojson } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [declination]);
 
   const show = (r: SurveyResult) => {
     setResult(r);
-    onOutput({ tool: 'survey', name: r.filename, markdown: surveyMarkdown(r), map: { bounds: r.bounds, geojson: r.geojson } });
+    onOutput({ tool: 'survey', name: r.filename, markdown: surveyMarkdown(r, declination), map: { bounds: r.bounds, geojson: r.geojson } });
   };
 
   const analyse = async (file: File, close = closeRing) => {
@@ -119,6 +133,10 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
           />
           CSV points form a closed boundary
         </label>
+        <label className="param" title="Local magnetic declination, east positive. Take it from a current geomagnetic model such as the NOAA WMM calculator.">
+          <span>Declination (° E)</span>
+          <input id="survey-declination" type="number" step="0.1" min="-90" max="90" placeholder="none" value={declText} onChange={e => setDeclText(e.target.value)} />
+        </label>
         <div className="button-row push-right">
           <button type="button" id="draw-start" className="btn" disabled={busy || Boolean(drawPoints)} onClick={() => onDraw([])}>
             Draw on map
@@ -178,12 +196,32 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
                 <span className="muted">{f.kind === 'Points' ? `${f.vertices.length} point${f.vertices.length === 1 ? '' : 's'}` : f.kind.toLowerCase()}</span>
               </div>
               <div className="stat-grid">
-                {f.area !== null && <Stat label="Area" value={formatAreaM2(f.area)} />}
-                {f.length !== null && <Stat label={f.kind === 'Polygon' ? 'Perimeter' : 'Length'} value={formatLength(f.length)} />}
+                {f.area !== null && <Stat label="Area" value={units === 'imperial' ? `${areaHa(f.area / 10_000, units)} (${formatAreaM2(f.area).split(' (')[0]})` : formatAreaM2(f.area)} />}
+                {f.length !== null && <Stat label={f.kind === 'Polygon' ? 'Perimeter' : 'Length'} value={units === 'imperial' ? lengthM(f.length, units) : formatLength(f.length)} />}
                 <Stat label="Centroid" value={`${toDms(f.centroid[0], 'N', 'S')}, ${toDms(f.centroid[1], 'E', 'W')}`} />
-                {f.elevation && <Stat label="Elevation (file)" value={`${fmt(f.elevation.min)}–${fmt(f.elevation.max)} m`} />}
+                {f.elevation && <Stat label="Elevation (file)" value={`${elevationM(f.elevation.min, units)} – ${elevationM(f.elevation.max, units)}`} />}
               </div>
               <p className="field-hint">Method: {f.method}.</p>
+              {(() => {
+                const prof = elevationProfile(f);
+                if (!prof) return null;
+                return (
+                  <div className="render-window elevation-profile">
+                    <div className="eyebrow">
+                      Elevation profile · ascent {fmt(prof.gain)} m, descent {fmt(prof.loss)} m (changes over {prof.threshold} m)
+                    </div>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <LineChart data={prof.points.map(p => ({ km: p.distance / 1000, elevation: p.elevation }))} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#16283c" />
+                        <XAxis dataKey="km" type="number" domain={['dataMin', 'dataMax']} tickFormatter={v => `${fmt(v, 3)} km`} stroke="#4a6580" fontSize={11} />
+                        <YAxis domain={['auto', 'auto']} width={56} tickFormatter={v => `${fmt(v, 4)}`} stroke="#4a6580" fontSize={11} />
+                        <Tooltip formatter={v => `${fmt(Number(v))} m`} labelFormatter={v => `${fmt(Number(v), 4)} km`} contentStyle={{ background: '#030814', border: '1px solid #38bdf8' }} />
+                        <Line dataKey="elevation" stroke="#e0a458" dot={false} isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
 
               {f.legs.length > 0 && (
                 <details open={f.legs.length <= 12}>
@@ -195,6 +233,7 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
                           <th>Leg</th>
                           <th>Distance</th>
                           <th>Bearing (true N)</th>
+                          {declination !== null && <th>Bearing (magnetic)</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -203,8 +242,9 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
                             <td>
                               {l.from} → {l.to}
                             </td>
-                            <td className="num">{fmt(l.distance, 5)} m</td>
+                            <td className="num">{units === 'imperial' ? lengthM(l.distance, units) : `${fmt(l.distance, 5)} m`}</td>
                             <td className="num">{l.bearing.toFixed(1)}°</td>
+                            {declination !== null && <td className="num">{magneticBearing(l.bearing, declination).toFixed(1)}°</td>}
                           </tr>
                         ))}
                       </tbody>

@@ -4,6 +4,7 @@ import { GeoJSON, ImageOverlay, MapContainer, Marker, Pane, Polygon, Polyline, R
 import type { FeatureCollection, MultiLineString } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 import type { LatLngBounds } from '../lib/geo';
+import { usePrefs } from '../lib/prefs';
 import type { MapImage } from '../lib/tools/registry';
 import type { Boundary } from '../lib/zonal';
 
@@ -131,6 +132,8 @@ const START_ZOOM = __TERRAX_PREVIEW__ ? 5 : 10;
 
 export default function MapPanel({ target, bounds, geojson, image = null, boundary = null, draw = null }: Props) {
   const [basemap, setBasemap] = useState<Basemap | null>(null);
+  const { theme } = usePrefs();
+  const light = theme === 'light';
   const [panelOpen, setPanelOpen] = useState(false);
   const [vis, setVis] = useState<LayerVis>({ tiles: true, outlines: true, image: true, features: true, boundary: true, opacity: 0.75 });
   const toggle = (k: keyof Omit<LayerVis, 'opacity'>) => setVis(v => ({ ...v, [k]: !v[k] }));
@@ -151,13 +154,14 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
         {basemap && vis.outlines && (
           // Below the tile pane (z-index 200): online tiles cover it when they load.
           <Pane name="offline-basemap" style={{ zIndex: 150 }}>
-            <GeoJSON data={basemap.land} style={{ stroke: false, fillColor: '#15202b', fillOpacity: 1 }} interactive={false} />
-            <GeoJSON data={basemap.borders} style={{ color: '#3a5068', weight: 0.8, opacity: 0.9 }} interactive={false} />
+            <GeoJSON key={`land-${theme}`} data={basemap.land} style={{ stroke: false, fillColor: light ? '#f2f4f6' : '#15202b', fillOpacity: 1 }} interactive={false} />
+            <GeoJSON key={`borders-${theme}`} data={basemap.borders} style={{ color: light ? '#9aa9ba' : '#3a5068', weight: 0.8, opacity: 0.9 }} interactive={false} />
           </Pane>
         )}
         {!__TERRAX_PREVIEW__ && vis.tiles && (
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            key={theme}
+            url={`https://{s}.basemaps.cartocdn.com/${light ? 'light_all' : 'dark_all'}/{z}/{x}/{y}{r}.png`}
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
             subdomains="abcd"
             maxZoom={19}

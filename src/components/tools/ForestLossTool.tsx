@@ -7,7 +7,10 @@ import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
-import { BURN_CLASSES, CHANGE_CLASSES, analyzeBurn, analyzeHansen, analyzeNdviChange, forestMarkdown, formatArea, lossPolygons, type ForestResult } from '../../lib/tools/forest';
+import { usePrefs } from '../../lib/prefs';
+import { areaHa } from '../../lib/units';
+import type { AreaUnit } from '../../lib/tools/forest';
+import { BURN_CLASSES, CHANGE_CLASSES, analyzeBurn, analyzeHansen, analyzeNdviChange, forestMarkdown, lossPolygons, type ForestResult } from '../../lib/tools/forest';
 import type { ToolOutput } from '../../lib/tools/registry';
 import type { BandMap } from '../../lib/types';
 import type { Boundary } from '../../lib/zonal';
@@ -84,6 +87,8 @@ const MODE_TEXT: Record<Mode, { intro: string; a: string; b: string; run: string
 
 export default function ForestLossTool({ onOutput, boundary }: Props) {
   const notify = useToast();
+  const { units } = usePrefs();
+  const formatArea = (a: AreaUnit | null) => (!a ? '—' : a.ha === null ? `${a.pixels.toLocaleString()} px` : areaHa(a.ha, units));
   const [mode, setMode] = useState<Mode>('ndvi');
   const [a, setA] = useState<Slot | null>(null);
   const [b, setB] = useState<Slot | null>(null);

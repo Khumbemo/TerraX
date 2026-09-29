@@ -43,6 +43,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: isPreviewBuild ? 'dist-preview' : 'dist',
       chunkSizeWarningLimit: 1000,
+      // Lists every built file so the service worker can precache the whole app.
+      manifest: isPreviewBuild ? false : 'asset-manifest.json',
     },
   };
 });

@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
 
-/* ─── Tokens (single dark theme, by design) ───────────────────────────── */
+/* ─── Tokens (dark by default; light via Settings → Display) ─────────── */
 :root {
   --bg: #050a14;
   --panel: #08111f;
@@ -9,7 +9,7 @@
   --line-strong: #25496e;
   --text: #d4e6f5;
   --muted: #8aa6bf;
-  --dim: #5f7c97;
+  --dim: #6884a0;
   --accent: #38bdf8;
   --accent-ink: #04121f;
   --green: #34d399;
@@ -26,6 +26,70 @@
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Light theme. Text colours meet WCAG AA contrast (≥ 4.5:1) on --bg and --panel; see tests/theme.test.ts. */
+:root[data-theme='light'] {
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+  --panel-2: #eef2f7;
+  --line: #d3dce6;
+  --line-strong: #a7b6c7;
+  --text: #0f1b2a;
+  --muted: #475a6e;
+  --dim: #56687c;
+  --accent: #0369a1;
+  --accent-ink: #ffffff;
+  --green: #047857;
+  --warn: #92400e;
+  --danger: #b91c1c;
+  color-scheme: light;
+}
+:root[data-theme='light'] .top-navbar {
+  background: rgba(255, 255, 255, 0.92);
+}
+:root[data-theme='light'] .earth-background,
+:root[data-theme='light'] .login-wrapper {
+  background: var(--bg);
+}
+:root[data-theme='light'] .btn-primary:hover:not(:disabled),
+:root[data-theme='light'] .uplink-btn:hover {
+  background: #0284c7;
+}
+:root[data-theme='light'] .map-layers-toggle,
+:root[data-theme='light'] .map-layers-panel,
+:root[data-theme='light'] .leaflet-container .leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.94);
+}
+:root[data-theme='light'] .leaflet-container {
+  background: #dfe6ee;
+}
+:root[data-theme='light'] .data-notes,
+:root[data-theme='light'] .caveat-text,
+:root[data-theme='light'] .preview-banner {
+  color: #7a4205;
+}
+:root[data-theme='light'] .chart-tooltip,
+:root[data-theme='light'] .toast {
+  background: #ffffff;
+  color: var(--text);
+}
+:root[data-theme='light'] .raster-canvas {
+  background: repeating-conic-gradient(#e6ebf1 0% 25%, #f7f9fb 0% 50%) 50% / 16px 16px;
+}
+:root[data-theme='light'] .code-block {
+  background: #eef2f7;
+  border-color: var(--line);
+  color: var(--text);
+}
+:root[data-theme='light'] .modal-backdrop {
+  background: rgba(15, 27, 42, 0.45);
+}
+:root[data-theme='light'] .tone-bad {
+  color: #b91c1c;
+}
+:root[data-theme='light'] .boundary-banner strong {
+  color: #92400e;
 }
 
 *,
@@ -573,6 +637,89 @@ select {
   border-radius: 6px;
   padding: 4px 8px;
   color: var(--text);
+}
+.project-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.report-figures {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+}
+.report-figures img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  image-rendering: pixelated;
+}
+.report-figures figcaption {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.lang-switch {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.lang-switch button {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.lang-switch button.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(2, 6, 13, 0.35);
+}
+.tour-highlight {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(2, 6, 13, 0.45);
+  pointer-events: none;
+  transition: all 0.2s ease;
+}
+.tour-card {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.tour-card h3 {
+  margin: 4px 0 6px;
+  font-size: 16px;
+}
+.tour-card p {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-highlight {
+    transition: none;
+  }
 }
 .sub-panel {
   display: flex;

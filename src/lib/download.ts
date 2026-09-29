@@ -77,8 +77,14 @@ function markdownToPlain(md: string): string[] {
   );
 }
 
-/** Writes a multi-page, text-based (selectable) A4 PDF of a Markdown report. */
-export async function downloadReportPdf(title: string, subtitle: string, markdown: string, filename: string): Promise<void> {
+/** Writes a multi-page, text-based (selectable) A4 PDF of a Markdown report, with optional figures at the end. */
+export async function downloadReportPdf(
+  title: string,
+  subtitle: string,
+  markdown: string,
+  filename: string,
+  figures: { title: string; dataUrl: string; width: number; height: number }[] = [],
+): Promise<void> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const margin = 18;
@@ -123,6 +129,32 @@ export async function downloadReportPdf(title: string, subtitle: string, markdow
       y += lineH;
     }
   });
+
+  if (figures.length) {
+    ensureSpace(14);
+    y += 4;
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(12);
+    pdf.text('Figures', margin, y);
+    y += 7;
+    figures.forEach((f, i) => {
+      const w = maxW;
+      const h = Math.min((f.height / f.width) * w, pageH - margin * 2 - 12);
+      const drawW = (f.width / f.height) * h;
+      ensureSpace(h + 10);
+      pdf.addImage(f.dataUrl, 'PNG', margin + (maxW - drawW) / 2, y, drawW, h);
+      y += h + 4;
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9);
+      const caption = pdf.splitTextToSize(winAnsi(`Figure ${i + 1}. ${f.title}`), maxW) as string[];
+      for (const c of caption) {
+        ensureSpace(4.5);
+        pdf.text(c, margin, y);
+        y += 4.5;
+      }
+      y += 4;
+    });
+  }
 
   const pages = pdf.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {

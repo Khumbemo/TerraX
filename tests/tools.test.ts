@@ -10,7 +10,7 @@ import { groundGeometry, openGeoTiff, sinAuthalic } from '../src/lib/rasterio';
 import { parseDelimited } from '../src/lib/table';
 import { rainfallSummary } from '../src/lib/tools/climate';
 import { analyzeBurn, analyzeHansen, analyzeNdviChange, lossPolygons } from '../src/lib/tools/forest';
-import { measureSurvey, parseCoordinateCsv } from '../src/lib/tools/survey';
+import { elevationProfile, magneticBearing, measureSurvey, parseCoordinateCsv, surveyMarkdown } from '../src/lib/tools/survey';
 import { analyzeTerrain } from '../src/lib/tools/terrain';
 import { drawnPolygon, editableVertices, makeBoundary, polygonFeatures, toGpx, toKml } from '../src/lib/vector';
 import { boundaryMask, clipToBoundary, type Boundary } from '../src/lib/zonal';
@@ -441,4 +441,24 @@ test('land-cover classes on the synthetic scene: areas add up and water is found
   assert.equal(res.stats[0].suggestion, 'Water');
   assert.ok(res.stats[3].ndvi! > 0.5);
   assert.equal(res.classes.filter(c => c === 0).length, 0);
+});
+
+test('elevation profile with a noise threshold, and magnetic bearings', () => {
+  const coords = [100, 102, 101, 103, 110, 108, 120].map((z, i) => [94.1 + i * 0.001, 25.67, z]);
+  const r = measureSurvey('walk.geojson', 'GeoJSON', { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { name: 'Walk' }, geometry: { type: 'LineString', coordinates: coords } }] }, []);
+  const p = elevationProfile(r.features[0])!;
+  assert.equal(p.points.length, 7);
+  close(p.points[6].distance, r.features[0].length!, 1e-9);
+  close(p.gainRaw, 2 + 2 + 7 + 12, 1e-9);
+  close(p.lossRaw, 1 + 2, 1e-9);
+  // With a 5 m threshold: 100 → 110 (+10), 110 → 120 (+10); the 2 m wiggles are ignored.
+  close(p.gain, 20, 1e-9);
+  close(p.loss, 0, 1e-9);
+  assert.equal(magneticBearing(10, 15), 355);
+  assert.equal(magneticBearing(350, -15), 5);
+  const md = surveyMarkdown(r, -1.2);
+  assert.match(md, /Bearing \(magnetic\)/);
+  assert.match(md, /1.2° west/);
+  assert.match(md, /ascent 20 m/);
+  assert.doesNotMatch(surveyMarkdown(r), /magnetic\) \|/);
 });

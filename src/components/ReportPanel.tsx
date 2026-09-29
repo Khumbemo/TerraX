@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { AiMode } from '../lib/ai';
 import { generate } from '../lib/ai';
 import { downloadReportPdf, downloadText, safeFilename } from '../lib/download';
+import { collectFigures, type ReportFigure } from '../lib/figures';
 import { REPORT_PROMPT } from '../lib/guide';
 import { toolInfo, type ToolOutput } from '../lib/tools/registry';
 import { useToast } from '../lib/toast';
@@ -35,10 +36,10 @@ export function composeReport(output: ToolOutput, operator: string, ai: { text: 
   };
 }
 
-export async function exportReport(report: ReportRecord, kind: 'md' | 'pdf') {
+export async function exportReport(report: ReportRecord, kind: 'md' | 'pdf', figures: ReportFigure[] = report.figures ?? []) {
   const base = `TerraX_${safeFilename(report.datasetName)}_${report.createdAt.slice(0, 10)}`;
   if (kind === 'md') await downloadText(report.content, `${base}.md`, 'text/markdown;charset=utf-8');
-  else await downloadReportPdf(report.title, `${report.datasetName} · ${report.createdAt.slice(0, 10)}`, report.content.replace(/^# .*\n/, ''), `${base}.pdf`);
+  else await downloadReportPdf(report.title, `${report.datasetName} · ${report.createdAt.slice(0, 10)}`, report.content.replace(/^# .*\n/, ''), `${base}.pdf`, figures);
 }
 
 export default function ReportPanel({ output, aiMode, operator, onSave, onOpenSettings }: Props) {
@@ -75,14 +76,20 @@ export default function ReportPanel({ output, aiMode, operator, onSave, onOpenSe
     }
   };
 
-  const save = () => {
-    onSave(report);
+  const save = async () => {
+    let figures: ReportFigure[] = [];
+    try {
+      figures = await collectFigures(output);
+    } catch {
+      figures = [];
+    }
+    onSave({ ...report, figures });
     setSaved(true);
   };
 
   const download = async (kind: 'md' | 'pdf') => {
     try {
-      await exportReport(report, kind);
+      await exportReport(report, kind, kind === 'pdf' ? await collectFigures(output).catch(() => []) : []);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'The download failed.', 'error');
     }

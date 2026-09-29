@@ -2,6 +2,9 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { DEFAULT_MODEL } from '../lib/gemini-shared';
 import { getAiMode, getModel, getOwnKey, refreshAiStatus, setModel, setOwnKey, type AiMode } from '../lib/ai';
 import { useToast } from '../lib/toast';
+import { usePrefs, type Theme } from '../lib/prefs';
+import type { Units } from '../lib/units';
+import type { Lang } from '../lib/i18n';
 import GEEGuidance from './GEEGuidance';
 
 export interface Target {
@@ -16,6 +19,7 @@ interface Props {
   onTargetChange: (t: Target) => void;
   onAiChange: () => void;
   onClose: () => void;
+  onStartTour?: () => void;
 }
 
 type Tab = 'settings' | 'guide' | 'gee' | 'about';
@@ -35,8 +39,9 @@ const AI_MODE_TEXT: Record<AiMode, string> = {
   off: 'Off — statistics only',
 };
 
-export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose }: Props) {
+export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose, onStartTour }: Props) {
   const notify = useToast();
+  const prefs = usePrefs();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [mode, setMode] = useState<AiMode | null>(null);
   const [keyInput, setKeyInput] = useState('');
@@ -116,6 +121,38 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
           <div className="modal-content">
             {tab === 'settings' && (
               <div className="settings-stack">
+                <section aria-label="Display">
+                  <h3>{prefs.t('prefs.display')}</h3>
+                  <div className="param-row">
+                    <label className="inline-select">
+                      <span>{prefs.t('prefs.theme')}</span>
+                      <select id="pref-theme" value={prefs.theme} onChange={e => prefs.setTheme(e.target.value as Theme)}>
+                        <option value="dark">{prefs.t('prefs.dark')}</option>
+                        <option value="light">{prefs.t('prefs.light')}</option>
+                      </select>
+                    </label>
+                    <label className="inline-select">
+                      <span>{prefs.t('prefs.units')}</span>
+                      <select id="pref-units" value={prefs.units} onChange={e => prefs.setUnits(e.target.value as Units)}>
+                        <option value="metric">{prefs.t('prefs.metric')}</option>
+                        <option value="imperial">{prefs.t('prefs.imperial')}</option>
+                      </select>
+                    </label>
+                    <label className="inline-select">
+                      <span>{prefs.t('prefs.language')}</span>
+                      <select id="pref-lang" value={prefs.lang} onChange={e => prefs.setLang(e.target.value as Lang)}>
+                        <option value="en">English</option>
+                        <option value="hi">हिन्दी (Hindi)</option>
+                      </select>
+                    </label>
+                    {onStartTour && (
+                      <button type="button" id="start-tour" className="btn btn-small" onClick={onStartTour}>
+                        {prefs.t('prefs.tour')}
+                      </button>
+                    )}
+                  </div>
+                  <p className="field-hint">{prefs.t('prefs.unitsNote')}</p>
+                </section>
                 <section>
                   <h3>AI interpretation (Gemini)</h3>
                   <p className="status-line">

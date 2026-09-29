@@ -75,7 +75,7 @@ export const TOOLS: ToolInfo[] = [
     id: 'terrain',
     name: 'Terrain',
     group: 'Elevation',
-    summary: 'Derive slope, aspect and relief from an elevation model.',
+    summary: 'Derive slope, aspect, relief, streams and watersheds from an elevation model.',
     measures: ['Slope, aspect, hillshade and relief', 'Streams, Strahler order and watersheds', 'Contours (GeoJSON)'],
     formats: 'DEM GeoTIFF (SRTM, ASTER, Copernicus)',
     mark: 'Te',

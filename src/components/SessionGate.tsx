@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { usePrefs } from '../lib/prefs';
 
 interface Props {
   onStart: (operator: string) => void;
@@ -10,6 +11,7 @@ interface Props {
  */
 export default function SessionGate({ onStart }: Props) {
   const [name, setName] = useState('');
+  const { t, lang, setLang } = usePrefs();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -21,11 +23,11 @@ export default function SessionGate({ onStart }: Props) {
       <form className="login-panel" onSubmit={submit}>
         <div className="login-header">
           <div className="brand-title">TERRAX</div>
-          <div className="brand-subtitle">Earth observation workbench</div>
+          <div className="brand-subtitle">{t('session.subtitle')}</div>
         </div>
 
         <div className="input-group">
-          <label htmlFor="operator-name">Your name (optional)</label>
+          <label htmlFor="operator-name">{t('session.name')}</label>
           <input
             id="operator-name"
             type="text"
@@ -35,17 +37,22 @@ export default function SessionGate({ onStart }: Props) {
             value={name}
             onChange={e => setName(e.target.value)}
           />
-          <p className="field-hint">Shown on the reports you create.</p>
+          <p className="field-hint">{t('session.hint')}</p>
         </div>
 
         <button type="submit" className="uplink-btn">
-          Start session
+          {t('session.start')}
         </button>
 
-        <p className="login-note">
-          TerraX runs in your browser and has no user accounts. Your files are read on this device. If you set up AI, a summary of the loaded dataset is sent to
-          Google's Gemini API when you ask for an interpretation.
-        </p>
+        <p className="login-note">{t('session.note')}</p>
+        <div className="lang-switch" role="group" aria-label="Language / भाषा">
+          <button type="button" aria-pressed={lang === 'en'} className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>
+            English
+          </button>
+          <button type="button" aria-pressed={lang === 'hi'} className={lang === 'hi' ? 'active' : ''} onClick={() => setLang('hi')}>
+            हिन्दी
+          </button>
+        </div>
       </form>
     </div>
   );

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { downloadText, safeFilename } from '../../lib/download';
 import { labelPatches, patchAreas, patchesToGeoJson } from '../../lib/patches';
 import { groundGeometry } from '../../lib/rasterio';
-import { contoursGeoJson, flowRouting, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
+import { flowRoutingAsync } from '../../lib/compute';
+import { contoursGeoJson, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
 import { makeBoundary } from '../../lib/vector';
 import { viridis } from '../../lib/colormap';
 import { mapImage } from '../../lib/overlay';
@@ -10,6 +11,8 @@ import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
+import { usePrefs } from '../../lib/prefs';
+import { ACRES_PER_HA, elevationM } from '../../lib/units';
 import type { ToolOutput } from '../../lib/tools/registry';
 import { ASPECTS, SLOPE_CLASSES, analyzeTerrain, gridToRgba, terrainMarkdown, type TerrainResult } from '../../lib/tools/terrain';
 import type { Boundary } from '../../lib/zonal';
@@ -46,6 +49,7 @@ function slopeRgba(t: TerrainResult): Uint8ClampedArray {
 
 export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
   const notify = useToast();
+  const { units } = usePrefs();
   const [busy, setBusy] = useState(false);
   const [raster, setRaster] = useState<OpenRaster | null>(null);
   const [result, setResult] = useState<TerrainResult | null>(null);
@@ -139,7 +143,8 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow, basin, showContours, interval]);
 
-  const computeFlow = () => {
+  const [flowBusy, setFlowBusy] = useState(false);
+  const computeFlow = async () => {
     if (!result || !geo) {
       notify('Flow routing needs a DEM with ground units (WGS84, Web Mercator or UTM).', 'error');
       return;
@@ -149,9 +154,16 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
       notify('Set the channel threshold as a positive area in km², for example 0.5.', 'error');
       return;
     }
-    setFlow(flowRouting(demGrid(result), geo, km2 * 1e6));
-    setBasin(null);
-    setLayer('flow');
+    setFlowBusy(true);
+    try {
+      setFlow(await flowRoutingAsync(demGrid(result), geo, km2 * 1e6));
+      setBasin(null);
+      setLayer('flow');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Flow routing failed.', 'error');
+    } finally {
+      setFlowBusy(false);
+    }
   };
 
   const pickOutlet = (col: number, row: number) => {
@@ -253,8 +265,8 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
       {result && image && (
         <div className="result-block">
           <div className="stat-grid">
-            <Stat label="Elevation range" value={`${fmt(result.elevation.min)}–${fmt(result.elevation.max)} m`} />
-            <Stat label="Relief" value={`${fmt(result.relief)} m`} />
+            <Stat label="Elevation range" value={`${elevationM(result.elevation.min, units)} – ${elevationM(result.elevation.max, units)}`} />
+            <Stat label="Relief" value={elevationM(result.relief, units)} />
             <Stat label="Mean slope" value={`${fmt(result.slope.mean)}°`} />
             <Stat label="Hypsometric integral" value={fmt(result.hypsometricIntegral, 3)} />
           </div>
@@ -285,8 +297,8 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                 <span>Channel threshold (km²)</span>
                 <input id="terrain-threshold" type="number" step="0.1" min="0.01" value={thresholdKm2} onChange={e => setThresholdKm2(e.target.value)} />
               </label>
-              <button type="button" id="terrain-flow" className="btn" onClick={computeFlow}>
-                {flow ? 'Recompute flow' : 'Compute flow & streams'}
+              <button type="button" id="terrain-flow" className="btn" onClick={computeFlow} disabled={flowBusy}>
+                {flowBusy ? 'Routing flow…' : flow ? 'Recompute flow' : 'Compute flow & streams'}
               </button>
               <label className="param">
                 <span>Contour interval (m)</span>
@@ -300,7 +312,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
               <div className="stat-grid">
                 <Stat label="Highest stream order" value={String(flow.maxOrder)} />
                 <Stat label="Channel length" value={`${fmt(flow.lengthByOrder.reduce((a, b) => a + b, 0) / 1000, 4)} km`} />
-                {basin && <Stat label="Watershed area" value={`${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
+                {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt((basin.areaM2 / 1e4) * ACRES_PER_HA / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
                 {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
               </div>
             )}

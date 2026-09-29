@@ -480,7 +480,44 @@ export function formatLength(m: number): string {
   return m >= 1000 ? `${fmt(m / 1000, 5)} km` : `${fmt(m, 5)} m`;
 }
 
-export function surveyMarkdown(r: SurveyResult): string {
+export interface ElevationProfile {
+  /** Cumulative distance (m) and elevation (m) at each vertex. */
+  points: { distance: number; elevation: number }[];
+  gainRaw: number;
+  lossRaw: number;
+  /** Ascent and descent counting only changes larger than `threshold` (hysteresis). */
+  gain: number;
+  loss: number;
+  threshold: number;
+}
+
+/** Elevation profile of a line whose vertices all carry elevations. */
+export function elevationProfile(f: MeasuredFeature, threshold = 5): ElevationProfile | null {
+  if (f.kind !== 'Line' || f.vertices.length < 2 || f.vertices.some(v => v.elevation === null)) return null;
+  const points = [{ distance: 0, elevation: f.vertices[0].elevation! }];
+  for (let i = 0; i < f.legs.length; i++) points.push({ distance: points[i].distance + f.legs[i].distance, elevation: f.vertices[i + 1].elevation! });
+  let gainRaw = 0, lossRaw = 0, gain = 0, loss = 0;
+  let ref = points[0].elevation;
+  for (let i = 1; i < points.length; i++) {
+    const d = points[i].elevation - points[i - 1].elevation;
+    if (d > 0) gainRaw += d;
+    else lossRaw -= d;
+    const e = points[i].elevation;
+    if (e - ref >= threshold) {
+      gain += e - ref;
+      ref = e;
+    } else if (ref - e >= threshold) {
+      loss += ref - e;
+      ref = e;
+    }
+  }
+  return { points, gainRaw, lossRaw, gain, loss, threshold };
+}
+
+/** Magnetic bearing from a true bearing and declination (degrees, east positive). */
+export const magneticBearing = (trueBearing: number, declination: number) => (((trueBearing - declination) % 360) + 360) % 360;
+
+export function surveyMarkdown(r: SurveyResult, declination: number | null = null): string {
   const lines = ['## Dataset', '', `- File: ${r.filename} (${r.format}); ${r.features.length} feature${r.features.length === 1 ? '' : 's'}`, '', '## Results', ''];
   for (const f of r.features) {
     lines.push(`### ${f.name} (${f.kind.toLowerCase()})`, '');
@@ -489,15 +526,34 @@ export function surveyMarkdown(r: SurveyResult): string {
     lines.push(`- Vertices: ${f.vertices.length}; centroid ${toDms(f.centroid[0], 'N', 'S')}, ${toDms(f.centroid[1], 'E', 'W')}`);
     if (f.elevation) lines.push(`- Elevation range: ${fmt(f.elevation.min)}–${fmt(f.elevation.max)} m (from the file)`);
     lines.push(`- Method: ${f.method}`, '');
+    const prof = elevationProfile(f);
+    if (prof) {
+      lines.push(
+        `- Elevation profile: ascent ${fmt(prof.gain)} m and descent ${fmt(prof.loss)} m counting changes over ${prof.threshold} m (all changes: +${fmt(prof.gainRaw)} / −${fmt(prof.lossRaw)} m)`,
+        '',
+      );
+    }
     if (f.legs.length && f.legs.length <= 60) {
-      lines.push('| Leg | Distance | Bearing (true) |', '|---|---|---|', ...f.legs.map(l => `| ${l.from} → ${l.to} | ${fmt(l.distance, 5)} m | ${l.bearing.toFixed(1)}° |`), '');
+      if (declination === null) lines.push('| Leg | Distance | Bearing (true) |', '|---|---|---|', ...f.legs.map(l => `| ${l.from} → ${l.to} | ${fmt(l.distance, 5)} m | ${l.bearing.toFixed(1)}° |`), '');
+      else
+        lines.push(
+          '| Leg | Distance | Bearing (true) | Bearing (magnetic) |',
+          '|---|---|---|---|',
+          ...f.legs.map(l => `| ${l.from} → ${l.to} | ${fmt(l.distance, 5)} m | ${l.bearing.toFixed(1)}° | ${magneticBearing(l.bearing, declination).toFixed(1)}° |`),
+          '',
+        );
     }
   }
   lines.push(
     '## Method and limits',
     '',
     '- Areas and distances are on the WGS84 ellipsoid via UTM with scale-factor correction (error well under 0.1 % for plots), or on the authalic sphere for very large features.',
-    '- Bearings are initial great-circle bearings from true north; magnetic bearings differ by the local declination.',
+    declination === null
+      ? '- Bearings are initial great-circle bearings from true north; magnetic bearings differ by the local declination.'
+      : `- Bearings are initial great-circle bearings from true north. Magnetic bearings use the declination entered by the user (${Math.abs(declination)}° ${declination >= 0 ? 'east' : 'west'}): magnetic = true − declination. Declination changes with place and year; take it from a current geomagnetic model (for example the NOAA World Magnetic Model calculator).`,
+    ...(r.features.some(f => elevationProfile(f))
+      ? ['- Elevations come from the file (GPS or a DEM in the source software). GPS heights are typically about 1.5–3 times less precise than horizontal positions, and that noise inflates a summed ascent, so a 5 m threshold is also shown.']
+      : []),
     '- Accuracy is limited by the input coordinates: consumer GPS is typically 3–10 m, so small plots can carry large relative area errors.',
     ...r.warnings.map(w => `- ${w}`),
   );

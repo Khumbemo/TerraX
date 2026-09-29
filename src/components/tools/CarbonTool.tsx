@@ -3,6 +3,8 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { fetchSample } from '../../lib/samples';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
+import { usePrefs } from '../../lib/prefs';
+import { perHa } from '../../lib/units';
 import {
   CHAVE2005,
   DEFAULT_PARAMS,
@@ -25,9 +27,6 @@ interface Props {
 
 const AXIS = { stroke: '#4a6580', fontSize: 11, fontFamily: 'Space Mono, monospace' };
 
-function estText(e: Estimate, unit: string): string {
-  return `${fmt(e.mean, 4)} ${unit}`;
-}
 function ciText(e: Estimate): string | undefined {
   return e.ci95 ? `95 % CI ${fmt(Math.max(0, e.ci95[0]), 3)}–${fmt(e.ci95[1], 3)}` : undefined;
 }
@@ -64,6 +63,7 @@ function NumberField({ id, label, value, onChange, step, min, max, placeholder }
 
 export default function CarbonTool({ onOutput }: Props) {
   const notify = useToast();
+  const { units } = usePrefs();
   const [busy, setBusy] = useState(false);
   const [inv, setInv] = useState<Inventory | null>(null);
   const [params, setParams] = useState<CarbonParams>(DEFAULT_PARAMS);
@@ -194,11 +194,11 @@ export default function CarbonTool({ onOutput }: Props) {
         <div className="result-block">
           {result.perHa ? (
             <div className="stat-grid">
-              <Stat label="Above-ground biomass" value={estText(result.perHa.agb, 't/ha')} />
-              <Stat label="Carbon stock" value={estText(result.perHa.carbon, 't C/ha')} tone="good" />
-              <Stat label="CO₂ equivalent" value={estText(result.perHa.co2e, 't CO₂e/ha')} />
-              <Stat label="Basal area" value={estText(result.perHa.basalArea, 'm²/ha')} />
-              <Stat label="Stems" value={`${fmt(result.perHa.stems.mean, 3)} /ha`} />
+              <Stat label="Above-ground biomass" value={perHa(result.perHa.agb.mean, 't', units)} />
+              <Stat label="Carbon stock" value={perHa(result.perHa.carbon.mean, 't', units, ' C')} tone="good" />
+              <Stat label="CO₂ equivalent" value={perHa(result.perHa.co2e.mean, 't', units, ' CO₂e')} />
+              <Stat label="Basal area" value={perHa(result.perHa.basalArea.mean, 'm2', units)} />
+              <Stat label="Stems" value={perHa(result.perHa.stems.mean, 'stems', units)} />
               <Stat label="Plots" value={`${result.perHa.plots} · ${fmt(result.perHa.areaHa, 3)} ha`} />
             </div>
           ) : (

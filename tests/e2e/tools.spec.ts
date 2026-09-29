@@ -57,7 +57,7 @@ test('land survey: sample, KML, GPX, shapefile and a broken zip', async ({ page 
   await expect(page.locator('.feature-card').first()).toContainText('111.2');
   const gpx = '<?xml version="1.0"?><gpx version="1.1" creator="t" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Walk</name><trkseg><trkpt lat="25.670" lon="94.100"><ele>1400</ele></trkpt><trkpt lat="25.671" lon="94.101"><ele>1410</ele></trkpt><trkpt lat="25.672" lon="94.101"><ele>1425</ele></trkpt></trkseg></trk></gpx>';
   await page.setInputFiles('#survey-file', { name: 'walk.gpx', mimeType: 'application/gpx+xml', buffer: Buffer.from(gpx) });
-  await expect(page.locator('.feature-card').first()).toContainText('1,400–1,425 m');
+  await expect(page.locator('.feature-card').first()).toContainText('1,400 m – 1,425 m');
   await page.setInputFiles('#survey-file', { name: 'plot.zip', mimeType: 'application/zip', buffer: shapefileZip() });
   await expect(page.locator('.feature-card h3').first()).toHaveText('Shapefile plot');
   await expect(page.locator('.feature-card').first()).toContainText('111.22 ha');

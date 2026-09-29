@@ -1,3 +1,4 @@
+import { usePrefs } from '../lib/prefs';
 import { TOOLS, type ToolId } from '../lib/tools/registry';
 
 interface Props {
@@ -5,27 +6,32 @@ interface Props {
 }
 
 export default function ToolHub({ onOpen }: Props) {
+  const { t } = usePrefs();
+  const note = t('hub.englishNote');
   return (
     <section className="tool-hub" aria-label="Tools">
       <div className="tool-hub-head">
-        <h2>Tools</h2>
-        <p className="muted">Choose an analysis, then upload your GIS files. Every tool has sample data to try it first.</p>
+        <h2>{t('hub.title')}</h2>
+        <p className="muted">
+          {t('hub.intro')}
+          {note && ` ${note}`}
+        </p>
       </div>
       <div className="tool-grid">
-        {TOOLS.map(t => (
-          <button key={t.id} type="button" className={`tool-card tool-${t.id}`} onClick={() => onOpen(t.id)}>
+        {TOOLS.map(tool => (
+          <button key={tool.id} type="button" className={`tool-card tool-${tool.id}`} data-name={tool.name} onClick={() => onOpen(tool.id)}>
             <span className="tool-mark" aria-hidden="true">
-              {t.mark}
+              {tool.mark}
             </span>
-            <span className="tool-group">{t.group}</span>
-            <span className="tool-name">{t.name}</span>
-            <span className="tool-summary">{t.summary}</span>
+            <span className="tool-group">{t(`tool.${tool.id}.group`, tool.group)}</span>
+            <span className="tool-name">{t(`tool.${tool.id}.name`, tool.name)}</span>
+            <span className="tool-summary">{t(`tool.${tool.id}.summary`, tool.summary)}</span>
             <ul className="tool-measures">
-              {t.measures.map(m => (
+              {tool.measures.map(m => (
                 <li key={m}>{m}</li>
               ))}
             </ul>
-            <span className="tool-formats">{t.formats}</span>
+            <span className="tool-formats">{tool.formats}</span>
           </button>
         ))}
       </div>

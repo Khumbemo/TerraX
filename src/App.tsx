@@ -18,6 +18,8 @@ import { downloadText, safeFilename } from './lib/download';
 import type { ChatTurn } from './lib/gemini-shared';
 import { OfflineAssistant, STARTER_SUGGESTIONS, type AssistantContext } from './lib/assistant/engine';
 import { DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT } from './lib/guide';
+import { usePrefs } from './lib/prefs';
+import { buildProject, mergeReports, parseProject } from './lib/project';
 import { loadReports, saveReports } from './lib/reports';
 import { getJSON, removeItem, setJSON } from './lib/storage';
 import { useToast } from './lib/toast';
@@ -35,6 +37,7 @@ const TerrainTool = lazy(() => import('./components/tools/TerrainTool'));
 const PhotoTool = lazy(() => import('./components/tools/PhotoTool'));
 const ReportsView = lazy(() => import('./components/ReportsView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
+const Tour = lazy(() => import('./components/Tour'));
 
 const AI_MODE_TEXT: Record<AiMode, string> = {
   'own-key': 'AI on: using your API key from this browser',
@@ -76,6 +79,7 @@ function summaryJson(ds: Dataset) {
 
 export default function App() {
   const notify = useToast();
+  const { t } = usePrefs();
   const [session, setSession] = useState<{ operator: string } | null>(() => getJSON('session', null));
   const [view, setView] = useState<View>('explore');
   const [settings, setSettings] = useState<{ open: boolean; tab?: 'settings' | 'guide' | 'gee' | 'about' }>({ open: false });
@@ -110,10 +114,18 @@ export default function App() {
   }, []);
   useEffect(refreshAi, [refreshAi]);
 
+  const [tour, setTour] = useState(false);
+  const endTour = useCallback(() => {
+    setTour(false);
+    setJSON('tour_done', true);
+  }, []);
+
   const startSession = (operator: string) => {
     const s = { operator };
     setJSON('session', s);
     setSession(s);
+    // First visit: offer the guided tour once (not in automated browsers).
+    if (!getJSON('tour_done', false) && !navigator.webdriver) setTour(true);
   };
 
   const endSession = () => {
@@ -138,8 +150,43 @@ export default function App() {
   };
 
   const saveReport = (r: ReportRecord) => {
-    persistReports([r, ...reports.filter(x => x.id !== r.id)]);
+    const next = [r, ...reports.filter(x => x.id !== r.id)];
+    if (r.figures?.length && !saveReports(next)) {
+      // Figures are the bulky part; keep the text if storage is short.
+      const { figures: _f, ...text } = r;
+      persistReports([text, ...reports.filter(x => x.id !== r.id)]);
+      notify('Report saved without its figures: browser storage is nearly full. Download the PDF to keep them.');
+      return;
+    }
+    persistReports(next);
     notify('Report saved. Find it in the Reports view.', 'success');
+  };
+
+  const PREF_KEYS = ['declination', 'units', 'theme', 'lang'];
+  const exportProject = () => {
+    const preferences: Record<string, unknown> = {};
+    for (const k of PREF_KEYS) {
+      const v = getJSON<unknown>(k, null);
+      if (v !== null) preferences[k] = v;
+    }
+    const p = buildProject({ target, boundary, reports, preferences });
+    downloadText(JSON.stringify(p), `TerraX_project_${new Date().toISOString().slice(0, 10)}.terrax.json`, 'application/json').catch(err =>
+      notify(err instanceof Error ? err.message : 'The download failed.', 'error'),
+    );
+  };
+
+  const importProject = async (file: File) => {
+    try {
+      const p = parseProject(JSON.parse(await file.text()));
+      const { reports: merged, added } = mergeReports(reports, p.reports);
+      persistReports(merged);
+      if (p.target) updateTarget(p.target);
+      if (p.boundary) setBoundary(p.boundary);
+      for (const k of PREF_KEYS) if (k in p.preferences) setJSON(k, p.preferences[k]);
+      notify(`Project imported: ${added} new report${added === 1 ? '' : 's'}${p.boundary ? ', analysis boundary' : ''}${p.target ? ', target location' : ''}. Reload to apply display preferences.`, 'success');
+    } catch (err) {
+      notify(err instanceof SyntaxError ? `${file.name} is not valid JSON.` : err instanceof Error ? err.message : 'Could not import the project.', 'error');
+    }
   };
 
   const deleteReport = (id: string) => {
@@ -231,13 +278,14 @@ export default function App() {
               else setView('explore');
             }}
           >
-            Tools
+            {t('nav.tools')}
           </button>
-          <button type="button" className={view === 'reports' ? 'active-link' : ''} aria-current={view === 'reports' ? 'page' : undefined} onClick={() => setView('reports')}>
-            Reports{reports.length ? ` (${reports.length})` : ''}
+          <button type="button" id="nav-reports" className={view === 'reports' ? 'active-link' : ''} aria-current={view === 'reports' ? 'page' : undefined} onClick={() => setView('reports')}>
+            {t('nav.reports')}
+            {reports.length ? ` (${reports.length})` : ''}
           </button>
-          <button type="button" onClick={() => setSettings({ open: true, tab: 'settings' })}>
-            Settings
+          <button type="button" id="nav-settings" onClick={() => setSettings({ open: true, tab: 'settings' })}>
+            {t('nav.settings')}
           </button>
         </nav>
         <div className="nav-right">
@@ -246,7 +294,7 @@ export default function App() {
           </span>
           {session.operator && <span className="operator">{session.operator}</span>}
           <button type="button" className="link-btn" onClick={endSession}>
-            End session
+            {t('nav.end')}
           </button>
         </div>
       </header>
@@ -259,7 +307,24 @@ export default function App() {
 
       {settings.open && (
         <Suspense fallback={null}>
-          <SettingsModal initialTab={settings.tab} target={target} onTargetChange={updateTarget} onAiChange={refreshAi} onClose={() => setSettings({ open: false })} />
+          <SettingsModal
+            initialTab={settings.tab}
+            target={target}
+            onTargetChange={updateTarget}
+            onAiChange={refreshAi}
+            onClose={() => setSettings({ open: false })}
+            onStartTour={() => {
+              setSettings({ open: false });
+              setView('explore');
+              setTour(true);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {tour && (
+        <Suspense fallback={null}>
+          <Tour onClose={endTour} />
         </Suspense>
       )}
 
@@ -273,7 +338,15 @@ export default function App() {
         <div className="center-column">
           {view === 'reports' ? (
             <Suspense fallback={<Loading />}>
-              <ReportsView reports={reports} openId={openReportId} onOpen={setOpenReportId} onDelete={deleteReport} onGoExplore={() => setView('explore')} />
+              <ReportsView
+                reports={reports}
+                openId={openReportId}
+                onOpen={setOpenReportId}
+                onDelete={deleteReport}
+                onGoExplore={() => setView('explore')}
+                onExportProject={exportProject}
+                onImportProject={importProject}
+              />
             </Suspense>
           ) : (
             <>
@@ -295,11 +368,11 @@ export default function App() {
                   <section className="tool-workspace" aria-label={info.name}>
                     <div className="tool-workspace-head">
                       <button type="button" className="link-btn" onClick={() => openTool(null)}>
-                        ← All tools
+                        {t('workspace.all')}
                       </button>
                       <div>
-                        <div className="eyebrow">{info.group}</div>
-                        <h2>{info.name}</h2>
+                        <div className="eyebrow">{t(`tool.${info.id}.group`, info.group)}</div>
+                        <h2 data-name={info.name}>{t(`tool.${info.id}.name`, info.name)}</h2>
                       </div>
                       {output?.dataset && (
                         <button type="button" className="btn btn-small push-right" onClick={exportSummary}>

@@ -11,15 +11,46 @@ interface Props {
   onOpen: (id: string | null) => void;
   onDelete: (id: string) => void;
   onGoExplore: () => void;
+  onExportProject: () => void;
+  onImportProject: (file: File) => void;
 }
 
-export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExplore }: Props) {
+function ProjectBar({ onExportProject, onImportProject }: Pick<Props, 'onExportProject' | 'onImportProject'>) {
+  return (
+    <div className="project-bar">
+      <span className="muted">Project file: the analysis boundary, target location, saved reports and preferences (never your API key).</span>
+      <div className="button-row push-right">
+        <button type="button" id="project-export" className="btn btn-small" onClick={onExportProject}>
+          Export project
+        </button>
+        <label className="btn btn-small" htmlFor="project-import">
+          Import project
+        </label>
+        <input
+          id="project-import"
+          type="file"
+          accept=".json,.terrax.json,application/json"
+          hidden
+          onChange={e => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) onImportProject(f);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExplore, onExportProject, onImportProject }: Props) {
   const notify = useToast();
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const open = reports.find(r => r.id === openId) ?? reports[0] ?? null;
 
   if (!reports.length) {
     return (
+      <>
+      <ProjectBar onExportProject={onExportProject} onImportProject={onImportProject} />
       <div className="empty-state">
         <h2>No saved reports yet</h2>
         <p>Load a dataset in Explore, then choose “Save to Reports” on its report.</p>
@@ -27,6 +58,7 @@ export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExp
           Go to Explore
         </button>
       </div>
+      </>
     );
   }
 
@@ -39,6 +71,8 @@ export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExp
   };
 
   return (
+    <>
+    <ProjectBar onExportProject={onExportProject} onImportProject={onImportProject} />
     <div className="reports-layout">
       <aside className="report-list" aria-label="Saved reports">
         <div className="eyebrow">Saved reports ({reports.length})</div>
@@ -91,8 +125,21 @@ export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExp
           <div className="markdown report-body">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{open.content.replace(/^# .*\n+/, '')}</ReactMarkdown>
           </div>
+          {open.figures && open.figures.length > 0 && (
+            <div className="report-figures">
+              {open.figures.map((f, i) => (
+                <figure key={i}>
+                  <img src={f.dataUrl} alt={f.title} width={f.width} height={f.height} />
+                  <figcaption>
+                    Figure {i + 1}. {f.title}
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
         </article>
       )}
     </div>
+    </>
   );
 }

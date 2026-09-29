@@ -97,4 +97,6 @@ export interface ReportRecord {
   source: 'ai' | 'local';
   model?: string;
   content: string;
+  /** PNG figures (result map and charts) captured when the report was saved. */
+  figures?: { title: string; dataUrl: string; width: number; height: number }[];
 }
