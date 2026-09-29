@@ -4,7 +4,7 @@ import { backToTools, chat, openTool, shapefileZip, start } from './helpers';
 test('tool hub lists every tool', async ({ page }) => {
   const errors = await start(page);
   await expect(page.locator('.tool-card')).toHaveCount(await page.locator('.tool-card').count());
-  for (const name of ['Forest loss', 'Land survey', 'Weather & climate', 'Satellite imagery', 'Terrain', 'Space & aerial photos']) {
+  for (const name of ['Forest loss', 'Carbon & biomass', 'Land survey', 'Weather & climate', 'Satellite imagery', 'Terrain', 'Space & aerial photos']) {
     await expect(page.locator('.tool-card', { hasText: name })).toBeVisible();
   }
   expect(errors).toEqual([]);
@@ -18,6 +18,31 @@ test('forest loss: synthetic sample gives areas and a report', async ({ page }) 
   await expect(stats).toContainText('Forest loss');
   await expect(stats).toContainText('ha');
   await expect(page.locator('.report-card')).toContainText('Method and limits');
+  expect(errors).toEqual([]);
+});
+
+test('carbon: inventory sample, settings and a generic CSV', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Carbon & biomass');
+  await page.click('button:has-text("Try synthetic inventory")');
+  const agb = page.locator('.stat', { hasText: 'Above-ground biomass' }).locator('.stat-value');
+  await expect(agb).toContainText('t/ha');
+  const before = await agb.innerText();
+  await expect(page.locator('.report-card')).toContainText('Chave et al. (2014)');
+  await expect(page.locator('.data-notes')).toContainText('dead stems');
+  // Denser wood → more biomass.
+  await page.fill('#carbon-density', '0.8');
+  await expect(agb).not.toHaveText(before);
+  const n = (s: string) => Number(s.replace(/,/g, '').match(/[\d.]+/)![0]);
+  expect(n(await agb.innerText())).toBeGreaterThan(n(before));
+  // An invalid value is flagged and ignored.
+  await page.fill('#carbon-density', '9');
+  await expect(page.locator('#carbon-density')).toHaveAttribute('aria-invalid', 'true');
+  const csv = 'Species,GBH\nSchima wallichii,94.2478\nSchima wallichii,62.83\n';
+  await page.setInputFiles('#carbon-file', { name: 'girths.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await expect(page.locator('.stat', { hasText: 'Live trees' })).toContainText('2');
+  await page.fill('#carbon-area', '100');
+  await expect(agb).toContainText('t/ha');
   expect(errors).toEqual([]);
 });
 

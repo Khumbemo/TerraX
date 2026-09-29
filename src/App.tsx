@@ -27,6 +27,7 @@ import type { Boundary } from './lib/zonal';
 
 // Tools and rarely needed views load on demand to keep the first load small.
 const ForestLossTool = lazy(() => import('./components/tools/ForestLossTool'));
+const CarbonTool = lazy(() => import('./components/tools/CarbonTool'));
 const SurveyTool = lazy(() => import('./components/tools/SurveyTool'));
 const DataTool = lazy(() => import('./components/tools/DataTool'));
 const TerrainTool = lazy(() => import('./components/tools/TerrainTool'));
@@ -305,7 +306,7 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    {boundary && tool !== 'photo' && (
+                    {boundary && tool !== 'photo' && tool !== 'carbon' && (
                       <div className="boundary-banner" role="status">
                         <span>
                           Analysis boundary: <strong>{boundary.name}</strong> ({(boundary.areaM2 / 10_000).toFixed(2)} ha).{' '}
@@ -318,6 +319,7 @@ export default function App() {
                     )}
                     <Suspense fallback={<Loading />}>
                       {tool === 'forest' && <ForestLossTool onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'carbon' && <CarbonTool onOutput={setOutput} />}
                       {tool === 'survey' && <SurveyTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} drawPoints={drawPts} onDraw={setDrawPts} />}
                       {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} boundary={boundary} />}
                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} />}

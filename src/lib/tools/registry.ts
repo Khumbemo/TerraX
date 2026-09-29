@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import type { LatLngBounds } from '../geo';
 import type { Dataset } from '../types';
 
-export type ToolId = 'forest' | 'survey' | 'weather' | 'satellite' | 'terrain' | 'photo';
+export type ToolId = 'forest' | 'carbon' | 'survey' | 'weather' | 'satellite' | 'terrain' | 'photo';
 
 export interface ToolInfo {
   id: ToolId;
@@ -25,6 +25,15 @@ export const TOOLS: ToolInfo[] = [
     measures: ['Forest area and loss in hectares', 'Loss share and regrowth', 'Hansen loss by year'],
     formats: 'Two NDVI or Red/NIR GeoTIFFs · Hansen lossyear GeoTIFF',
     mark: 'Fo',
+  },
+  {
+    id: 'carbon',
+    name: 'Carbon & biomass',
+    group: 'Forestry',
+    summary: 'Estimate tree biomass, carbon stock and CO₂ from a field inventory.',
+    measures: ['Biomass and carbon per hectare with 95 % CI', 'Chave 2014 allometry, IPCC root:shoot', 'Basal area, stems and species shares'],
+    formats: 'Forest-Capture CSV · CSV with DBH/GBH and height',
+    mark: 'Cb',
   },
   {
     id: 'survey',

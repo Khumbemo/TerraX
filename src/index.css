@@ -1702,6 +1702,7 @@ select {
   transform: translateY(-1px);
 }
 .tool-forest { --tool: #34d399; }
+.tool-carbon { --tool: #86c06c; }
 .tool-survey { --tool: #f5b84b; }
 .tool-weather { --tool: #38bdf8; }
 .tool-satellite { --tool: #a78bfa; }
@@ -1852,6 +1853,42 @@ select {
   padding: 6px 8px;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
+}
+.param select {
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text);
+  max-width: 100%;
+}
+.param input[aria-invalid='true'] {
+  border-color: #e5484d;
+}
+.param-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.param-panel > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.param-panel .param-row {
+  margin-top: 10px;
+}
+.density-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 8px 16px;
+  padding-top: 8px;
+}
+.density-grid .param {
+  justify-content: space-between;
+  font-style: italic;
 }
 .result-block {
   display: flex;

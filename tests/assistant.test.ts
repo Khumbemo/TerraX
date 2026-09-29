@@ -47,6 +47,15 @@ test('questions route to the right topic, typos included', () => {
     ['what does the mann kendall p value mean', 'trend'],
     ['can i upload kml files', 'formats'],
     ['what is hypsometric integral', 'hypsometric'],
+    ['how do I estimate carbon stock', 'carbon'],
+    ['calculate biomass from dbh and height', 'carbon'],
+    ['import my forest capture data', 'carbon'],
+    ['what wood density should I use', 'wooddensity'],
+    ['clip forest loss to my plot boundary', 'aoi'],
+    ['only analyse pixels inside my plot', 'aoi'],
+    ['can I draw a polygon on the map', 'draw'],
+    ['export my boundary as kml', 'draw'],
+    ['how much forest was lost', 'forest'],
   ];
   for (const [q, id] of cases) assert.equal(new OfflineAssistant('guide').reply(q, ctx).topic, id, q);
 });

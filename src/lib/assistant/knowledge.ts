@@ -42,6 +42,48 @@ export const TOPICS: Topic[] = [
     suggestions: ['How do I estimate forest loss?', 'What canopy threshold should I use?'],
   },
   {
+    id: 'carbon',
+    title: 'Carbon & biomass',
+    keywords: { carbon: 4, biomass: 4, co2: 3, sequestration: 3, allometry: 3, allometric: 3, dbh: 3, gbh: 3, girth: 2, inventory: 2, 'basal area': 3, stock: 1, 'forest capture': 3, agb: 3 },
+    phrases: [/carbon|biomass|co2|co₂/, /allometr/, /basal area/, /forest[- ]?capture/, /wood density/],
+    phraseBoost: 5,
+    answer:
+      '**Carbon & biomass** (Tools → Carbon & biomass) turns a tree inventory into biomass and carbon:\n\n1. Upload the **Forest-Capture** survey CSV, or any CSV with species, **DBH** (cm) or girth/**GBH** (cm), and ideally **height** (m), plus plot and plot size (m²).\n2. TerraX computes above-ground biomass per tree with **Chave et al. (2014)** (0.0673 × (ρD²H)^0.976), adds roots with the **IPCC 2006** root-to-shoot ratio for your forest zone, and converts to carbon (× 0.47) and CO₂e (× 44/12).\n3. You get t/ha with a 95 % interval across plots, basal area, stems/ha and a species table.\n\nTry **Try synthetic inventory** first.',
+    more:
+      'Accuracy tips:\n\n- **Wood density** matters as much as diameter: enter species values (Global Wood Density Database) instead of the 0.57 g/cm³ default.\n- **Measure heights** where you can; the diameter-only equations (Chave 2005 dry/moist/wet, or Chave 2014 eq. 7 with the site’s E value) are less accurate.\n- Dead stems and stumps are excluded; stems under the minimum DBH (default 5 cm) are left out.\n- The interval reflects variation between plots only, not allometric error, so use several plots.',
+    suggestions: ['What is wood density?', 'How do I measure a plot?', 'How do I estimate forest loss?'],
+  },
+  {
+    id: 'wooddensity',
+    title: 'Wood density',
+    keywords: { 'wood density': 5, density: 2, 'specific gravity': 4, rho: 2 },
+    phrases: [/wood (specific )?(density|gravity)/],
+    phraseBoost: 6,
+    answer:
+      '**Wood density** (ρ, oven-dry mass ÷ green volume, g/cm³) is how heavy a species’ wood is. Two trees with the same size can differ in biomass by a factor of two because of it, so allometric equations use D, H and ρ.\n\nTerraX uses **0.57 g/cm³** by default (the tropical Asian mean in Brown 1997, FAO) and lets you enter a value per species under Carbon & biomass → Method settings. Species values are in the **Global Wood Density Database** (Zanne et al. 2009).',
+    suggestions: ['How do I estimate carbon?'],
+  },
+  {
+    id: 'aoi',
+    title: 'Analysis boundary',
+    keywords: { clip: 4, aoi: 4, zonal: 4, 'analysis boundary': 5, 'area of interest': 5, restrict: 2, within: 1, inside: 1, mask: 1 },
+    phrases: [/(clip|limit|restrict|only).{0,30}(boundary|plot|polygon|area)/, /analysis boundary/, /area of interest/, /zonal/, /inside (my|the) (plot|boundary)/],
+    phraseBoost: 5,
+    answer:
+      'To analyse only your plot, set an **analysis boundary**:\n\n1. Open **Land survey** and load or draw the plot.\n2. Choose **Use as analysis boundary**. A banner shows it is active.\n3. Forest loss, Terrain and Satellite imagery then count only pixels whose centres fall inside the boundary, and the report says so.\n\nChoose **Clear boundary** to analyse whole images again. The raster must be WGS84, Web Mercator or UTM.',
+    suggestions: ['Can I draw a plot on the map?', 'How do I estimate forest loss?'],
+  },
+  {
+    id: 'draw',
+    title: 'Draw and export a plot',
+    keywords: { draw: 4, sketch: 3, digitise: 3, digitize: 3, vertex: 2, vertices: 2, export: 1, kml: 1, gpx: 1 },
+    phrases: [/draw/, /(export|download|save).{0,20}(kml|gpx|geojson|boundary|plot)/, /edit (the )?(vertices|boundary|polygon)/],
+    phraseBoost: 4,
+    answer:
+      'In **Land survey**, choose **Draw on map**, then click the map to add corners. Drag a corner to move it, double-click it to delete it, use **Undo**, and choose **Finish polygon** (at least three points). TerraX measures it like an uploaded file.\n\n**Edit on map** reopens a polygon for editing, and **Export** saves the result as **GeoJSON**, **KML** (Google Earth) or **GPX** (GPS units; polygons become closed tracks).',
+    suggestions: ['How do I clip an analysis to my plot?', 'How accurate is the area?'],
+  },
+  {
     id: 'survey',
     title: 'Measure a plot (Land survey)',
     keywords: { survey: 3, area: 2, measure: 2, perimeter: 2, coordinates: 1, bearing: 2, distance: 1, boundary: 2, hectare: 1, acre: 1 },
@@ -317,7 +359,7 @@ export const TOPICS: Topic[] = [
     title: 'The map',
     keywords: { map: 4, zoom: 2, pan: 1, tiles: 2, basemap: 2, navigate: 2 },
     phrases: [/\bmap\b/],
-    answer: 'The map shows your target location and whatever a tool produces: raster footprints as a blue box, and surveyed boundaries, tracks and points. It zooms to new results once and then lets you pan and zoom freely. Online it uses the CARTO dark basemap (© OpenStreetMap contributors); offline it falls back to built-in country borders.',
+    answer: 'The map shows your target location and whatever a tool produces: raster footprints as a blue box, result maps (forest change, slope classes, raster layers) as an overlay, surveyed boundaries, and the analysis boundary as a dashed amber line. **Layers** (top right) turns each layer on or off, sets the overlay’s opacity and shows its legend. It zooms to new results once and then lets you pan and zoom freely. Online it uses the CARTO dark basemap (© OpenStreetMap contributors); offline it falls back to built-in country borders.',
     suggestions: ['How do I measure a plot?'],
   },
 ];
