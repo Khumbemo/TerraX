@@ -112,6 +112,19 @@ interface LayerVis {
   opacity: number;
 }
 
+// react-leaflet's GeoJSON layer does not update its data, so give each
+// feature collection object its own key.
+const layerIds = new WeakMap<object, number>();
+let nextLayerId = 1;
+function layerKey(o: object): number {
+  let id = layerIds.get(o);
+  if (!id) {
+    id = nextLayerId++;
+    layerIds.set(o, id);
+  }
+  return id;
+}
+
 // Without tiles (the sandboxed preview) the 1:50m basemap has no detail at
 // city scale, so open at a regional view there.
 const START_ZOOM = __TERRAX_PREVIEW__ ? 5 : 10;
@@ -152,12 +165,12 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
         )}
         {image && vis.image && <ImageOverlay key={image.url.length + image.label} url={image.url} bounds={image.bounds} opacity={vis.opacity} className="pixelated-overlay" />}
         {boundary && vis.boundary && (
-          <GeoJSON key={`b-${boundary.name}-${boundary.areaM2}`} data={boundary.geojson} style={{ color: '#f5b83d', weight: 2, dashArray: '6 4', fill: false }} interactive={false} />
+          <GeoJSON key={`b-${layerKey(boundary.geojson)}`} data={boundary.geojson} style={{ color: '#f5b83d', weight: 2, dashArray: '6 4', fill: false }} interactive={false} />
         )}
         {bounds && !geojson && vis.features && <Rectangle bounds={bounds} pathOptions={{ color: '#5ab0f0', weight: 2, fillOpacity: 0.2 }} />}
         {geojson && vis.features && (
           <GeoJSON
-            key={JSON.stringify(bounds)}
+            key={layerKey(geojson)}
             data={geojson}
             style={{ color: '#5ab0f0', weight: 2, fillColor: '#5ab0f0', fillOpacity: 0.18 }}
             pointToLayer={(_f, latlng) => L.circleMarker(latlng, { radius: 5, color: '#5ab0f0', weight: 2, fillOpacity: 0.6 })}

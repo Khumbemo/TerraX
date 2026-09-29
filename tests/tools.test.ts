@@ -9,7 +9,7 @@ import { buildClassification, detectMetric } from '../src/lib/metrics';
 import { groundGeometry, openGeoTiff, sinAuthalic } from '../src/lib/rasterio';
 import { parseDelimited } from '../src/lib/table';
 import { rainfallSummary } from '../src/lib/tools/climate';
-import { analyzeHansen, analyzeNdviChange } from '../src/lib/tools/forest';
+import { analyzeBurn, analyzeHansen, analyzeNdviChange, lossPolygons } from '../src/lib/tools/forest';
 import { measureSurvey, parseCoordinateCsv } from '../src/lib/tools/survey';
 import { analyzeTerrain } from '../src/lib/tools/terrain';
 import { drawnPolygon, editableVertices, makeBoundary, polygonFeatures, toGpx, toKml } from '../src/lib/vector';
@@ -300,4 +300,59 @@ test('vector exports and drawn polygons', () => {
   assert.equal(b.geojson.features.length, 1);
   assert.equal(makeBoundary('pts', { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [0, 0] } }] }, 0), null);
   assert.equal(polygonFeatures({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'GeometryCollection', geometries: [fc.features[0].geometry] } }] }).features.length, 1);
+});
+
+// ── Burn severity, minimum mapping unit and loss polygons ─────────────────
+
+test('dNBR classes follow the USGS ranges', async () => {
+  const w = 7, h = 1;
+  const d = [-0.3, -0.2, 0, 0.2, 0.3, 0.5, 0.8]; // one pixel per class
+  const pre = new Float32Array(w).fill(0.6);
+  const post = Float32Array.from(d.map(x => 0.6 - x));
+  const r = await analyzeBurn({ raster: await tif('pre.tif', w, h, [pre]), bands: {} }, { raster: await tif('post.tif', w, h, [post]), bands: {} });
+  assert.deepEqual(Array.from(r.classes), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(r.burned.pixels, 4);
+  close(r.burned.ha!, 4 * 0.09, 1e-9);
+  close(r.meanDnbr, d.reduce((a, b) => a + b, 0) / 7, 1e-6);
+});
+
+test('minimum mapping unit removes small loss patches, also per Hansen year', async () => {
+  const w = 20, h = 20;
+  const before = new Float32Array(w * h).fill(0.8);
+  const after = new Float32Array(w * h).fill(0.8);
+  for (let y = 2; y < 10; y++) for (let x = 2; x < 10; x++) after[y * w + x] = 0.2; // 64 px = 5.76 ha
+  after[15 * w + 15] = 0.2; // 1 px = 0.09 ha
+  after[16 * w + 16] = 0.2; // diagonal neighbour: same patch (0.18 ha)
+  const rb = await tif('b.tif', w, h, [before]);
+  const ra = await tif('a.tif', w, h, [after]);
+  const all = await analyzeNdviChange({ raster: rb, bands: {} }, { raster: ra, bands: {} }, 0.5, -0.2);
+  assert.equal(all.loss.pixels, 66);
+  assert.equal(all.patches!.count, 2);
+  close(all.patches!.largest.ha!, 5.76, 1e-9);
+  const mmu = await analyzeNdviChange({ raster: rb, bands: {} }, { raster: ra, bands: {} }, 0.5, -0.2, null, { mmuHa: 0.5 });
+  assert.equal(mmu.loss.pixels, 64);
+  close(mmu.loss.ha!, 5.76, 1e-9);
+  assert.equal(mmu.patches!.removedPatches, 1);
+  assert.equal(mmu.forestBefore.pixels, w * h);
+  assert.ok(mmu.notes.some(n => /Minimum mapping unit 0.5 ha/.test(n)));
+  // Hansen: the small patch is 2019 loss; after the MMU only 2005 remains.
+  const ly = new Float32Array(w * h);
+  for (let y = 2; y < 10; y++) for (let x = 2; x < 10; x++) ly[y * w + x] = 5;
+  ly[15 * w + 15] = 19;
+  const hr = await analyzeHansen(await tif('ly.tif', w, h, [ly]), null, 30, null, { mmuHa: 0.5 });
+  assert.deepEqual(hr.byYear.map(y => [y.year, y.area.pixels]), [[2005, 64]]);
+  assert.equal(hr.totalLoss.pixels, 64);
+
+  // Loss polygons: areas add up to the loss area; coordinates are lon/lat.
+  const polys = lossPolygons(all, rb.meta)!;
+  assert.equal(polys.fc.features.length, 2);
+  const haSum = polys.fc.features.reduce((a, f) => a + (f.properties!.area_ha as number), 0);
+  close(haSum, 66 * 0.09, 1e-3);
+  const [lon, lat] = polys.fc.features[0].geometry.coordinates[0][0][0];
+  assert.ok(lon > 94 && lon < 94.2 && lat > 25.6 && lat < 25.8, `${lon}, ${lat}`);
+  // Geometric check: the big square's ring spans 8 × 30 m = 240 m east–west.
+  const ring = polys.fc.features[0].geometry.coordinates[0][0];
+  const lons = ring.map(p => p[0]);
+  const spanM = (Math.max(...lons) - Math.min(...lons)) * 111_320 * Math.cos(lat * RAD);
+  close(spanM, 240, 3);
 });

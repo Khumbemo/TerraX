@@ -94,13 +94,17 @@ export default function DataTool({ variant, onOutput, boundary }: Props) {
     }
   };
 
-  const changeView = async (mode: RasterMode) => {
+  const changeView = async (mode: RasterMode, clearOnError = false) => {
     if (!raster || !dataset) return;
     setBusy(true);
     try {
       setDataset(await readRaster(new File([], dataset.filename), mode, raster, boundary));
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not compute that layer.', 'error');
+      if (clearOnError) {
+        setDataset(null);
+        setRaster(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -129,7 +133,7 @@ export default function DataTool({ variant, onOutput, boundary }: Props) {
   useEffect(() => {
     if (lastBoundary.current === boundary) return;
     lastBoundary.current = boundary;
-    if (dataset?.kind === 'raster') changeView(dataset.view);
+    if (dataset?.kind === 'raster') changeView(dataset.view, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundary]);
 

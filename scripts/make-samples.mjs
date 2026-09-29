@@ -85,6 +85,25 @@ for (let y = 0; y < H; y++)
 await writeTif('forest_ndvi_2016_synthetic.tif', [before]);
 await writeTif('forest_ndvi_2024_synthetic.tif', [after]);
 
+// ── Burn: pre- and post-fire NBR with a graded fire scar and some regrowth ──
+const pre = new Float32Array(W * H), post = new Float32Array(W * H);
+const nb = noiseField(W, H, 9, 21);
+for (let y = 0; y < H; y++)
+  for (let x = 0; x < W; x++) {
+    const k = y * W + x;
+    const river = Math.abs(x - 60 - y * 0.2) < 3;
+    const base = river ? -0.2 : 0.3 + canopy[k] * 0.3;
+    pre[k] = base;
+    // Elliptical scar centred at (150, 90); severity falls from the core outwards.
+    const d = Math.sqrt(((x - 150) / 60) ** 2 + ((y - 90) / 42) ** 2);
+    let dnbr = (nb[k] - 0.5) * 0.06; // background noise
+    if (!river && d < 1) dnbr = 0.08 + 0.72 * (1 - d) ** 0.8 + (nb[k] - 0.5) * 0.1;
+    if (!river && x < 45 && y > 150) dnbr = -0.18 + (nb[k] - 0.5) * 0.05; // regrowth on an old clearing
+    post[k] = Math.max(-1, Math.min(1, base - dnbr));
+  }
+await writeTif('burn_nbr_pre_synthetic.tif', [pre]);
+await writeTif('burn_nbr_post_synthetic.tif', [post]);
+
 // ── Satellite: 4-band surface reflectance ×10,000 (B2 blue, B3 green, B4 red, B8 NIR) ──
 const blue = new Float32Array(W * H), green = new Float32Array(W * H), red = new Float32Array(W * H), nir = new Float32Array(W * H);
 for (let k = 0; k < W * H; k++) {

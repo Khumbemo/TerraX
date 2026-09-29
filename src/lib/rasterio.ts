@@ -148,7 +148,7 @@ function isUtm(epsg: number | null): boolean {
  * authalic latitude); Web Mercator cells are corrected by cos²(latitude);
  * UTM cells use the projected size (scale error < 0.1 % within a zone).
  */
-export function groundGeometry(meta: GeoMeta, grid: Grid): { cellArea: (row: number) => number; spacing: (row: number) => { dx: number; dy: number }; note: string } | null {
+export function groundGeometry(meta: GeoMeta, grid: Pick<Grid, 'width' | 'height'>): { cellArea: (row: number) => number; spacing: (row: number) => { dx: number; dy: number }; note: string } | null {
   if (!meta.bbox || !meta.pixelSize) return null;
   const [minX, minY, maxX, maxY] = meta.bbox;
   const cw = (maxX - minX) / grid.width; // cell size in CRS units

@@ -322,7 +322,7 @@ export default function App() {
                       {tool === 'carbon' && <CarbonTool onOutput={setOutput} />}
                       {tool === 'survey' && <SurveyTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} drawPoints={drawPts} onDraw={setDrawPts} />}
                       {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} boundary={boundary} />}
-                      {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
                     </Suspense>
                   </section>
