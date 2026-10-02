@@ -116,7 +116,7 @@ test('installed app works offline after one visit', async ({ page, context }) =>
   expect(errors).toEqual([]);
 });
 
-test('space background: Earth by default, galaxy, off, and the galaxy theme', async ({ page }) => {
+test('space background: Earth at night by default, galaxy, off, and the galaxy theme', async ({ page }) => {
   const errors = await start(page);
   await expect(page.locator('.space-background.bg-earth canvas.space-canvas')).toBeAttached();
   await expect(page.locator('html')).toHaveAttribute('data-bg', 'on');
@@ -125,10 +125,14 @@ test('space background: Earth by default, galaxy, off, and the galaxy theme', as
     const c = document.querySelector<HTMLCanvasElement>('.space-canvas')!;
     const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
     let bright = 0;
-    for (let i = 0; i < d.length; i += 400) if (d[i + 2] > 60) bright++;
+    // City lights: warm pixels (red well above blue) on the night side.
+    for (let i = 0; i < d.length; i += 40) if (d[i] > 120 && d[i] > d[i + 2] + 50) bright++;
     return bright;
-  }), { timeout: 15_000 }).toBeGreaterThan(100);
+  }), { timeout: 20_000 }).toBeGreaterThan(200);
   await page.click('#nav-settings');
+  await expect(page.locator('#pref-background')).toHaveValue('earth-night');
+  await page.selectOption('#pref-background', 'earth');
+  await expect(page.locator('.space-background.bg-earth canvas')).toBeAttached();
   await page.selectOption('#pref-background', 'galaxy');
   await expect(page.locator('.space-background.bg-galaxy canvas')).toBeAttached();
   await page.selectOption('#pref-theme', 'galaxy');

@@ -136,6 +136,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                     <label className="inline-select">
                       <span>{prefs.t('prefs.background')}</span>
                       <select id="pref-background" value={prefs.background} onChange={e => prefs.setBackground(e.target.value as Background)}>
+                        <option value="earth-night">{prefs.t('prefs.bg.earthNight')}</option>
                         <option value="earth">{prefs.t('prefs.bg.earth')}</option>
                         <option value="galaxy">{prefs.t('prefs.bg.galaxy')}</option>
                         <option value="custom">{prefs.t('prefs.bg.custom')}</option>

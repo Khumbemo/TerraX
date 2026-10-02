@@ -4,7 +4,7 @@ import { getJSON, setJSON } from './storage';
 import type { Units } from './units';
 
 export type Theme = 'dark' | 'light' | 'galaxy';
-export type Background = 'earth' | 'galaxy' | 'custom' | 'off';
+export type Background = 'earth-night' | 'earth' | 'galaxy' | 'custom' | 'off';
 
 interface Prefs {
   theme: Theme;
@@ -32,7 +32,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => stored('theme', ['dark', 'light', 'galaxy'] as const, 'dark'));
   const [units, setUnitsState] = useState<Units>(() => stored('units', ['metric', 'imperial'] as const, 'metric'));
   const [lang, setLangState] = useState<Lang>(() => stored('lang', ['en', 'hi'] as const, 'en'));
-  const [background, setBgState] = useState<Background>(() => stored('background', ['earth', 'galaxy', 'custom', 'off'] as const, 'earth'));
+  const [background, setBgState] = useState<Background>(() => stored('background', ['earth-night', 'earth', 'galaxy', 'custom', 'off'] as const, 'earth-night'));
   const [customBgVersion, setCustomBgVersion] = useState(0);
   const setBackground = useCallback((b: Background) => {
     setBgState(b);

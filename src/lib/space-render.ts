@@ -1,13 +1,19 @@
 // Decorative backgrounds drawn on a canvas:
 //  • Earth from orbit: orthographic view of Natural Earth land, centred
 //    south of the target so the target region sits on the visible upper
-//    globe, lit by the real sun position (day/night terminator for now).
-//    Land colours are illustrative, not imagery; there are no clouds or
-//    city lights because no such data is bundled.
+//    globe. "live" lights it by the real sun position (day/night line now);
+//    "night" shows the visible side at night with a dawn glow on one limb.
+//    City lights are drawn from 49,025 GeoNames places (≥ 5,000 people):
+//    each light's extent and brightness scale with population, so the
+//    pattern follows where people live, as in night-time satellite
+//    composites, but it is a model, not satellite night-light data.
+//    Land colours are illustrative; there are no clouds.
 //  • Galaxy: procedural star field and Milky-Way-like band (not a real sky map).
 import { solarAngles } from './solar';
 
 const RAD = Math.PI / 180;
+/** Land mask size (equirectangular). 4096 × 2048 stays within every browser's canvas limit. */
+export const MASK_W = 4096, MASK_H = 2048;
 
 function rng(seed: number) {
   return () => {
@@ -59,7 +65,7 @@ export interface LandShapes {
 }
 
 /** Rasterises land polygons to an equirectangular mask (1 = land). */
-export function landMask(land: LandShapes, w = 2048, h = 1024): Uint8Array {
+export function landMask(land: LandShapes, w = MASK_W, h = MASK_H): Uint8Array {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
@@ -70,12 +76,27 @@ export function landMask(land: LandShapes, w = 2048, h = 1024): Uint8Array {
   for (const f of land.features) {
     const polys = (f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates) as Ring[][];
     for (const poly of polys) {
-      g.beginPath();
-      for (const ring of poly) {
-        ring.forEach(([lon, lat], i) => (i ? g.lineTo(X(lon), Y(lat)) : g.moveTo(X(lon), Y(lat))));
-        g.closePath();
+      // Rings that cross the 180° meridian jump by ~360° in longitude; unwrap them so they stay
+      // continuous, then draw the polygon shifted by −360°, 0 and +360° so both sides are filled.
+      const unwrapped = poly.map(ring => {
+        let off = 0;
+        return ring.map(([lon, lat], i) => {
+          if (i) {
+            const prev = ring[i - 1][0];
+            if (lon - prev > 180) off -= 360;
+            else if (prev - lon > 180) off += 360;
+          }
+          return [lon + off, lat];
+        });
+      });
+      for (const shift of [-360, 0, 360]) {
+        g.beginPath();
+        for (const ring of unwrapped) {
+          ring.forEach(([lon, lat], i) => (i ? g.lineTo(X(lon + shift), Y(lat)) : g.moveTo(X(lon + shift), Y(lat))));
+          g.closePath();
+        }
+        g.fill('evenodd');
       }
-      g.fill('evenodd');
     }
   }
   const px = g.getImageData(0, 0, w, h).data;
@@ -102,19 +123,88 @@ function drawStars(img: ImageData, count: number, seed: number, skip?: (x: numbe
   }
 }
 
-/** Earth seen from orbit, centred below `target`, lit by the sun at `date`. */
-export function renderEarth(ctx: CanvasRenderingContext2D, w: number, h: number, mask: Uint8Array, target: { lat: number; lon: number }, date: Date) {
+/** Decodes the packed city table into lon, lat (degrees) and population arrays. */
+export function decodeCities(b64: string, minPop: number): { lon: Float32Array; lat: Float32Array; pop: Float32Array } {
+  const bin = atob(b64);
+  const n = Math.floor(bin.length / 5);
+  const lon = new Float32Array(n), lat = new Float32Array(n), pop = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const o = i * 5;
+    const u = bin.charCodeAt(o) | (bin.charCodeAt(o + 1) << 8);
+    const v = bin.charCodeAt(o + 2) | (bin.charCodeAt(o + 3) << 8);
+    lon[i] = (u / 65535) * 360 - 180;
+    lat[i] = (v / 65535) * 180 - 90;
+    pop[i] = minPop * 10 ** ((bin.charCodeAt(o + 4) / 255) * 4);
+  }
+  return { lon, lat, pop };
+}
+
+export type Cities = ReturnType<typeof decodeCities>;
+
+/** Separable box blur of a float image, `passes` times (≈ Gaussian). */
+function blur(src: Float32Array, w: number, h: number, r: number, passes = 3): Float32Array {
+  let a = Float32Array.from(src);
+  let b = new Float32Array(src.length);
+  const norm = 1 / (2 * r + 1);
+  for (let p = 0; p < passes; p++) {
+    for (let y = 0; y < h; y++) {
+      let acc = 0;
+      const row = y * w;
+      for (let x = -r; x <= r; x++) acc += a[row + Math.min(w - 1, Math.max(0, x))];
+      for (let x = 0; x < w; x++) {
+        b[row + x] = acc * norm;
+        acc += a[row + Math.min(w - 1, x + r + 1)] - a[row + Math.max(0, x - r)];
+      }
+    }
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let y = -r; y <= r; y++) acc += b[Math.min(h - 1, Math.max(0, y)) * w + x];
+      for (let y = 0; y < h; y++) {
+        a[y * w + x] = acc * norm;
+        acc += b[Math.min(h - 1, y + r + 1) * w + x] - b[Math.max(0, y - r) * w + x];
+      }
+    }
+  }
+  return a;
+}
+
+/** Earth seen from orbit, centred below `target`; "live" uses the sun at `date`, "night" a night-side view. */
+export function renderEarth(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  mask: Uint8Array,
+  target: { lat: number; lon: number },
+  date: Date,
+  mode: 'live' | 'night' = 'live',
+  cities: Cities | null = null,
+) {
   const img = ctx.createImageData(w, h);
   const d = img.data;
-  const MW = 2048, MH = 1024;
+  const MW = MASK_W, MH = MASK_H;
   const R = Math.max(w, h) * 0.95;
   const cx = w * 0.55, cy = h * 0.42 + R; // globe top at ~42 % of the height
   // Centre the view ~30° south of the target so it appears on the visible upper cap.
   const lat0 = Math.max(-80, Math.min(80, target.lat - 30)) * RAD, lon0 = target.lon * RAD;
   const sin0 = Math.sin(lat0), cos0 = Math.cos(lat0);
-  const sun = subsolarPoint(date);
-  const sl = sun.lat * RAD, sL = sun.lon * RAD;
-  const sx = Math.cos(sl) * Math.cos(sL), sy = Math.cos(sl) * Math.sin(sL), sz = Math.sin(sl);
+  let sx: number, sy: number, sz: number;
+  if (mode === 'night') {
+    // Sun 128° from the view centre, towards the east: the visible disc is in night with a dawn glow on its eastern limb.
+    const cxv = cos0 * Math.cos(lon0), cyv = cos0 * Math.sin(lon0), czv = sin0;
+    const ex = -Math.sin(lon0), ey = Math.cos(lon0);
+    const a = 128 * RAD;
+    sx = Math.cos(a) * cxv + Math.sin(a) * ex;
+    sy = Math.cos(a) * cyv + Math.sin(a) * ey;
+    sz = Math.cos(a) * czv;
+  } else {
+    const sun = subsolarPoint(date);
+    const sl = sun.lat * RAD, sL = sun.lon * RAD;
+    sx = Math.cos(sl) * Math.cos(sL);
+    sy = Math.cos(sl) * Math.sin(sL);
+    sz = Math.sin(sl);
+  }
+  // Night-side factor per pixel (0 day … 1 full night), used to place city lights.
+  const nightAt = new Float32Array(w * h);
   const noise = makeNoise(11);
   for (let py = 0; py < h; py++) {
     for (let px = 0; px < w; px++) {
@@ -122,11 +212,13 @@ export function renderEarth(ctx: CanvasRenderingContext2D, w: number, h: number,
       const x = (px - cx) / R, y = (cy - py) / R;
       const rho2 = x * x + y * y;
       if (rho2 >= 1) {
-        // Space with a thin atmospheric glow above the limb.
-        const t = Math.max(0, 1 - (Math.sqrt(rho2) - 1) * 60);
-        d[k] = 2 + 30 * t * t;
-        d[k + 1] = 4 + 90 * t * t;
-        d[k + 2] = 10 + 170 * t * t;
+        // Space with a thin atmospheric glow above the limb, brighter where the limb is sunlit.
+        const t = Math.max(0, 1 - (Math.sqrt(rho2) - 1) * 45);
+        const lit = Math.max(0, Math.min(1, ((x * (sy * Math.cos(lon0) - sx * Math.sin(lon0)) + y * (sz * cos0 - (sx * Math.cos(lon0) + sy * Math.sin(lon0)) * sin0)) / Math.sqrt(rho2) + 0.35) / 0.7));
+        const g = t * t * (0.35 + 0.65 * lit);
+        d[k] = 2 + 45 * g;
+        d[k + 1] = 4 + 120 * g;
+        d[k + 2] = 10 + 230 * g;
         d[k + 3] = 255;
         continue;
       }
@@ -150,30 +242,110 @@ export function renderEarth(ctx: CanvasRenderingContext2D, w: number, h: number,
       const n = noise(lo * 0.08 + 50, la * 0.08 + 50);
       // Illustrative surface colours: ice sheets only on Antarctica and Greenland; tundra at high northern latitudes.
       const ocean: [number, number, number] = [14 + 8 * n, 48 + 12 * n, 96 + 20 * n];
-      let ground: [number, number, number];
-      const greenland = la > 59 && lo > -74 && lo < -11;
-      if (la < -60 || (greenland && la > 61)) ground = [214, 222, 230];
-      else if (la > 64) ground = [112 + 20 * n, 112 + 14 * n, 94 + 10 * n];
-      else {
-        const arid = Math.max(0, 1 - Math.abs(Math.abs(la) - 24) / 14) * (0.4 + 0.8 * n);
-        ground = [52 + 110 * arid, 88 + 40 * arid, 50 + 30 * arid];
-      }
+      // Smooth blends between temperate, tundra and ice colours (no hard latitude edges).
+      const sstep = (a: number, b: number, t: number) => {
+        const x = Math.min(1, Math.max(0, (t - a) / (b - a)));
+        return x * x * (3 - 2 * x);
+      };
+      const arid = Math.max(0, 1 - Math.abs(Math.abs(la) - 24) / 14) * (0.4 + 0.8 * n);
+      const temperate = [52 + 110 * arid, 88 + 40 * arid, 50 + 30 * arid];
+      const tundra = [112 + 20 * n, 112 + 14 * n, 94 + 10 * n];
+      const ice = [214, 222, 230];
+      const tT = sstep(58, 70, la);
+      const greenlandIce = la > 59 && lo > -74 && lo < -11 ? sstep(59, 64, la) : 0;
+      const tI = Math.max(sstep(-58, -64, la), greenlandIce);
+      const ground = temperate.map((t0, i) => {
+        const g1 = t0 + (tundra[i] - t0) * tT;
+        return g1 + (ice[i] - g1) * tI;
+      }) as [number, number, number];
       const base = ocean.map((o, i) => o + (ground[i] - o) * landFrac) as [number, number, number];
       const edge = Math.pow(1 - cosc, 2.2); // limb: atmosphere haze
-      const light = 0.12 + 0.88 * day * (0.55 + 0.45 * Math.max(0, mu));
-      d[k] = base[0] * light * (1 - edge * 0.5) + 40 * edge * (0.3 + day);
-      d[k + 1] = base[1] * light * (1 - edge * 0.5) + 110 * edge * (0.3 + day);
-      d[k + 2] = base[2] * light * (1 - edge * 0.5) + 200 * edge * (0.3 + day);
-      if (day < 0.5) {
-        const night = (0.5 - day) * 2;
-        for (let ch = 0; ch < 3; ch++) d[k + ch] *= 1 - 0.75 * night;
-        d[k + 2] += 6 * night;
-      }
+      const light = day * (0.55 + 0.45 * Math.max(0, mu));
+      // Night surface: faint "moonlit" land and near-black ocean, as in night composites.
+      const nightCol = [4 + 14 * landFrac + 4 * n, 8 + 16 * landFrac + 4 * n, 18 + 18 * landFrac + 6 * n];
+      for (let ch = 0; ch < 3; ch++) d[k + ch] = nightCol[ch] * (1 - day) + base[ch] * light;
+      const haze = edge * (0.25 + 0.75 * day);
+      d[k] += 40 * haze;
+      d[k + 1] += 110 * haze;
+      d[k + 2] += 210 * haze;
+      // Warm twilight band along the terminator.
+      const dusk = Math.max(0, 1 - Math.abs(mu + 0.02) / 0.07) * 0.35;
+      d[k] += 70 * dusk;
+      d[k + 1] += 32 * dusk;
+      d[k + 2] += 8 * dusk;
       d[k + 3] = 255;
+      nightAt[py * w + px] = Math.min(1, Math.max(0, (-mu - 0.01) / 0.12)) * (1 - 0.6 * edge);
     }
   }
+  if (cities) drawCityLights(d, w, h, cities, { cx, cy, R, lon0, sin0, cos0 }, nightAt);
   drawStars(img, Math.round((w * h) / 900), 5, (x, yy) => (x - cx) ** 2 + (yy - cy) ** 2 < R * R * 1.001);
   ctx.putImageData(img, 0, 0);
+}
+
+/**
+ * Splats city lights on the night side: each place becomes a cluster of
+ * small glows covering roughly its urban extent (radius ≈ 0.9 km ×
+ * (population / 10,000)^0.45) with total brightness ∝ population^0.85,
+ * then a blurred bloom is added. Tone-mapped with 1 − e^(−L).
+ */
+function drawCityLights(
+  d: Uint8ClampedArray,
+  w: number,
+  h: number,
+  c: Cities,
+  v: { cx: number; cy: number; R: number; lon0: number; sin0: number; cos0: number },
+  nightAt: Float32Array,
+) {
+  const L = new Float32Array(w * h);
+  const pxPerKm = v.R / 6371;
+  const r = rng(17);
+  const deposit = (x: number, y: number, amount: number) => {
+    const x0 = Math.floor(x), y0 = Math.floor(y);
+    if (x0 < 0 || y0 < 0 || x0 >= w - 1 || y0 >= h - 1) return;
+    const fx = x - x0, fy = y - y0;
+    L[y0 * w + x0] += amount * (1 - fx) * (1 - fy);
+    L[y0 * w + x0 + 1] += amount * fx * (1 - fy);
+    L[(y0 + 1) * w + x0] += amount * (1 - fx) * fy;
+    L[(y0 + 1) * w + x0 + 1] += amount * fx * fy;
+  };
+  for (let i = 0; i < c.lon.length; i++) {
+    const phi = c.lat[i] * RAD, dl = c.lon[i] * RAD - v.lon0;
+    const cp = Math.cos(phi);
+    const cosc = v.sin0 * Math.sin(phi) + v.cos0 * cp * Math.cos(dl);
+    if (cosc <= 0.02) continue; // far side or edge-on
+    const sx = v.cx + v.R * cp * Math.sin(dl);
+    const sy = v.cy - v.R * (v.cos0 * Math.sin(phi) - v.sin0 * cp * Math.cos(dl));
+    if (sx < -20 || sy < -20 || sx > w + 20 || sy > h + 20) continue;
+    const night = nightAt[Math.min(h - 1, Math.max(0, Math.round(sy))) * w + Math.min(w - 1, Math.max(0, Math.round(sx)))];
+    if (night <= 0.01) continue;
+    const pop = c.pop[i];
+    const radiusPx = 0.9 * Math.pow(pop / 1e4, 0.45) * pxPerKm;
+    const total = 0.8 * Math.pow(pop / 5000, 0.85) * night * (0.4 + 0.6 * cosc);
+    // Few sub-lights for towns, many for metropolises, so large cities get an organic, speckled shape.
+    const nSub = Math.max(1, Math.min(600, Math.round(radiusPx * radiusPx * 1.5)));
+    const per = total / nSub;
+    for (let j = 0; j < nSub; j++) {
+      // Gaussian offsets (Box–Muller), squashed toward the limb by cos c in the radial direction (approximation).
+      const g1 = Math.sqrt(-2 * Math.log(1 - r())) * 0.55 * radiusPx;
+      const t = r() * 2 * Math.PI;
+      deposit(sx + g1 * Math.cos(t), sy + g1 * Math.sin(t) * (0.35 + 0.65 * cosc), per);
+    }
+  }
+  const glowNear = blur(L, w, h, 1, 2);
+  const bloom = blur(L, w, h, Math.max(2, Math.round(w / 300)), 3);
+  for (let k = 0; k < w * h; k++) {
+    const core = glowNear[k] * 0.9 + L[k] * 0.35;
+    const halo = bloom[k] * 3.5;
+    if (core + halo < 0.002) continue;
+    const a = 1 - Math.exp(-core * 2.2);
+    const hb = 1 - Math.exp(-halo);
+    const o = k * 4;
+    // Sodium orange at the edges, warm white in bright cores.
+    const white = Math.min(1, core * 0.8);
+    d[o] = Math.min(255, d[o] + 255 * a + 150 * hb);
+    d[o + 1] = Math.min(255, d[o + 1] + (170 + 70 * white) * a + 80 * hb);
+    d[o + 2] = Math.min(255, d[o + 2] + (70 + 120 * white) * a + 25 * hb);
+  }
 }
 
 /** Procedural galaxy: star field with a dusty, glowing band across the sky. */

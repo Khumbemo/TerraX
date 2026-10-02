@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { idbGet } from '../lib/idb';
 import { usePrefs } from '../lib/prefs';
-import { landMask, renderEarth, renderGalaxy, type LandShapes } from '../lib/space-render';
+import { decodeCities, landMask, renderEarth, renderGalaxy, type Cities, type LandShapes } from '../lib/space-render';
 
 interface Props {
   target: { lat: number; lon: number };
@@ -18,6 +18,14 @@ function loadMask(): Promise<Uint8Array> {
   return maskPromise;
 }
 
+let citiesPromise: Promise<Cities> | null = null;
+function loadCities(): Promise<Cities> {
+  if (!citiesPromise) citiesPromise = import('../lib/data/city-lights').then(m => decodeCities(m.CITY_DATA, m.MIN_POPULATION));
+  return citiesPromise;
+}
+
+const isEarth = (b: string) => b === 'earth' || b === 'earth-night';
+
 /** Full-window decorative background: Earth from orbit, a galaxy, or the user's own image. */
 export default function SpaceBackground({ target }: Props) {
   const { background, theme, customBgVersion } = usePrefs();
@@ -28,7 +36,7 @@ export default function SpaceBackground({ target }: Props) {
 
   // Re-render the Earth every 10 minutes so the day/night line moves; redraw on resize.
   useEffect(() => {
-    if (!active || background !== 'earth') return;
+    if (!active || !isEarth(background)) return;
     const id = window.setInterval(() => setTick(t => t + 1), 10 * 60_000);
     return () => window.clearInterval(id);
   }, [active, background]);
@@ -58,10 +66,11 @@ export default function SpaceBackground({ target }: Props) {
 
   useEffect(() => {
     const c = ref.current;
-    if (!active || !c || (background !== 'earth' && background !== 'galaxy')) return;
+    if (!active || !c || (!isEarth(background) && background !== 'galaxy')) return;
     let alive = true;
-    // Draw at up to 1600 px wide and let CSS scale it; the backdrop is soft anyway.
-    const s = Math.min(1, 1600 / window.innerWidth);
+    // Draw at device resolution, up to 2560 px wide (city lights need the detail).
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const s = Math.min(dpr, 2560 / window.innerWidth);
     const w = Math.max(320, Math.round(window.innerWidth * s)), h = Math.max(240, Math.round(window.innerHeight * s));
     c.width = w;
     c.height = h;
@@ -69,8 +78,8 @@ export default function SpaceBackground({ target }: Props) {
     if (!ctx) return;
     if (background === 'galaxy') renderGalaxy(ctx, w, h);
     else
-      loadMask()
-        .then(mask => alive && renderEarth(ctx, w, h, mask, target, new Date()))
+      Promise.all([loadMask(), loadCities().catch(() => null)])
+        .then(([mask, cities]) => alive && renderEarth(ctx, w, h, mask, target, new Date(), background === 'earth-night' ? 'night' : 'live', cities))
         .catch(err => console.warn('TerraX: Earth background unavailable', err));
     return () => {
       alive = false;
@@ -79,7 +88,7 @@ export default function SpaceBackground({ target }: Props) {
 
   if (!active) return <div className="earth-background" aria-hidden="true" />;
   return (
-    <div className={`space-background bg-${background}`} aria-hidden="true">
+    <div className={`space-background bg-${isEarth(background) ? 'earth' : background}`} aria-hidden="true">
       {background === 'custom' ? custom && <div className="space-custom" style={{ backgroundImage: `url(${custom})` }} /> : <canvas ref={ref} className="space-canvas" />}
       <div className="space-shade" />
     </div>
