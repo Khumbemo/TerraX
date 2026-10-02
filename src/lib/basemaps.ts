@@ -4,8 +4,11 @@
 // a second URL form that is tried automatically if the first does not load.
 // Terms change; each entry links to the provider's own terms.
 
-export type MapKind = 'none' | 'raster' | 'vector' | 'pmtiles' | 'wms';
-export type MapGroup = 'Offline' | 'Street maps' | 'Vector maps' | 'Terrain' | 'Satellite' | 'Night lights' | 'Your own';
+export type MapKind = 'none' | 'raster' | 'vector' | 'pmtiles' | 'wms' | 'builtin';
+export type MapGroup = 'Built in (works offline)' | 'Science layers (built in)' | 'Street maps' | 'Vector maps' | 'Terrain' | 'Satellite' | 'Night lights' | 'Your own';
+export const MAP_GROUPS: MapGroup[] = ['Built in (works offline)', 'Science layers (built in)', 'Street maps', 'Vector maps', 'Terrain', 'Satellite', 'Night lights', 'Your own'];
+/** How a built-in map is drawn (see BuiltinLayers.ts). */
+export type BuiltinKind = 'image' | 'classes' | 'ne-detailed' | 'ne-borders' | 'ne-water' | 'ne-places' | 'graticule' | 'plates';
 export type KeyName = 'stadia' | 'maptiler';
 
 export interface MapDef {
@@ -34,6 +37,9 @@ export interface MapDef {
   light?: boolean;
   /** Mostly transparent; meant to sit on top of another map. */
   overlayOnly?: boolean;
+  /** Built-in maps: how they are drawn, and their file in public/data/maps/. */
+  builtin?: BuiltinKind;
+  file?: string;
 }
 
 const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
@@ -123,8 +129,29 @@ const eox = (id: string, name: string, year: number, terms: string): MapDef => (
   termsUrl: 'https://s2maps.eu',
 });
 
+const NE = 'Made with <a href="https://www.naturalearthdata.com">Natural Earth</a>';
+const BUILT_IN = 'Built into TerraX; works without internet.';
+
+/** Maps shipped with TerraX in public/data/maps/ (made by scripts/make-world-maps.py). */
+const BUILTIN_MAPS: MapDef[] = [
+  { id: 'ne-detailed', name: 'Natural Earth detailed (borders, rivers, cities)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'ne-detailed', attribution: NE, terms: `${BUILT_IN} Natural Earth 1:50 million borders, states and provinces, rivers and lakes, and 7,300 places from the 1:10 million set; public domain. Borders show the situation on the ground (Natural Earth's default view).`, termsUrl: 'https://www.naturalearthdata.com/about/terms-of-use/' },
+  { id: 'relief', name: 'Shaded relief (natural colour)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'image', file: 'relief.jpg', attribution: 'Shaded relief by Tom Patterson, <a href="https://www.shadedrelief.com">shadedrelief.com</a>', terms: `${BUILT_IN} Public domain; about 10 km per pixel at the equator.`, termsUrl: 'https://www.shadedrelief.com', light: true },
+  { id: 'etopo', name: 'Land and sea-floor relief (NOAA ETOPO1)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'image', file: 'etopo.jpg', attribution: 'Relief: <a href="https://www.ncei.noaa.gov/products/etopo-global-relief-model">NOAA ETOPO1</a> (Amante &amp; Eakins 2009)', terms: `${BUILT_IN} Public domain (NOAA). Colours show height on land and depth at sea; about 10 km per pixel at the equator.`, termsUrl: 'https://www.ncei.noaa.gov/products/etopo-global-relief-model', light: true },
+  { id: 'bluemarble', name: 'NASA Blue Marble (true colour, cloud-free)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'image', file: 'bluemarble.jpg', attribution: 'Imagery: <a href="https://visibleearth.nasa.gov">NASA Visible Earth</a>, Blue Marble Next Generation', terms: `${BUILT_IN} Public domain (NASA). A cloud-free mosaic of 2004 MODIS imagery with shaded relief; about 10 km per pixel, for overview only.`, termsUrl: 'https://visibleearth.nasa.gov' },
+  { id: 'blackmarble-local', name: 'NASA Black Marble 2016 (night lights, built in)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'image', file: 'blackmarble.jpg', attribution: 'Imagery: NASA Earth Observatory, <a href="https://earthobservatory.nasa.gov/features/NightLights">Black Marble 2016</a> (Suomi NPP VIIRS)', terms: `${BUILT_IN} Public domain (NASA). Real VIIRS night-time light, 3 km source resampled to about 10 km per pixel.`, termsUrl: 'https://earthobservatory.nasa.gov/features/NightLights' },
+
+  { id: 'ne-borders', name: 'Borders: countries, states and provinces', group: 'Science layers (built in)', kind: 'builtin', builtin: 'ne-borders', attribution: NE, terms: `${BUILT_IN} Natural Earth 1:50 million; public domain.`, termsUrl: 'https://www.naturalearthdata.com/about/terms-of-use/', overlayOnly: true },
+  { id: 'ne-water', name: 'Rivers and lakes', group: 'Science layers (built in)', kind: 'builtin', builtin: 'ne-water', attribution: NE, terms: `${BUILT_IN} Natural Earth 1:50 million; public domain.`, termsUrl: 'https://www.naturalearthdata.com/about/terms-of-use/', overlayOnly: true },
+  { id: 'ne-places', name: 'Cities and capitals (labels)', group: 'Science layers (built in)', kind: 'builtin', builtin: 'ne-places', attribution: NE, terms: `${BUILT_IN} 7,300 populated places from Natural Earth 1:10 million, shown by importance as you zoom in; public domain.`, termsUrl: 'https://www.naturalearthdata.com/about/terms-of-use/', overlayOnly: true },
+  { id: 'graticule', name: 'Latitude/longitude grid, tropics and polar circles', group: 'Science layers (built in)', kind: 'builtin', builtin: 'graticule', attribution: '', terms: `${BUILT_IN} The tropics and polar circles are placed from today's obliquity of the ecliptic (IAU 2006).`, overlayOnly: true },
+  { id: 'plates', name: 'Tectonic plate boundaries (Bird 2003)', group: 'Science layers (built in)', kind: 'builtin', builtin: 'plates', file: 'plates.json', attribution: 'Plates: Bird (2003) PB2002, <a href="https://github.com/fraxen/tectonicplates">Ahlenius/Nordpil</a> (ODC-BY)', terms: `${BUILT_IN} PB2002 model of 52 plates; boundaries coloured by type, with relative plate speed. Open Data Commons Attribution licence.`, termsUrl: 'https://opendatacommons.org/licenses/by/1-0/', overlayOnly: true },
+  { id: 'koppen', name: 'Köppen–Geiger climate zones 1980–2016 (Beck et al. 2018)', group: 'Science layers (built in)', kind: 'builtin', builtin: 'classes', file: 'koppen.png', attribution: 'Climate zones: Beck et al. (2018) <i>Scientific Data</i> 5:180214 (CC BY 4.0), via Fischer et al. (2022)', terms: `${BUILT_IN} CC BY 4.0. The 1 km map resampled to about 10 km; click the map to read the zone.`, termsUrl: 'https://www.gloh2o.org/koppen/', overlayOnly: true },
+  { id: 'biomes', name: 'Biomes (RESOLVE Ecoregions 2017)', group: 'Science layers (built in)', kind: 'builtin', builtin: 'classes', file: 'biomes.png', attribution: 'Biomes: Dinerstein et al. (2017) <i>BioScience</i> 67:534 (CC BY 4.0), via Fischer et al. (2022)', terms: `${BUILT_IN} CC BY 4.0. The 14 biomes (plus rock and ice) of the 846 RESOLVE ecoregions, at about 10 km; click the map to read the biome.`, termsUrl: 'https://ecoregions.appspot.com', overlayOnly: true },
+];
+
 export const MAPS: MapDef[] = [
-  { id: 'offline', name: 'Offline outlines only (Natural Earth)', group: 'Offline', kind: 'none', attribution: 'Natural Earth (public domain)', terms: 'Built into TerraX; works without internet.' },
+  { id: 'offline', name: 'Plain outlines (Natural Earth)', group: 'Built in (works offline)', kind: 'none', attribution: 'Natural Earth (public domain)', terms: 'Built into TerraX; works without internet.' },
+  ...BUILTIN_MAPS,
 
   carto('carto-dark', 'CARTO Dark Matter', 'dark_all', false),
   carto('carto-light', 'CARTO Positron (light)', 'light_all', true),
@@ -251,6 +278,7 @@ export function normaliseMapSettings(raw: unknown): MapSettings {
     overlays: Array.isArray(r.overlays)
       ? r.overlays
           .filter(o => o && known.has(o.id) && mapDef(o.id).kind !== 'none')
+          .filter((o, i, all) => all.findIndex(x => x.id === o.id) === i)
           .map(o => ({ id: o.id, opacity: Math.min(1, Math.max(0.05, Number(o.opacity) || 0.7)) }))
       : [],
     keys: { ...(r.keys ?? {}) },

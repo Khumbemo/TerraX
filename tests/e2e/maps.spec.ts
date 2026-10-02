@@ -13,7 +13,15 @@ async function mockTiles(page: Page, opts: { fail?: RegExp } = {}) {
     requested.push(url);
     if (opts.fail?.test(url)) return route.fulfill({ status: 404, body: 'not found' });
     if (url.includes('/styles/')) {
-      return route.fulfill({ contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({ version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#1d3b5a' } }] }) });
+      return route.fulfill({ contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': '*' }, body: JSON.stringify({
+          version: 8,
+          // A GeoJSON source is parsed in MapLibre's web worker, so a broken worker shows up as an error.
+          sources: { plot: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[94, 25], [95, 25], [95, 26], [94, 25]]] } } } },
+          layers: [
+            { id: 'bg', type: 'background', paint: { 'background-color': '#1d3b5a' } },
+            { id: 'plot', type: 'fill', source: 'plot', paint: { 'fill-color': '#f5b83d' } },
+          ],
+        }) });
     }
     return route.fulfill({ contentType: 'image/png', headers: { 'Access-Control-Allow-Origin': '*' }, body: PNG });
   });
@@ -84,7 +92,10 @@ test('vector maps (OpenFreeMap), custom WMS and a local Protomaps file', async (
   const requested = await mockTiles(page);
   const errors = await start(page);
   await page.click('.map-layers-toggle');
+  // MapLibre's web worker must be served by the app; a missing worker used to fail only after the map reported success.
+  const workerLoaded = page.waitForResponse(r => /maplibre-gl-worker-[\w-]+\.js$/.test(r.url()) && r.status() === 200 && r.request().resourceType() !== 'document');
   await page.selectOption('#layers-map-base', 'ofm-liberty');
+  await workerLoaded;
   await expect.poll(() => requested.includes('https://tiles.openfreemap.org/styles/liberty')).toBe(true);
   await expect(page.locator('.leaflet-gl-layer, canvas.maplibregl-canvas').first()).toBeAttached({ timeout: 15_000 });
   await expect(page.locator('.map-status')).toHaveCount(0);

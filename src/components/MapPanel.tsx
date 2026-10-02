@@ -2,6 +2,7 @@ import L from 'leaflet';
 import { useEffect, useMemo, useState } from 'react';
 import { GeoJSON, ImageOverlay, MapContainer, Marker, Pane, Polygon, Polyline, Rectangle, useMap, useMapEvents } from 'react-leaflet';
 import { mapDef, resolveBase } from '../lib/basemaps';
+import { BIOMES, KOPPEN, KOPPEN_LEGEND, PLATE_CLASSES, classFromColor, mercatorPixel } from '../lib/world-maps';
 import MapChooser from './MapChooser';
 import MapLayer, { type LayerStatus } from './MapLayers';
 import type { FeatureCollection, MultiLineString } from 'geojson';
@@ -107,6 +108,58 @@ function DrawLayer({ draw }: { draw: DrawState }) {
   );
 }
 
+interface LegendItem {
+  label: string;
+  color: string;
+  short?: string;
+  dashed?: boolean;
+}
+
+function ClassLegend({ title, items }: { title: string; items: LegendItem[] }) {
+  return (
+    <details className="class-legend" open={items.length <= 15}>
+      <summary>{title}</summary>
+      <div className="map-legend">
+        {items.map(l => (
+          <span key={l.label} title={l.label}>
+            <i className={`class-swatch ${l.dashed ? 'dashed' : ''}`} style={{ background: l.dashed ? 'transparent' : l.color, borderColor: l.color }} /> {l.label}
+          </span>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/** Reads the Köppen zone and/or biome under a click from the built-in class pictures. */
+function ClassIdentify({ ids }: { ids: string[] }) {
+  const map = useMap();
+  useMapEvents({
+    click: async e => {
+      const { lat, lng } = e.latlng;
+      const lon = ((((lng + 180) % 360) + 360) % 360) - 180;
+      const { loadPixels } = await import('./BuiltinLayers');
+      const rows: string[] = [];
+      for (const id of ids) {
+        const info = id === 'koppen' ? KOPPEN : BIOMES;
+        const px = await loadPixels(id === 'koppen' ? 'koppen.png' : 'biomes.png').catch(() => null);
+        if (!px) continue;
+        const at = mercatorPixel(lat, lon, px.width);
+        if (!at) continue;
+        const o = (at[1] * px.width + at[0]) * 4;
+        const c = classFromColor(px.data[o], px.data[o + 1], px.data[o + 2], px.data[o + 3], info);
+        const label = id === 'koppen' ? 'Climate (Köppen–Geiger)' : 'Biome';
+        rows.push(`<div><span class="muted">${label}:</span> <strong>${c ? (id === 'koppen' ? `${info[c - 1].code} · ` : '') + info[c - 1].name : 'none (sea or no data)'}</strong></div>`);
+      }
+      if (rows.length)
+        L.popup({ className: 'class-popup', maxWidth: 280 })
+          .setLatLng(e.latlng)
+          .setContent(`<div class="muted">${lat.toFixed(3)}°, ${lon.toFixed(3)}°</div>${rows.join('')}`)
+          .openOn(map);
+    },
+  });
+  return null;
+}
+
 interface LayerVis {
   tiles: boolean;
   outlines: boolean;
@@ -137,8 +190,10 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
   const [basemap, setBasemap] = useState<Basemap | null>(null);
   const { theme, map: mapSettings } = usePrefs();
   const light = theme === 'light';
-  // In the sandboxed preview no map server is reachable, so 'automatic' means the offline outlines there.
-  const baseDef = __TERRAX_PREVIEW__ && mapSettings.base === 'auto' ? mapDef('offline') : resolveBase(mapSettings, theme);
+  // In the sandboxed preview no map server is reachable, so 'automatic' means the built-in Natural Earth map there.
+  const baseDef = __TERRAX_PREVIEW__ && mapSettings.base === 'auto' ? mapDef('ne-detailed') : resolveBase(mapSettings, theme);
+  const classLayers = mapSettings.overlays.map(o => o.id).filter(id => id === 'koppen' || id === 'biomes');
+  const showPlates = mapSettings.overlays.some(o => o.id === 'plates');
   const [status, setStatus] = useState<Record<string, LayerStatus>>({});
   const report = (id: string) => (s: LayerStatus) => setStatus(prev => (prev[id]?.state === s.state && prev[id]?.message === s.message ? prev : { ...prev, [id]: s }));
   const [panelOpen, setPanelOpen] = useState(false);
@@ -163,7 +218,7 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
 
   return (
     <div className="map-container">
-      <MapContainer center={[target.lat, target.lon]} zoom={START_ZOOM} style={{ height: '100%', width: '100%' }}>
+      <MapContainer center={[target.lat, target.lon]} zoom={START_ZOOM} worldCopyJump style={{ height: '100%', width: '100%' }}>
         {basemap && vis.outlines && (
           // Below the tile pane (z-index 200): online tiles cover it when they load.
           <Pane name="offline-basemap" style={{ zIndex: 150 }}>
@@ -171,7 +226,7 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
             <GeoJSON key={`borders-${theme}`} data={basemap.borders} style={{ color: light ? '#9aa9ba' : '#3a5068', weight: 0.8, opacity: 0.9 }} interactive={false} />
           </Pane>
         )}
-        {vis.tiles && baseDef.kind !== 'none' && <MapLayer key={`base-${baseDef.id}`} def={baseDef} settings={mapSettings} opacity={1} zIndex={1} dark={!light} onStatus={report(baseDef.id)} />}
+        {vis.tiles && baseDef.kind !== 'none' && <MapLayer key={`base-${baseDef.id}`} def={baseDef} settings={mapSettings} opacity={1} zIndex={1} dark={!light} base onStatus={report(baseDef.id)} />}
         {mapSettings.overlays.map((o, i) => (
           <MapLayer key={`ov-${o.id}`} def={mapDef(o.id)} settings={mapSettings} opacity={o.opacity} zIndex={10 + i} dark={!light} onStatus={report(o.id)} />
         ))}
@@ -189,6 +244,7 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
           />
         )}
         {draw && <DrawLayer draw={draw} />}
+        {!draw && classLayers.length > 0 && <ClassIdentify ids={classLayers} />}
         <FitToBounds bounds={bounds} />
       </MapContainer>
       {problemKey && problemKey !== dismissed && !draw && (
@@ -263,6 +319,15 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
                 ))}
               </div>
             )}
+            {classLayers.includes('koppen') && <ClassLegend title="Köppen–Geiger climate zones" items={KOPPEN_LEGEND.map(k => ({ label: `${k.code} ${k.name}`, short: k.code, color: k.color }))} />}
+            {classLayers.includes('biomes') && <ClassLegend title="Biomes (RESOLVE 2017)" items={BIOMES.map(b => ({ label: b.name, color: b.color }))} />}
+            {showPlates && (
+              <ClassLegend
+                title="Plate boundaries (Bird 2003)"
+                items={Object.values(PLATE_CLASSES).map(c => ({ label: c.name, color: c.color, dashed: Boolean(c.dash) }))}
+              />
+            )}
+            {(classLayers.length > 0 || showPlates) && <p className="field-hint">Click the map to read the climate zone or biome; hover a plate boundary for its type and speed.</p>}
             {image && <p className="field-hint">The overlay is stretched over the raster’s bounding box, not reprojected, so it is approximate at the edges.</p>}
           </div>
         )}

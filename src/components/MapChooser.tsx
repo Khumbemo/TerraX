@@ -1,7 +1,7 @@
-import { MAPS, mapDef, type MapGroup } from '../lib/basemaps';
+import { MAPS, mapDef, MAP_GROUPS } from '../lib/basemaps';
 import { usePrefs } from '../lib/prefs';
 
-const GROUPS: MapGroup[] = ['Offline', 'Street maps', 'Vector maps', 'Terrain', 'Satellite', 'Night lights', 'Your own'];
+const GROUPS = MAP_GROUPS;
 
 interface Props {
   idPrefix: string;
@@ -19,8 +19,8 @@ export default function MapChooser({ idPrefix, compact }: Props) {
       <label className="inline-select">
         <span>{t('map.base', 'Base map')}</span>
         <select id={`${idPrefix}-base`} value={map.base} onChange={e => updateMap({ base: e.target.value, overlays: map.overlays.filter(o => o.id !== e.target.value) })}>
-          <option value="auto">{t('map.auto', 'Automatic (CARTO, follows the theme)')}</option>
-          {GROUPS.map(g => (
+          <option value="auto">{__TERRAX_PREVIEW__ ? 'Automatic (built-in Natural Earth map in this preview)' : t('map.auto', 'Automatic (CARTO, follows the theme)')}</option>
+          {GROUPS.filter(g => MAPS.some(m => m.group === g && !m.overlayOnly)).map(g => (
             <optgroup key={g} label={g}>
               {MAPS.filter(m => m.group === g && !m.overlayOnly).map(m => (
                 <option key={m.id} value={m.id}>
@@ -66,7 +66,7 @@ export default function MapChooser({ idPrefix, compact }: Props) {
           onChange={e => {
             if (!e.target.value) return;
             const d = mapDef(e.target.value);
-            updateMap({ overlays: [...map.overlays, { id: d.id, opacity: d.overlayOnly ? 1 : 0.6 }] });
+            updateMap({ overlays: [...map.overlays, { id: d.id, opacity: d.builtin === 'classes' ? 0.7 : d.overlayOnly ? 1 : 0.6 }] });
           }}
         >
           <option value="">{t('map.addOverlay', '+ Add an overlay…')}</option>

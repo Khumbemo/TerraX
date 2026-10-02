@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { MAPS, gibsDefaultDate, type MapGroup } from '../lib/basemaps';
+import { MAPS, gibsDefaultDate, MAP_GROUPS } from '../lib/basemaps';
 import { getLocalPmtiles, loadLocalPmtiles, onLocalPmtilesChange, setLocalPmtiles } from '../lib/pmtiles-store';
 import { usePrefs } from '../lib/prefs';
 import { useToast } from '../lib/toast';
 import MapChooser from './MapChooser';
 
-const GROUPS: MapGroup[] = ['Offline', 'Street maps', 'Vector maps', 'Terrain', 'Satellite', 'Night lights', 'Your own'];
+const GROUPS = MAP_GROUPS;
 
 /** Settings → Map: base map and overlays, keys, dates and your own sources. */
 export default function MapSettingsTab() {
@@ -24,7 +24,7 @@ export default function MapSettingsTab() {
         <h3>Map</h3>
         <p className="field-hint">Choose one base map and stack any number of overlays on top, each with its own opacity. The same controls are in the map’s Layers panel.</p>
         <MapChooser idPrefix="settings-map" />
-        {__TERRAX_PREVIEW__ && <p className="notice">This preview runs in a sandbox that blocks map servers, so online maps will not load here; the offline outlines are shown instead. Run TerraX locally to use them.</p>}
+        {__TERRAX_PREVIEW__ && <p className="notice">This preview runs in a sandbox that blocks map servers, so online maps will not load here. The built-in maps and science layers (the first two groups) work everywhere, including here and offline. Run TerraX locally to use the online maps.</p>}
       </section>
 
       <section>

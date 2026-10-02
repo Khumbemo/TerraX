@@ -12,6 +12,8 @@ interface Props {
   opacity: number;
   zIndex: number;
   dark: boolean;
+  /** The base map (drawn under everything else). */
+  base?: boolean;
   onStatus: (s: LayerStatus) => void;
 }
 
@@ -40,7 +42,7 @@ function watchTiles(layer: L.TileLayer, templates: string[], onStatus: (s: Layer
 }
 
 /** Adds one map (raster, WMS, vector style or PMTiles) to the Leaflet map. */
-export default function MapLayer({ def, settings, opacity, zIndex, dark, onStatus }: Props) {
+export default function MapLayer({ def, settings, opacity, zIndex, dark, base = false, onStatus }: Props) {
   const map = useMap();
   const layerRef = useRef<L.Layer | null>(null);
   const opacityRef = useRef(opacity);
@@ -69,7 +71,7 @@ export default function MapLayer({ def, settings, opacity, zIndex, dark, onStatu
       layer = l;
       layerRef.current = l;
       l.addTo(map);
-      applyOpacity(l, opacityRef.current);
+      applyOpacity(map, def, l, opacityRef.current);
     };
     const fail = (message: string) => !cancelled && onStatus({ state: 'error', message });
 
@@ -101,9 +103,16 @@ export default function MapLayer({ def, settings, opacity, zIndex, dark, onStatu
       watchTiles(t, [w.url.trim()], onStatus, 'Custom WMS');
       finish(t);
     } else if (def.kind === 'vector') {
-      Promise.all([import('maplibre-gl'), import('@maplibre/maplibre-gl-leaflet'), import('maplibre-gl/dist/maplibre-gl.css')])
-        .then(([, plugin]) => {
+      Promise.all([
+        import('maplibre-gl'),
+        import('@maplibre/maplibre-gl-leaflet'),
+        import('maplibre-gl/dist/maplibre-gl.css'),
+        // MapLibre looks for its worker next to its own chunk, where the bundler puts nothing; ship it as a worker of ours.
+        import('maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'),
+      ])
+        .then(([maplibre, plugin, , worker]) => {
           if (cancelled) return;
+          maplibre.setWorkerUrl(worker.default);
           const gl = plugin.maplibreGL({ style: def.style!, attribution: def.attribution, interactive: false } as never);
           finish(gl);
           const glMap = (gl as unknown as { getMaplibreMap: () => { on: (e: string, f: (ev: { error?: Error }) => void) => void; once: (e: string, f: () => void) => void } }).getMaplibreMap();
@@ -112,6 +121,14 @@ export default function MapLayer({ def, settings, opacity, zIndex, dark, onStatu
           (gl as unknown as { getContainer: () => HTMLElement }).getContainer().style.zIndex = String(zIndex);
         })
         .catch(err => fail(`The vector map engine could not start: ${err instanceof Error ? err.message : String(err)}. It needs WebGL.`));
+    } else if (def.kind === 'builtin') {
+      import('./BuiltinLayers')
+        .then(m => m.createBuiltinLayer(def, map, { opacity, zIndex, dark, base }))
+        .then(l => {
+          finish(l);
+          if (!cancelled) onStatus({ state: 'ok' });
+        })
+        .catch(err => fail(`${def.name} could not be loaded (${err instanceof Error ? err.message : String(err)}).`));
     } else if (def.kind === 'pmtiles') {
       // protomaps-leaflet and pmtiles' raster layer extend the global Leaflet object.
       (window as unknown as { L?: typeof L }).L ??= L;
@@ -150,17 +167,21 @@ export default function MapLayer({ def, settings, opacity, zIndex, dark, onStatu
     };
     // `config` stands in for the settings this map uses; opacity is applied below without a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, def, config, dark, zIndex, fileVersion]);
+  }, [map, def, config, dark, zIndex, base, fileVersion]);
 
   useEffect(() => {
-    if (layerRef.current) applyOpacity(layerRef.current, opacity);
-  }, [opacity]);
+    if (layerRef.current) applyOpacity(map, def, layerRef.current, opacity);
+  }, [map, def, opacity]);
   return null;
 }
 
-function applyOpacity(l: L.Layer, opacity: number) {
+function applyOpacity(map: L.Map, def: MapDef, l: L.Layer, opacity: number) {
   const grid = l as L.GridLayer;
   if (typeof grid.setOpacity === 'function') grid.setOpacity(opacity);
+  else if (def.kind === 'builtin') {
+    const pane = map.getPane(`builtin-${def.id}`);
+    if (pane) pane.style.opacity = String(opacity);
+  }
   else {
     const gl = l as unknown as { getContainer?: () => HTMLElement };
     if (gl.getContainer) gl.getContainer().style.opacity = String(opacity);

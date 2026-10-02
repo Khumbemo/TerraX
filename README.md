@@ -19,6 +19,24 @@ Every tool has sample data. The forest, terrain, satellite, survey and photo sam
 
 Also: a results assistant and an OS Guide (Gemini when configured, built-in answers otherwise), a Reports archive with Markdown and PDF export, planetary telemetry (solar time, sun position, NOAA planetary K-index), and an Earth Engine export manual.
 
+## Maps
+
+Settings → Map (or **Layers** on the map) picks one base map and any number of overlays, each with its own opacity. Online maps (OpenStreetMap, CARTO, OpenFreeMap, Esri, NASA GIBS, EOX and others) need internet; the **built-in** maps ship with the app in `public/data/maps/` and work offline:
+
+| Built-in map | Source (licence) |
+|---|---|
+| Natural Earth detailed: borders, states/provinces, rivers, lakes, 7,300 places | Natural Earth 1:50m and 1:10m (public domain), default worldview |
+| Shaded relief | Tom Patterson, shadedrelief.com (public domain) |
+| Land and sea-floor relief | NOAA ETOPO1 (public domain) |
+| Blue Marble | NASA Blue Marble Next Generation (public domain) |
+| Black Marble 2016 night lights | NASA Earth Observatory, Suomi NPP VIIRS (public domain) |
+| Köppen–Geiger climate zones 1980–2016 | Beck et al. 2018, *Sci. Data* 5:180214 (CC BY 4.0) |
+| Biomes | RESOLVE Ecoregions 2017, Dinerstein et al. 2017, *BioScience* 67:534 (CC BY 4.0) |
+| Tectonic plate boundaries with type and speed | Bird 2003, *G3* 4(3):1027, via Ahlenius/Nordpil (ODC-BY 1.0) |
+| Latitude/longitude grid, tropics and polar circles | Computed (obliquity of the ecliptic, IAU 2006) |
+
+The climate and biome rasters come from the harmonised 10 km stack of Fischer et al. 2022 (*Global Ecol. Biogeogr.* 31:2172, CC BY 4.0); clicking the map reads the class under the cursor. Pictures are about 10 km per pixel at the equator, for overview rather than plot-scale work. `python3 scripts/make-world-maps.py <source-dir>` rebuilds every file (its header lists where each source comes from).
+
 ## Run locally
 
 Prerequisite: Node.js 20 or later.
