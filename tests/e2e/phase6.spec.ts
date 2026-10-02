@@ -149,3 +149,23 @@ test('space background: Earth at night by default, galaxy, off, and the galaxy t
   await expect(page.locator('html')).toHaveAttribute('data-bg', 'off');
   expect(errors).toEqual([]);
 });
+
+test('old daytime background setting moves to the night view once; panel see-through levels', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('seeded')) {
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('terrax_background', '"earth"');
+    }
+  });
+  const errors = await start(page);
+  expect(await page.evaluate(() => localStorage.getItem('terrax_background'))).toBe('"earth-night"');
+  await page.click('#nav-settings');
+  await expect(page.locator('#pref-background')).toHaveValue('earth-night');
+  await page.selectOption('#pref-background', 'earth'); // a deliberate choice is kept after reload
+  await page.selectOption('#pref-panels', 'clear');
+  await expect(page.locator('html')).toHaveAttribute('data-panels', 'clear');
+  await page.reload();
+  expect(await page.evaluate(() => localStorage.getItem('terrax_background'))).toBe('"earth"');
+  await expect(page.locator('html')).toHaveAttribute('data-panels', 'clear');
+  expect(errors).toEqual([]);
+});

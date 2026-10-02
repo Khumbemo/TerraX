@@ -118,6 +118,31 @@
   --panel: rgba(14, 11, 38, 0.74);
   --panel-2: rgba(21, 16, 54, 0.82);
 }
+:root[data-bg='on'][data-panels='clear'] {
+  --panel: rgba(8, 17, 31, 0.5);
+  --panel-2: rgba(11, 23, 40, 0.62);
+}
+:root[data-bg='on'][data-panels='clear'][data-theme='galaxy'] {
+  --panel: rgba(14, 11, 38, 0.5);
+  --panel-2: rgba(21, 16, 54, 0.62);
+}
+:root[data-bg='on'][data-panels='solid'] {
+  --panel: rgba(8, 17, 31, 0.95);
+  --panel-2: rgba(11, 23, 40, 0.97);
+}
+:root[data-bg='on'][data-panels='solid'][data-theme='galaxy'] {
+  --panel: rgba(14, 11, 38, 0.95);
+  --panel-2: rgba(21, 16, 54, 0.97);
+}
+/* Stronger blur when panels are clear, so the lights behind never compete with text. */
+:root[data-bg='on'][data-panels='clear'] .telemetry-panel,
+:root[data-bg='on'][data-panels='clear'] .right-links-panel > *,
+:root[data-bg='on'][data-panels='clear'] .tool-workspace,
+:root[data-bg='on'][data-panels='clear'] .report-card,
+:root[data-bg='on'][data-panels='clear'] .chat-panel,
+:root[data-bg='on'][data-panels='clear'] .tool-card {
+  backdrop-filter: blur(16px) saturate(120%);
+}
 :root[data-bg='on'] body,
 :root[data-bg='on'] .login-wrapper {
   /* The html element keeps --bg; body must not paint over the fixed background layer. */
@@ -125,11 +150,12 @@
 }
 :root[data-bg='on'] .telemetry-panel,
 :root[data-bg='on'] .right-links-panel > *,
-:root[data-bg='on'] .tool-hub,
 :root[data-bg='on'] .tool-workspace,
 :root[data-bg='on'] .report-card,
-:root[data-bg='on'] .chat-panel {
-  backdrop-filter: blur(8px);
+:root[data-bg='on'] .chat-panel,
+:root[data-bg='on'] .tool-card,
+:root[data-bg='on'] .top-navbar {
+  backdrop-filter: blur(10px);
 }
 .space-background {
   position: fixed;
@@ -152,7 +178,8 @@
 .space-shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to bottom, rgba(2, 6, 13, 0.5), rgba(2, 6, 13, 0.18) 45%, rgba(2, 6, 13, 0.45));
+  /* Just enough to keep the nav bar and page edges calm; the Earth stays clearly visible. */
+  background: linear-gradient(to bottom, rgba(2, 6, 13, 0.35), rgba(2, 6, 13, 0) 30%, rgba(2, 6, 13, 0) 80%, rgba(2, 6, 13, 0.25));
 }
 
 *,

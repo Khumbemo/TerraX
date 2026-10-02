@@ -183,19 +183,23 @@ export function renderEarth(
   const d = img.data;
   const MW = MASK_W, MH = MASK_H;
   const R = Math.max(w, h) * 0.95;
-  const cx = w * 0.55, cy = h * 0.42 + R; // globe top at ~42 % of the height
-  // Centre the view ~30° south of the target so it appears on the visible upper cap.
-  const lat0 = Math.max(-80, Math.min(80, target.lat - 30)) * RAD, lon0 = target.lon * RAD;
+  const horizon = 0.3; // globe top at 30 % of the height
+  const cx = w * 0.5, cy = h * horizon + R;
+  // Tilt the view so the target appears about 68 % down the screen, i.e. the
+  // populated region around it fills the visible part of the globe.
+  const rhoT = Math.max(0.2, Math.min(0.98, 1 - (h * (0.68 - horizon)) / R));
+  const lat0 = Math.max(-85, Math.min(85, target.lat - Math.asin(rhoT) / RAD)) * RAD, lon0 = target.lon * RAD;
   const sin0 = Math.sin(lat0), cos0 = Math.cos(lat0);
   let sx: number, sy: number, sz: number;
   if (mode === 'night') {
-    // Sun 128° from the view centre, towards the east: the visible disc is in night with a dawn glow on its eastern limb.
+    // Sun almost behind the globe, just beyond the top horizon: everything on screen is night,
+    // with only a thin sunrise arc along the horizon (as in photos from the ISS).
     const cxv = cos0 * Math.cos(lon0), cyv = cos0 * Math.sin(lon0), czv = sin0;
-    const ex = -Math.sin(lon0), ey = Math.cos(lon0);
-    const a = 128 * RAD;
-    sx = Math.cos(a) * cxv + Math.sin(a) * ex;
-    sy = Math.cos(a) * cyv + Math.sin(a) * ey;
-    sz = Math.cos(a) * czv;
+    const nx0 = -sin0 * Math.cos(lon0), ny0 = -sin0 * Math.sin(lon0), nz0 = cos0; // north at the view centre
+    const a = 174 * RAD;
+    sx = Math.cos(a) * cxv + Math.sin(a) * nx0;
+    sy = Math.cos(a) * cyv + Math.sin(a) * ny0;
+    sz = Math.cos(a) * czv + Math.sin(a) * nz0;
   } else {
     const sun = subsolarPoint(date);
     const sl = sun.lat * RAD, sL = sun.lon * RAD;

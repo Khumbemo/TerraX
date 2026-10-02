@@ -3,7 +3,7 @@ import { DEFAULT_MODEL } from '../lib/gemini-shared';
 import { getAiMode, getModel, getOwnKey, refreshAiStatus, setModel, setOwnKey, type AiMode } from '../lib/ai';
 import { useToast } from '../lib/toast';
 import { idbSet } from '../lib/idb';
-import { usePrefs, type Background, type Theme } from '../lib/prefs';
+import { usePrefs, type Background, type PanelStyle, type Theme } from '../lib/prefs';
 import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
 import GEEGuidance from './GEEGuidance';
@@ -143,6 +143,16 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="off">{prefs.t('prefs.bg.off')}</option>
                       </select>
                     </label>
+                    {prefs.background !== 'off' && (
+                      <label className="inline-select">
+                        <span>{prefs.t('prefs.panels')}</span>
+                        <select id="pref-panels" value={prefs.panels} onChange={e => prefs.setPanels(e.target.value as PanelStyle)}>
+                          <option value="clear">{prefs.t('prefs.panels.clear')}</option>
+                          <option value="balanced">{prefs.t('prefs.panels.balanced')}</option>
+                          <option value="solid">{prefs.t('prefs.panels.solid')}</option>
+                        </select>
+                      </label>
+                    )}
                     {prefs.background === 'custom' && (
                       <>
                         <label className="btn btn-small" htmlFor="pref-bg-file">
