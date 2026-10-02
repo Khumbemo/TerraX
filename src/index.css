@@ -576,6 +576,41 @@ select {
   aspect-ratio: 1;
   height: auto !important;
 }
+.globe-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.globe-status-text.is-online::before,
+.globe-status-text.is-offline::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: 1px;
+  background: #34d399;
+}
+.globe-status-text.is-offline::before {
+  background: #94a3b8;
+}
+.globe-spin-toggle {
+  font: inherit;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.globe-spin-toggle:hover {
+  border-color: rgba(56, 189, 248, 0.7);
+}
 .globe-legend {
   display: flex;
   justify-content: center;

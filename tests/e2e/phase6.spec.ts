@@ -182,3 +182,29 @@ test('only visible cards blur the background, not the empty column below them', 
   expect(blurred.some(b => /^telemetry-panel$/.test(b.cls))).toBe(false);
   expect(errors).toEqual([]);
 });
+
+test('telemetry globe rotates while online and stops on target when offline', async ({ page, context }) => {
+  const errors = await start(page);
+  const globe = page.locator('canvas.globe');
+  const snap = () => globe.evaluate((c: HTMLCanvasElement) => c.toDataURL());
+  await expect(globe).toHaveAttribute('data-spinning', 'true');
+  await expect(page.locator('.globe-status')).toContainText('rotating');
+  const a = await snap();
+  await page.waitForTimeout(400);
+  expect(await snap()).not.toBe(a); // frames change while spinning
+
+  await context.setOffline(true);
+  await expect(globe).toHaveAttribute('data-spinning', 'false');
+  await expect(page.locator('.globe-status')).toContainText('Offline');
+  await page.waitForTimeout(150);
+  const b = await snap();
+  await page.waitForTimeout(400);
+  expect(await snap()).toBe(b); // static when offline
+
+  await context.setOffline(false);
+  await expect(globe).toHaveAttribute('data-spinning', 'true');
+  await page.click('.globe-spin-toggle');
+  await expect(globe).toHaveAttribute('data-spinning', 'false');
+  await expect(page.locator('.globe-status')).toContainText('paused');
+  expect(errors).toEqual([]);
+});

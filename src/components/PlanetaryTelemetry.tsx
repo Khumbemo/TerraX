@@ -22,13 +22,50 @@ const LAND_RINGS: number[][][] = (() => {
   return rings;
 })();
 
-function drawGlobe(canvas: HTMLCanvasElement, lat0: number, lon0: number, sub: { lat: number; lon: number }) {
+/** Per-pixel geometry for one canvas size and view latitude (independent of the view longitude). */
+interface GlobeGeometry {
+  px: number;
+  lat0: number;
+  /** Pixel index inside the disc, sin/cos of latitude and longitude offset from the view centre. */
+  idx: Int32Array;
+  sinPhi: Float32Array;
+  cosPhi: Float32Array;
+  dLam: Float32Array;
+}
+
+function globeGeometry(px: number, lat0: number): GlobeGeometry {
+  const R = px / 2 - 2 * (px / SIZE);
+  const c0 = px / 2;
+  const sinP0 = Math.sin(lat0 * RAD), cosP0 = Math.cos(lat0 * RAD);
+  const idx: number[] = [], sp: number[] = [], cp: number[] = [], dl: number[] = [];
+  for (let y = 0; y < px; y++)
+    for (let x = 0; x < px; x++) {
+      const dx = (x - c0) / R, dy = (c0 - y) / R;
+      const rho = Math.hypot(dx, dy);
+      if (rho > 1) continue;
+      const c = Math.asin(rho), sinc = Math.sin(c), cosc = Math.cos(c);
+      const phi = rho === 0 ? lat0 * RAD : Math.asin(cosc * sinP0 + (dy * sinc * cosP0) / rho);
+      idx.push(y * px + x);
+      sp.push(Math.sin(phi));
+      cp.push(Math.cos(phi));
+      dl.push(rho === 0 ? 0 : Math.atan2(dx * sinc, rho * cosc * cosP0 - dy * sinc * sinP0));
+    }
+  return { px, lat0, idx: Int32Array.from(idx), sinPhi: Float32Array.from(sp), cosPhi: Float32Array.from(cp), dLam: Float32Array.from(dl) };
+}
+
+let geomCache: GlobeGeometry | null = null;
+
+function drawGlobe(canvas: HTMLCanvasElement, lat0: number, lon0: number, sub: { lat: number; lon: number }, target: { lat: number; lon: number }) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const px = SIZE * dpr;
-  canvas.width = px;
-  canvas.height = px;
+  const px = Math.round(SIZE * dpr);
+  if (canvas.width !== px) {
+    canvas.width = px;
+    canvas.height = px;
+  }
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  if (!geomCache || geomCache.px !== px || geomCache.lat0 !== lat0) geomCache = globeGeometry(px, lat0);
+  const g = geomCache;
   const R = px / 2 - 2 * dpr;
   const cx = px / 2;
   const cy = px / 2;
@@ -45,29 +82,19 @@ function drawGlobe(canvas: HTMLCanvasElement, lat0: number, lon0: number, sub: {
     return [cx + R * Math.cos(phi) * Math.sin(dl), cy - R * (cosP0 * Math.sin(phi) - sinP0 * Math.cos(phi) * Math.cos(dl))];
   };
 
-  // Ocean disc with day/night shading (per-pixel inverse orthographic).
+  // Ocean disc with day/night shading: one cosine per pixel using the cached geometry.
   const img = ctx.createImageData(px, px);
   const sinD = Math.sin(sub.lat * RAD);
   const cosD = Math.cos(sub.lat * RAD);
-  for (let y = 0; y < px; y++) {
-    for (let x = 0; x < px; x++) {
-      const dx = (x - cx) / R;
-      const dy = (cy - y) / R;
-      const rho = Math.hypot(dx, dy);
-      if (rho > 1) continue;
-      const c = Math.asin(rho);
-      const sinc = Math.sin(c);
-      const cosc = Math.cos(c);
-      const phi = rho === 0 ? phi0 : Math.asin(cosc * sinP0 + (dy * sinc * cosP0) / rho);
-      const lam = lam0 + Math.atan2(dx * sinc, rho * cosc * cosP0 - dy * sinc * sinP0);
-      const sunCos = Math.sin(phi) * sinD + Math.cos(phi) * cosD * Math.cos(lam - sub.lon * RAD);
-      const light = Math.max(0, Math.min(1, (sunCos + 0.1) / 0.2)); // soft twilight band
-      const o = (y * px + x) * 4;
-      img.data[o] = 6 + 10 * light;
-      img.data[o + 1] = 18 + 30 * light;
-      img.data[o + 2] = 34 + 50 * light;
-      img.data[o + 3] = 255;
-    }
+  const off = lam0 - sub.lon * RAD;
+  for (let i = 0; i < g.idx.length; i++) {
+    const sunCos = g.sinPhi[i] * sinD + g.cosPhi[i] * cosD * Math.cos(g.dLam[i] + off);
+    const light = Math.max(0, Math.min(1, (sunCos + 0.1) / 0.2)); // soft twilight band
+    const o = g.idx[i] * 4;
+    img.data[o] = 6 + 10 * light;
+    img.data[o + 1] = 18 + 30 * light;
+    img.data[o + 2] = 34 + 50 * light;
+    img.data[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
 
@@ -111,7 +138,7 @@ function drawGlobe(canvas: HTMLCanvasElement, lat0: number, lon0: number, sub: {
     ctx.arc(s[0], s[1], 3.5 * dpr, 0, Math.PI * 2);
     ctx.fill();
   }
-  const t = project(lon0, lat0);
+  const t = project(target.lon, target.lat);
   if (t) {
     ctx.strokeStyle = '#34d399';
     ctx.lineWidth = 1.5 * dpr;
@@ -123,6 +150,24 @@ function drawGlobe(canvas: HTMLCanvasElement, lat0: number, lon0: number, sub: {
     ctx.arc(t[0], t[1], 1.8 * dpr, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+/** One full turn every 40 s while spinning. */
+const SPIN_DEG_PER_S = 9;
+
+/** True while the browser reports a network connection. */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const up = () => setOnline(true), down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  return online;
 }
 
 const Row = ({ label, value, title }: { label: string; value: string; title?: string }) => (
@@ -147,11 +192,45 @@ export default function PlanetaryTelemetry({ target }: Props) {
   const report = solarReport(now, target.lat, target.lon);
   const minuteKey = Math.floor(now.getTime() / 60_000);
 
-  // Redraw the globe once a minute (the terminator moves ~0.25° per minute).
+  const online = useOnline();
+  const [paused, setPaused] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const spinning = online && !paused;
+  const lat0 = Math.max(-60, Math.min(60, target.lat));
+  const lonRef = useRef(target.lon);
+
+  // Static view (offline or paused): face the target, redraw once a minute as the terminator moves ~0.25°/min.
   useEffect(() => {
-    if (canvasRef.current) drawGlobe(canvasRef.current, Math.max(-60, Math.min(60, target.lat)), target.lon, report.subsolar);
+    if (spinning || !canvasRef.current) return;
+    lonRef.current = target.lon;
+    drawGlobe(canvasRef.current, lat0, target.lon, report.subsolar, target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [minuteKey, target.lat, target.lon]);
+  }, [spinning, minuteKey, lat0, target.lat, target.lon]);
+
+  // Spinning view while online: the globe turns eastward; drawing stops when it is off-screen or the tab is hidden.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!spinning || !c) return;
+    let raf = 0, visible = true, lastDraw = 0;
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(([e]) => (visible = e.isIntersecting)) : null;
+    io?.observe(c);
+    const frame = (t: number) => {
+      // ~30 frames per second is smooth for a slow spin and keeps CPU use low; rAF itself stops in hidden tabs.
+      if (visible && t - lastDraw > 33) {
+        const dt = lastDraw ? Math.min(0.1, (t - lastDraw) / 1000) : 0;
+        lastDraw = t;
+        // The Earth turns west to east, so surface features drift left to right: the view longitude decreases.
+        lonRef.current = ((lonRef.current - SPIN_DEG_PER_S * dt + 540) % 360) - 180;
+        drawGlobe(c, lat0, lonRef.current, solarReport(new Date(), target.lat, target.lon).subsolar, target);
+      }
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      io?.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spinning, lat0, target.lat, target.lon]);
 
   useEffect(() => {
     if (__TERRAX_PREVIEW__) {
@@ -188,7 +267,24 @@ export default function PlanetaryTelemetry({ target }: Props) {
         <span className="pulse-dot" aria-hidden="true" /> Planetary telemetry
       </div>
 
-      <canvas ref={canvasRef} className="globe" style={{ width: SIZE, height: SIZE }} role="img" aria-label={`Globe centred on ${target.name} showing day and night`} />
+      <canvas
+        ref={canvasRef}
+        className="globe"
+        data-spinning={spinning ? 'true' : 'false'}
+        style={{ width: SIZE, height: SIZE }}
+        role="img"
+        aria-label={spinning ? 'Rotating globe showing day and night' : `Globe centred on ${target.name} showing day and night`}
+      />
+      <div className="globe-status">
+        <span className={`globe-status-text ${online ? 'is-online' : 'is-offline'}`}>
+          {!online ? 'Offline · globe paused on target' : spinning ? 'Online · rotating (1 turn / 40 s)' : 'Online · rotation paused'}
+        </span>
+        {online && (
+          <button type="button" className="globe-spin-toggle" onClick={() => setPaused((v) => !v)} aria-pressed={!paused}>
+            {paused ? 'Rotate' : 'Pause'}
+          </button>
+        )}
+      </div>
       <div className="globe-legend">
         <span>
           <i className="dot dot-target" /> {target.name}
