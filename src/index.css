@@ -647,12 +647,14 @@ select {
   overflow: hidden;
   border: 1px solid var(--line);
   position: relative;
+  /* Keep Leaflet's internal z-indexes (up to 1000) inside the map, below dialogs and toasts. */
+  isolation: isolate;
 }
 .map-layers {
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 1000;
+  z-index: 900;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -674,6 +676,7 @@ select {
 }
 .map-layers-panel {
   background: rgba(5, 10, 20, 0.94);
+  width: 290px !important;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
@@ -873,6 +876,84 @@ select {
   width: 100%;
   height: 100%;
   cursor: crosshair;
+}
+.map-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.map-chooser select {
+  max-width: 100%;
+}
+.map-chooser.compact .inline-select {
+  flex-direction: column;
+  align-items: stretch;
+}
+.map-overlays {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.overlay-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 80px 44px 20px;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.overlay-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overlay-row input[type='range'] {
+  width: 100%;
+}
+.map-status {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  position: absolute;
+  left: 10px;
+  bottom: 24px;
+  z-index: 900;
+  /* Clicks go through to the map (e.g. while drawing); only the close button takes them. */
+  pointer-events: none;
+  max-width: min(420px, calc(100% - 20px));
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--warn);
+  background: rgba(5, 10, 20, 0.9);
+  color: var(--text);
+  font-size: 12px;
+}
+#map-key-stadia,
+#map-key-maptiler {
+  width: 260px;
+  max-width: 100%;
+}
+.map-status button {
+  pointer-events: auto;
+}
+.param-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.param.wide {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+}
+.param.wide input {
+  width: 100%;
+}
+.map-terms {
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .sub-panel {
   display: flex;

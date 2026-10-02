@@ -440,10 +440,11 @@ export const TOPICS: Topic[] = [
   },
   {
     id: 'map',
-    title: 'The map',
-    keywords: { map: 4, zoom: 2, pan: 1, tiles: 2, basemap: 2, navigate: 2 },
-    phrases: [/\bmap\b/],
-    answer: 'The map shows your target location and whatever a tool produces: raster footprints as a blue box, result maps (forest change, slope classes, raster layers) as an overlay, surveyed boundaries, and the analysis boundary as a dashed amber line. **Layers** (top right) turns each layer on or off, sets the overlay’s opacity and shows its legend. It zooms to new results once and then lets you pan and zoom freely. Online it uses the CARTO dark basemap (© OpenStreetMap contributors); offline it falls back to built-in country borders.',
+    title: 'The map and map choices',
+    keywords: { map: 4, zoom: 2, pan: 1, tiles: 2, basemap: 3, 'base map': 3, navigate: 2, openstreetmap: 4, osm: 3, satellite: 1, topo: 2, overlay: 2, overlays: 2, layers: 2 },
+    phrases: [/\bmap\b/, /base ?map/, /(change|switch|choose|select).{0,20}map/, /openstreetmap|opentopomap|openfreemap|protomaps|stadia|maptiler|esri|black marble|gibs|sentinel-2 cloudless/],
+    answer:
+      'Choose the map in **Settings → Map** or the map’s **Layers** button: one **base map** plus any number of **overlays**, each with its own opacity.\n\nIncluded: OpenStreetMap, CARTO (dark, light, Voyager), OpenFreeMap vector maps (no key), OpenTopoMap and Esri topographic, Stadia/Stamen (account or key), MapTiler (free key), Esri World Imagery, EOX Sentinel-2 cloudless 2016 and 2020, NASA MODIS and VIIRS daily true colour (pick the date), NASA Black Marble and Earth at Night, place labels, your own tile URL or WMS (e.g. ISRO Bhuvan), Protomaps from a .pmtiles file (works offline), and the built-in offline outlines.\n\nEach map’s licence is listed under Settings → Map → All maps and their terms. If a map cannot load, a note on the map says so and the offline outlines stay underneath.',
     suggestions: ['How do I measure a plot?'],
   },
 ];

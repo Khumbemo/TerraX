@@ -7,6 +7,7 @@ import { usePrefs, type Background, type PanelStyle, type Theme } from '../lib/p
 import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
 import GEEGuidance from './GEEGuidance';
+import MapSettingsTab from './MapSettingsTab';
 
 export interface Target {
   lat: number;
@@ -23,10 +24,11 @@ interface Props {
   onStartTour?: () => void;
 }
 
-type Tab = 'settings' | 'guide' | 'gee' | 'about';
+type Tab = 'settings' | 'map' | 'guide' | 'gee' | 'about';
 
 const TABS: [Tab, string][] = [
   ['settings', 'Settings'],
+  ['map', 'Map'],
   ['guide', 'How TerraX works'],
   ['gee', 'Earth Engine manual'],
   ['about', 'About'],
@@ -274,6 +276,8 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                 </section>
               </div>
             )}
+
+            {tab === 'map' && <MapSettingsTab />}
 
             {tab === 'guide' && (
               <div className="prose">

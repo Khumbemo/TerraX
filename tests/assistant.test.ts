@@ -72,6 +72,8 @@ test('questions route to the right topic, typos included', () => {
     ['how to detect encroachment on my plot', 'encroachment'],
     ['illegal construction next to my property', 'encroachment'],
     ['measure my plot', 'survey'],
+    ['how do I switch to openstreetmap', 'map'],
+    ['change the base map to satellite', 'map'],
   ];
   for (const [q, id] of cases) assert.equal(new OfflineAssistant('guide').reply(q, ctx).topic, id, q);
 });

@@ -1,6 +1,9 @@
 import L from 'leaflet';
 import { useEffect, useMemo, useState } from 'react';
-import { GeoJSON, ImageOverlay, MapContainer, Marker, Pane, Polygon, Polyline, Rectangle, TileLayer, useMap, useMapEvents } from 'react-leaflet';
+import { GeoJSON, ImageOverlay, MapContainer, Marker, Pane, Polygon, Polyline, Rectangle, useMap, useMapEvents } from 'react-leaflet';
+import { mapDef, resolveBase } from '../lib/basemaps';
+import MapChooser from './MapChooser';
+import MapLayer, { type LayerStatus } from './MapLayers';
 import type { FeatureCollection, MultiLineString } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 import type { LatLngBounds } from '../lib/geo';
@@ -132,10 +135,20 @@ const START_ZOOM = __TERRAX_PREVIEW__ ? 5 : 10;
 
 export default function MapPanel({ target, bounds, geojson, image = null, boundary = null, draw = null }: Props) {
   const [basemap, setBasemap] = useState<Basemap | null>(null);
-  const { theme } = usePrefs();
+  const { theme, map: mapSettings } = usePrefs();
   const light = theme === 'light';
+  // In the sandboxed preview no map server is reachable, so 'automatic' means the offline outlines there.
+  const baseDef = __TERRAX_PREVIEW__ && mapSettings.base === 'auto' ? mapDef('offline') : resolveBase(mapSettings, theme);
+  const [status, setStatus] = useState<Record<string, LayerStatus>>({});
+  const report = (id: string) => (s: LayerStatus) => setStatus(prev => (prev[id]?.state === s.state && prev[id]?.message === s.message ? prev : { ...prev, [id]: s }));
   const [panelOpen, setPanelOpen] = useState(false);
   const [vis, setVis] = useState<LayerVis>({ tiles: true, outlines: true, image: true, features: true, boundary: true, opacity: 0.75 });
+  const [dismissed, setDismissed] = useState('');
+  const failing = [baseDef.id, ...mapSettings.overlays.map(o => o.id)].filter((id, i) => (i === 0 ? vis.tiles : true) && status[id]?.state === 'error');
+  // Tile servers that could not be reached report just the map name; other problems carry a full sentence.
+  const unreachable = failing.filter(id => status[id].message === mapDef(id).name || status[id].message === 'Custom WMS').map(id => status[id].message!);
+  const other = failing.map(id => status[id].message!).filter(m => !unreachable.includes(m));
+  const problemKey = [...unreachable, ...other].join('|');
   const toggle = (k: keyof Omit<LayerVis, 'opacity'>) => setVis(v => ({ ...v, [k]: !v[k] }));
 
   useEffect(() => {
@@ -158,15 +171,10 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
             <GeoJSON key={`borders-${theme}`} data={basemap.borders} style={{ color: light ? '#9aa9ba' : '#3a5068', weight: 0.8, opacity: 0.9 }} interactive={false} />
           </Pane>
         )}
-        {!__TERRAX_PREVIEW__ && vis.tiles && (
-          <TileLayer
-            key={theme}
-            url={`https://{s}.basemaps.cartocdn.com/${light ? 'light_all' : 'dark_all'}/{z}/{x}/{y}{r}.png`}
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            subdomains="abcd"
-            maxZoom={19}
-          />
-        )}
+        {vis.tiles && baseDef.kind !== 'none' && <MapLayer key={`base-${baseDef.id}`} def={baseDef} settings={mapSettings} opacity={1} zIndex={1} dark={!light} onStatus={report(baseDef.id)} />}
+        {mapSettings.overlays.map((o, i) => (
+          <MapLayer key={`ov-${o.id}`} def={mapDef(o.id)} settings={mapSettings} opacity={o.opacity} zIndex={10 + i} dark={!light} onStatus={report(o.id)} />
+        ))}
         {image && vis.image && <ImageOverlay key={image.url.length + image.label} url={image.url} bounds={image.bounds} opacity={vis.opacity} className="pixelated-overlay" />}
         {boundary && vis.boundary && (
           <GeoJSON key={`b-${layerKey(boundary.geojson)}`} data={boundary.geojson} style={{ color: '#f5b83d', weight: 2, dashArray: '6 4', fill: false }} interactive={false} />
@@ -183,15 +191,34 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
         {draw && <DrawLayer draw={draw} />}
         <FitToBounds bounds={bounds} />
       </MapContainer>
+      {problemKey && problemKey !== dismissed && !draw && (
+        <div className="map-status" role="status">
+          <div>
+            {unreachable.length > 0 && (
+              <div>
+                Not loading: <strong>{unreachable.join(', ')}</strong> (offline, blocked, or the server needs a key).
+              </div>
+            )}
+            {other.map(m => (
+              <div key={m}>{m}</div>
+            ))}
+            <div className="muted">The offline outlines are shown underneath.</div>
+          </div>
+          <button type="button" className="link-btn" aria-label="Dismiss" onClick={() => setDismissed(problemKey)}>
+            ×
+          </button>
+        </div>
+      )}
       <div className="map-layers">
         <button type="button" className="map-layers-toggle" aria-expanded={panelOpen} aria-controls="map-layers-panel" onClick={() => setPanelOpen(o => !o)}>
           Layers
         </button>
         {panelOpen && (
           <div id="map-layers-panel" className="map-layers-panel">
-            {!__TERRAX_PREVIEW__ && (
+            <MapChooser idPrefix="layers-map" compact />
+            {baseDef.kind !== 'none' && (
               <label className="check">
-                <input type="checkbox" checked={vis.tiles} onChange={() => toggle('tiles')} /> Street basemap (online)
+                <input type="checkbox" checked={vis.tiles} onChange={() => toggle('tiles')} /> Show base map ({baseDef.name})
               </label>
             )}
             <label className="check">

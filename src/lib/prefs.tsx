@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { translate, type Lang } from './i18n';
 import { getJSON, setJSON } from './storage';
 import type { Units } from './units';
+import { DEFAULT_MAP_SETTINGS, normaliseMapSettings, type MapSettings } from './basemaps';
 
 export type Theme = 'dark' | 'light' | 'galaxy';
 export type Background = 'earth-night' | 'earth' | 'galaxy' | 'custom' | 'off';
@@ -15,6 +16,8 @@ interface Prefs {
   background: Background;
   panels: PanelStyle;
   setPanels: (p: PanelStyle) => void;
+  map: MapSettings;
+  updateMap: (patch: Partial<MapSettings>) => void;
   /** Bumped when the custom background image changes. */
   customBgVersion: number;
   setBackground: (b: Background) => void;
@@ -44,6 +47,14 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     }
     return stored('background', ['earth-night', 'earth', 'galaxy', 'custom', 'off'] as const, 'earth-night');
   });
+  const [map, setMapState] = useState<MapSettings>(() => normaliseMapSettings(getJSON<unknown>('map', null)));
+  const updateMap = useCallback((patch: Partial<MapSettings>) => {
+    setMapState(m => {
+      const next = normaliseMapSettings({ ...m, ...patch });
+      setJSON('map', next);
+      return next;
+    });
+  }, []);
   const [panels, setPanelsState] = useState<PanelStyle>(() => stored('panels', ['clear', 'balanced', 'solid'] as const, 'balanced'));
   const setPanels = useCallback((p: PanelStyle) => {
     setPanelsState(p);
@@ -84,13 +95,13 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const t = useCallback((key: string, fallback = '') => translate(lang, key, fallback), [lang]);
 
   const value = useMemo(
-    () => ({ theme, units, lang, background, panels, setPanels, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t }),
-    [theme, units, lang, background, panels, setPanels, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t],
+    () => ({ theme, units, lang, background, panels, setPanels, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t }),
+    [theme, units, lang, background, panels, setPanels, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t],
   );
   return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
 }
 
-const DEFAULTS: Prefs = { theme: 'dark', units: 'metric', lang: 'en', background: 'off', panels: 'balanced', setPanels: () => {}, customBgVersion: 0, setBackground: () => {}, bumpCustomBg: () => {}, setTheme: () => {}, setUnits: () => {}, setLang: () => {}, t: (key, fallback = '') => translate('en', key, fallback) };
+const DEFAULTS: Prefs = { theme: 'dark', units: 'metric', lang: 'en', background: 'off', panels: 'balanced', setPanels: () => {}, map: DEFAULT_MAP_SETTINGS, updateMap: () => {}, customBgVersion: 0, setBackground: () => {}, bumpCustomBg: () => {}, setTheme: () => {}, setUnits: () => {}, setLang: () => {}, t: (key, fallback = '') => translate('en', key, fallback) };
 
 export function usePrefs(): Prefs {
   return useContext(PrefsContext) ?? DEFAULTS;

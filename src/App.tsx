@@ -84,7 +84,7 @@ export default function App() {
   const { t } = usePrefs();
   const [session, setSession] = useState<{ operator: string } | null>(() => getJSON('session', null));
   const [view, setView] = useState<View>('explore');
-  const [settings, setSettings] = useState<{ open: boolean; tab?: 'settings' | 'guide' | 'gee' | 'about' }>({ open: false });
+  const [settings, setSettings] = useState<{ open: boolean; tab?: 'settings' | 'map' | 'guide' | 'gee' | 'about' }>({ open: false });
   const [target, setTarget] = useState<Target>(() => getJSON('target', DEFAULT_TARGET));
   const [aiMode, setAiMode] = useState<AiMode | null>(null);
 
