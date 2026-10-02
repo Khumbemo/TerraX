@@ -169,3 +169,16 @@ test('old daytime background setting moves to the night view once; panel see-thr
   await expect(page.locator('html')).toHaveAttribute('data-panels', 'clear');
   expect(errors).toEqual([]);
 });
+
+test('only visible cards blur the background, not the empty column below them', async ({ page }) => {
+  const errors = await start(page);
+  const blurred = await page.evaluate(() =>
+    [...document.querySelectorAll('*')]
+      .filter(e => getComputedStyle(e).backdropFilter !== 'none')
+      .map(e => ({ cls: String(e.className), transparent: getComputedStyle(e).backgroundColor === 'rgba(0, 0, 0, 0)' })),
+  );
+  expect(blurred.length).toBeGreaterThan(3);
+  expect(blurred.filter(b => b.transparent)).toEqual([]); // a transparent element would blur empty space
+  expect(blurred.some(b => /^telemetry-panel$/.test(b.cls))).toBe(false);
+  expect(errors).toEqual([]);
+});

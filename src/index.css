@@ -135,7 +135,7 @@
   --panel-2: rgba(21, 16, 54, 0.97);
 }
 /* Stronger blur when panels are clear, so the lights behind never compete with text. */
-:root[data-bg='on'][data-panels='clear'] .telemetry-panel,
+:root[data-bg='on'][data-panels='clear'] .telemetry-panel-inner,
 :root[data-bg='on'][data-panels='clear'] .right-links-panel > *,
 :root[data-bg='on'][data-panels='clear'] .tool-workspace,
 :root[data-bg='on'][data-panels='clear'] .report-card,
@@ -148,7 +148,7 @@
   /* The html element keeps --bg; body must not paint over the fixed background layer. */
   background: transparent;
 }
-:root[data-bg='on'] .telemetry-panel,
+:root[data-bg='on'] .telemetry-panel-inner,
 :root[data-bg='on'] .right-links-panel > *,
 :root[data-bg='on'] .tool-workspace,
 :root[data-bg='on'] .report-card,
