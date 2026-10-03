@@ -1,0 +1,42 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Sample plot A (fictional)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              94.05731,
+              25.68768
+            ],
+            [
+              94.05167,
+              25.68095
+            ],
+            [
+              94.04299,
+              25.68286
+            ],
+            [
+              94.04373,
+              25.69222
+            ],
+            [
+              94.05166,
+              25.6941
+            ],
+            [
+              94.05731,
+              25.68768
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

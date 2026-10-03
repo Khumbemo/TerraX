@@ -1,282 +1,326 @@
-import React, { useState, useEffect, useRef } from 'react';
-import * as THREE from 'three';
-import SunCalc from 'suncalc';
+import { useEffect, useRef, useState } from 'react';
+import { feature } from 'topojson-client';
+import land from 'world-atlas/land-110m.json';
+import type { MultiPolygon, Polygon } from 'geojson';
+import { describeKp, fetchKp, type KpReading } from '../lib/kp';
+import { formatClock, solarReport } from '../lib/solar';
 
-// --- PERFECT TELEMETRY COMPONENT (Left Panel) ---
-const TelemetryRow = ({ label, value, unit = "" }: { label: string; value: string | number; unit?: string }) => (
-  <div style={{
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: '8px',
-    fontSize: '11px',
-    fontFamily: "'Space Mono', monospace",
-    letterSpacing: '0.5px',
-    whiteSpace: 'nowrap' // CRITICAL: Stops the text from stacking
-  }}>
-    <span style={{ color: '#475569', marginRight: '10px' }}>{label}:</span>
-    <span style={{ color: '#f8fafc', fontWeight: '700' }}>
-      {value}{unit}
-    </span>
+interface Props {
+  target: { lat: number; lon: number; name: string };
+}
+
+const RAD = Math.PI / 180;
+const SIZE = 200;
+const LAND = feature(land, land.objects.land) as unknown as { features: { geometry: Polygon | MultiPolygon }[] } | { geometry: Polygon | MultiPolygon };
+const LAND_RINGS: number[][][] = (() => {
+  const geoms = 'features' in LAND ? LAND.features.map(f => f.geometry) : [LAND.geometry];
+  const rings: number[][][] = [];
+  for (const g of geoms) {
+    if (g.type === 'Polygon') rings.push(...g.coordinates);
+    else for (const poly of g.coordinates) rings.push(...poly);
+  }
+  return rings;
+})();
+
+/** Per-pixel geometry for one canvas size and view latitude (independent of the view longitude). */
+interface GlobeGeometry {
+  px: number;
+  lat0: number;
+  /** Pixel index inside the disc, sin/cos of latitude and longitude offset from the view centre. */
+  idx: Int32Array;
+  sinPhi: Float32Array;
+  cosPhi: Float32Array;
+  dLam: Float32Array;
+}
+
+function globeGeometry(px: number, lat0: number): GlobeGeometry {
+  const R = px / 2 - 2 * (px / SIZE);
+  const c0 = px / 2;
+  const sinP0 = Math.sin(lat0 * RAD), cosP0 = Math.cos(lat0 * RAD);
+  const idx: number[] = [], sp: number[] = [], cp: number[] = [], dl: number[] = [];
+  for (let y = 0; y < px; y++)
+    for (let x = 0; x < px; x++) {
+      const dx = (x - c0) / R, dy = (c0 - y) / R;
+      const rho = Math.hypot(dx, dy);
+      if (rho > 1) continue;
+      const c = Math.asin(rho), sinc = Math.sin(c), cosc = Math.cos(c);
+      const phi = rho === 0 ? lat0 * RAD : Math.asin(cosc * sinP0 + (dy * sinc * cosP0) / rho);
+      idx.push(y * px + x);
+      sp.push(Math.sin(phi));
+      cp.push(Math.cos(phi));
+      dl.push(rho === 0 ? 0 : Math.atan2(dx * sinc, rho * cosc * cosP0 - dy * sinc * sinP0));
+    }
+  return { px, lat0, idx: Int32Array.from(idx), sinPhi: Float32Array.from(sp), cosPhi: Float32Array.from(cp), dLam: Float32Array.from(dl) };
+}
+
+let geomCache: GlobeGeometry | null = null;
+
+function drawGlobe(canvas: HTMLCanvasElement, lat0: number, lon0: number, sub: { lat: number; lon: number }, target: { lat: number; lon: number }) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const px = Math.round(SIZE * dpr);
+  if (canvas.width !== px) {
+    canvas.width = px;
+    canvas.height = px;
+  }
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  if (!geomCache || geomCache.px !== px || geomCache.lat0 !== lat0) geomCache = globeGeometry(px, lat0);
+  const g = geomCache;
+  const R = px / 2 - 2 * dpr;
+  const cx = px / 2;
+  const cy = px / 2;
+  const phi0 = lat0 * RAD;
+  const lam0 = lon0 * RAD;
+  const sinP0 = Math.sin(phi0);
+  const cosP0 = Math.cos(phi0);
+
+  const project = (lon: number, lat: number): [number, number] | null => {
+    const phi = lat * RAD;
+    const dl = lon * RAD - lam0;
+    const cosc = sinP0 * Math.sin(phi) + cosP0 * Math.cos(phi) * Math.cos(dl);
+    if (cosc < 0) return null;
+    return [cx + R * Math.cos(phi) * Math.sin(dl), cy - R * (cosP0 * Math.sin(phi) - sinP0 * Math.cos(phi) * Math.cos(dl))];
+  };
+
+  // Ocean disc with day/night shading: one cosine per pixel using the cached geometry.
+  const img = ctx.createImageData(px, px);
+  const sinD = Math.sin(sub.lat * RAD);
+  const cosD = Math.cos(sub.lat * RAD);
+  const off = lam0 - sub.lon * RAD;
+  for (let i = 0; i < g.idx.length; i++) {
+    const sunCos = g.sinPhi[i] * sinD + g.cosPhi[i] * cosD * Math.cos(g.dLam[i] + off);
+    const light = Math.max(0, Math.min(1, (sunCos + 0.1) / 0.2)); // soft twilight band
+    const o = g.idx[i] * 4;
+    img.data[o] = 6 + 10 * light;
+    img.data[o + 1] = 18 + 30 * light;
+    img.data[o + 2] = 34 + 50 * light;
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Graticule every 30°
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
+  ctx.lineWidth = dpr * 0.8;
+  const line = (pts: [number, number][]) => {
+    ctx.beginPath();
+    let pen = false;
+    for (const [lon, lat] of pts) {
+      const p = project(lon, lat);
+      if (!p) {
+        pen = false;
+        continue;
+      }
+      if (pen) ctx.lineTo(p[0], p[1]);
+      else ctx.moveTo(p[0], p[1]);
+      pen = true;
+    }
+    ctx.stroke();
+  };
+  for (let lon = -180; lon < 180; lon += 30) line(Array.from({ length: 61 }, (_, i) => [lon, -90 + i * 3] as [number, number]));
+  for (let lat = -60; lat <= 60; lat += 30) line(Array.from({ length: 121 }, (_, i) => [-180 + i * 3, lat] as [number, number]));
+
+  // Coastlines
+  ctx.strokeStyle = 'rgba(148, 197, 230, 0.75)';
+  ctx.lineWidth = dpr;
+  for (const ring of LAND_RINGS) line(ring as [number, number][]);
+
+  // Rim
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Subsolar point and target
+  const s = project(sub.lon, sub.lat);
+  if (s) {
+    ctx.fillStyle = '#f5b84b';
+    ctx.beginPath();
+    ctx.arc(s[0], s[1], 3.5 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const t = project(target.lon, target.lat);
+  if (t) {
+    ctx.strokeStyle = '#34d399';
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    ctx.arc(t[0], t[1], 5 * dpr, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#34d399';
+    ctx.beginPath();
+    ctx.arc(t[0], t[1], 1.8 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** One full turn every 40 s while spinning. */
+const SPIN_DEG_PER_S = 9;
+
+/** True while the browser reports a network connection. */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const up = () => setOnline(true), down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  return online;
+}
+
+const Row = ({ label, value, title }: { label: string; value: string; title?: string }) => (
+  <div className="telemetry-row" title={title}>
+    <span className="telemetry-label">{label}</span>
+    <span className="telemetry-value">{value}</span>
   </div>
 );
 
-const PlanetaryTelemetry = () => {
-  const mountRef = useRef(null);
-  
-  // Exact coordinates for Kohima, Nagaland
-  const TARGET_LAT = 25.674;
-  const TARGET_LON = 94.108;
+const utcClock = (d: Date | null) => (d ? `${d.toISOString().slice(11, 16)} UTC` : '—');
 
-  const [timeData, setTimeData] = useState({
-    utcTime: 'CALCULATING...',
-    localSolarTime: 'CALCULATING...',
-  });
+export default function PlanetaryTelemetry({ target }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [now, setNow] = useState(() => new Date());
+  const [kp, setKp] = useState<{ reading: KpReading | null; error: string | null; loading: boolean }>({ reading: null, error: null, loading: true });
 
-  const [solarData, setSolarData] = useState({
-    zenith: '0.00',
-    azimuth: '0.00',
-    altitude: '0.00',
-  });
-
-  // --- 3D ENGINE SETUP (React 18 Safe) ---
   useEffect(() => {
-    const currentMount = mountRef.current;
-    if (!currentMount) return;
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
-    // Clear any existing canvases (React Strict Mode protection)
-    while (currentMount.firstChild) {
-      currentMount.removeChild(currentMount.firstChild);
-    }
+  const report = solarReport(now, target.lat, target.lon);
+  const minuteKey = Math.floor(now.getTime() / 60_000);
 
-    // 1. Scene, Camera, Renderer
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    
-    // Size perfectly to fit the sidebar panel
-    renderer.setSize(200, 200); 
-    
-    // THIS IS THE SECRET FOR HIGH RESOLUTION:
-    renderer.setPixelRatio(window.devicePixelRatio); 
-    
-    currentMount.appendChild(renderer.domElement);
+  const online = useOnline();
+  const [paused, setPaused] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const spinning = online && !paused;
+  const lat0 = Math.max(-60, Math.min(60, target.lat));
+  const lonRef = useRef(target.lon);
 
-    // Create a group to handle Earth's axial tilt (23.5 degrees)
-    const earthGroup = new THREE.Group();
-    earthGroup.rotation.z = 23.5 * (Math.PI / 180);
-    scene.add(earthGroup);
+  // Static view (offline or paused): face the target, redraw once a minute as the terminator moves ~0.25°/min.
+  useEffect(() => {
+    if (spinning || !canvasRef.current) return;
+    lonRef.current = target.lon;
+    drawGlobe(canvasRef.current, lat0, target.lon, report.subsolar, target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spinning, minuteKey, lat0, target.lat, target.lon]);
 
-    // 2. High-Tech Wireframe Globe
-    const globeGeo = new THREE.SphereGeometry(1.5, 32, 32);
-    const globeMat = new THREE.MeshBasicMaterial({ 
-      color: 0x0ea5e9, // TerraSense Cyan
-      wireframe: true, 
-      transparent: true, 
-      opacity: 0.15 
-    });
-    const globe = new THREE.Mesh(globeGeo, globeMat);
-    earthGroup.add(globe);
-
-    // Core glow for depth
-    const coreGeo = new THREE.SphereGeometry(1.48, 32, 32);
-    const coreMat = new THREE.MeshBasicMaterial({ 
-      color: 0x030712, // Dark space background color
-    });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    earthGroup.add(core);
-
-    // 3. Kohima Target Dot (Precise Math Conversion)
-    const targetGeo = new THREE.SphereGeometry(0.06, 16, 16);
-    const targetMat = new THREE.MeshBasicMaterial({ color: 0x10b981 }); // Mint Green
-    const target = new THREE.Mesh(targetGeo, targetMat);
-    
-    // Convert Lat/Lon to 3D Cartesian coordinates
-    const R = 1.5;
-    const latRad = TARGET_LAT * (Math.PI / 180);
-    const lonRad = TARGET_LON * (Math.PI / 180);
-    
-    target.position.x = R * Math.cos(latRad) * Math.cos(lonRad);
-    target.position.z = R * Math.cos(latRad) * Math.sin(-lonRad); // -lonRad aligns with standard 3D mapping
-    target.position.y = R * Math.sin(latRad);
-    
-    globe.add(target); // Attach to globe so it rotates with the Earth
-
-    // 4. Polar Orbit Ring
-    const orbitGeo = new THREE.TorusGeometry(1.9, 0.004, 16, 100);
-    const orbitMat = new THREE.MeshBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.6 });
-    const orbit = new THREE.Mesh(orbitGeo, orbitMat);
-    orbit.rotation.y = Math.PI / 2; // Polar trajectory
-    scene.add(orbit);
-
-    // 5. Active Satellite Tracker (Sentinel-2 Mockup)
-    const satGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-    const satMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const satellite = new THREE.Mesh(satGeo, satMat);
-    orbit.add(satellite); // Attach to orbit ring
-
-    // Position Camera
-    camera.position.z = 4.8;
-    camera.position.y = 1.0; // Look slightly down at it
-    camera.lookAt(0, 0, 0);
-
-    // 6. Render & Animation Loop
-    let animationFrameId: number;
-    let satAngle = 0;
-
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
-      
-      // Rotate Earth slowly (Simulating rotation)
-      globe.rotation.y += 0.003;
-
-      // Orbit Satellite
-      satAngle -= 0.02;
-      satellite.position.x = Math.cos(satAngle) * 1.9;
-      satellite.position.y = Math.sin(satAngle) * 1.9;
-
-      renderer.render(scene, camera);
+  // Spinning view while online: the globe turns eastward; drawing stops when it is off-screen or the tab is hidden.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!spinning || !c) return;
+    let raf = 0, visible = true, lastDraw = 0;
+    const io = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver(([e]) => (visible = e.isIntersecting)) : null;
+    io?.observe(c);
+    const frame = (t: number) => {
+      // ~30 frames per second is smooth for a slow spin and keeps CPU use low; rAF itself stops in hidden tabs.
+      if (visible && t - lastDraw > 33) {
+        const dt = lastDraw ? Math.min(0.1, (t - lastDraw) / 1000) : 0;
+        lastDraw = t;
+        // The Earth turns west to east, so surface features drift left to right: the view longitude decreases.
+        lonRef.current = ((lonRef.current - SPIN_DEG_PER_S * dt + 540) % 360) - 180;
+        drawGlobe(c, lat0, lonRef.current, solarReport(new Date(), target.lat, target.lon).subsolar, target);
+      }
+      raf = requestAnimationFrame(frame);
     };
-    animate();
-
-    // 7. Unmount Cleanup
+    raf = requestAnimationFrame(frame);
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      renderer.dispose();
-      globeGeo.dispose();
-      globeMat.dispose();
-      coreGeo.dispose();
-      coreMat.dispose();
-      targetGeo.dispose();
-      targetMat.dispose();
-      orbitGeo.dispose();
-      orbitMat.dispose();
-      satGeo.dispose();
-      satMat.dispose();
+      cancelAnimationFrame(raf);
+      io?.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spinning, lat0, target.lat, target.lon]);
+
+  useEffect(() => {
+    if (__TERRAX_PREVIEW__) {
+      setKp({ reading: null, error: 'Live data is blocked in this preview', loading: false });
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const reading = await fetchKp(ctrl.signal);
+        if (!cancelled) setKp({ reading, error: reading ? null : 'No recent value', loading: false });
+      } catch {
+        if (!cancelled) setKp({ reading: null, error: 'Unavailable (offline?)', loading: false });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    load();
+    const id = setInterval(load, 15 * 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
     };
   }, []);
 
-  // --- MATH & DATA ENGINE (Runs every second) ---
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date();
-      setTimeData({
-        utcTime: now.toISOString().substring(11, 19) + ' UTC',
-        localSolarTime: now.toLocaleTimeString('en-US', { hour12: false }) + ' LST',
-      });
-
-      const sunPosition = SunCalc.getPosition(now, TARGET_LAT, TARGET_LON);
-      const altitudeDeg = sunPosition.altitude * (180 / Math.PI);
-      const azimuthDeg = sunPosition.azimuth * (180 / Math.PI);
-      const zenithDeg = 90 - altitudeDeg;
-      const normalizedAzimuth = (azimuthDeg + 180) % 360;
-
-      setSolarData({
-        altitude: altitudeDeg.toFixed(2),
-        zenith: zenithDeg.toFixed(2),
-        azimuth: normalizedAzimuth.toFixed(2),
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // --- INLINE STYLES (Guarantees zero CSS errors) ---
-  const styles: Record<string, React.CSSProperties> = {
-    panel: {
-      width: '200px', // Updated width to match new sidebar size
-      backgroundColor: 'rgba(3, 7, 18, 0.85)',
-      border: '1px solid #1a3a5a',
-      padding: '20px',
-      fontFamily: "'Space Mono', monospace",
-      color: '#94a3b8',
-      backdropFilter: 'none',
-      boxSizing: 'border-box'
-    },
-    header: {
-      color: '#0ea5e9',
-      fontSize: '14px',
-      fontWeight: 'bold',
-      letterSpacing: '2px',
-      borderBottom: '1px solid #1a3a5a',
-      paddingBottom: '10px',
-      marginBottom: '15px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-    },
-    pulse: {
-      width: '8px',
-      height: '8px',
-      backgroundColor: '#10b981',
-      borderRadius: '50%',
-      boxShadow: '0 0 10px #10b981',
-    },
-    canvasContainer: {
-      display: 'flex',
-      justifyContent: 'center',
-      marginBottom: '5px',
-      height: '200px',
-      width: '100%',
-    },
-    section: {
-      marginBottom: '18px',
-    },
-    sectionTitle: {
-      fontSize: '11px',
-      color: '#475569',
-      marginBottom: '8px',
-      letterSpacing: '1px',
-      textTransform: 'uppercase'
-    },
-    dataRow: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      marginBottom: '6px',
-      fontSize: '13px',
-    },
-    label: {
-      color: '#94a3b8',
-    },
-    value: {
-      color: '#f8fafc',
-      fontWeight: 'bold',
-    },
-    greenText: {
-      color: '#10b981',
-      fontWeight: 'bold',
-    }
-  };
+  const eot = report.equationOfTime;
+  const dayLength = report.sunrise && report.sunset ? (report.sunset.getTime() - report.sunrise.getTime()) / 3_600_000 : null;
 
   return (
-    <div style={styles.panel}>
-      <div style={styles.header}>
-        <span style={styles.pulse}></span>
-        PLANETARY TELEMETRY
+    <div className="telemetry-panel-inner">
+      <div className="panel-header">
+        <span className="pulse-dot" aria-hidden="true" /> Planetary telemetry
       </div>
 
-      {/* 3D ENGINE MOUNTS HERE */}
-      <div ref={mountRef} style={styles.canvasContainer} />
-
-       <div style={styles.section}>
-        <div style={styles.sectionTitle}>ORBITAL TIMEKEEPING</div>
-        <TelemetryRow label="SYS UTC" value={timeData.utcTime} />
-        <TelemetryRow label="TARGET LST" value={timeData.localSolarTime} />
+      <canvas
+        ref={canvasRef}
+        className="globe"
+        data-spinning={spinning ? 'true' : 'false'}
+        style={{ width: SIZE, height: SIZE }}
+        role="img"
+        aria-label={spinning ? 'Rotating globe showing day and night' : `Globe centred on ${target.name} showing day and night`}
+      />
+      <div className="globe-status">
+        <span className={`globe-status-text ${online ? 'is-online' : 'is-offline'}`}>
+          {!online ? 'Offline · globe paused on target' : spinning ? 'Online · rotating (1 turn / 40 s)' : 'Online · rotation paused'}
+        </span>
+        {online && (
+          <button type="button" className="globe-spin-toggle" onClick={() => setPaused((v) => !v)} aria-pressed={!paused}>
+            {paused ? 'Rotate' : 'Pause'}
+          </button>
+        )}
+      </div>
+      <div className="globe-legend">
+        <span>
+          <i className="dot dot-target" /> {target.name}
+        </span>
+        <span>
+          <i className="dot dot-sun" /> Sun overhead
+        </span>
       </div>
 
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>SENSOR CALIBRATION (SUN)</div>
-        <TelemetryRow label="SOLAR ZENITH" value={solarData.zenith} unit="°" />
-        <TelemetryRow label="AZIMUTH (TRUE)" value={solarData.azimuth} unit="°" />
+      <div className="telemetry-section">
+        <div className="eyebrow">Time</div>
+        <Row label="UTC" value={now.toISOString().slice(11, 19)} />
+        <Row label="Mean solar time" value={formatClock(report.meanSolarTime)} title="UTC + longitude / 15" />
+        <Row label="Apparent solar time" value={formatClock(report.apparentSolarTime)} title="Sundial time: mean solar time + equation of time" />
+        <Row label="Equation of time" value={`${eot >= 0 ? '+' : '−'}${Math.abs(eot).toFixed(1)} min`} />
       </div>
 
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>SPACE WEATHER / GNSS</div>
-        <TelemetryRow label="GEOMAGNETIC K" value="2 (QUIET)" />
-        <TelemetryRow label="GPS EST ERROR" value="< 1.5m" />
+      <div className="telemetry-section">
+        <div className="eyebrow">Sun at target</div>
+        <Row label="Altitude" value={`${report.altitude.toFixed(2)}°`} />
+        <Row label="Zenith angle" value={`${report.zenith.toFixed(2)}°`} />
+        <Row label="Azimuth (true N)" value={`${report.azimuth.toFixed(2)}°`} />
+        <Row label="Declination" value={`${report.declination.toFixed(2)}°`} />
+        <Row label="Sunrise" value={utcClock(report.sunrise)} />
+        <Row label="Sunset" value={utcClock(report.sunset)} />
+        <Row label="Day length" value={dayLength !== null ? `${Math.floor(Math.round(dayLength * 60) / 60)} h ${Math.round(dayLength * 60) % 60} min` : '—'} />
       </div>
+
+      <div className="telemetry-section">
+        <div className="eyebrow">Space weather (NOAA SWPC)</div>
+        <Row label="Planetary Kp" value={kp.loading ? 'Loading…' : kp.reading ? `${kp.reading.kp.toFixed(2)} · ${describeKp(kp.reading.kp)}` : kp.error ?? '—'} />
+        {kp.reading && <Row label="Interval start" value={`${kp.reading.time.toISOString().slice(0, 16).replace('T', ' ')} UTC`} />}
+      </div>
+      <p className="panel-foot">
+        Target {Math.abs(target.lat).toFixed(3)}° {target.lat >= 0 ? 'N' : 'S'}, {Math.abs(target.lon).toFixed(3)}° {target.lon >= 0 ? 'E' : 'W'} · change in Settings
+      </p>
     </div>
   );
-};
-
-export default PlanetaryTelemetry;
+}

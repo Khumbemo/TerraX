@@ -1,6 +1,6 @@
 {
-  "name": "Remix: TerraSense",
-  "description": "Earth Intelligence Platform for climate, forest, and land analysis.",
+  "name": "TerraX",
+  "description": "Earth observation workbench for climate, forest, and land analysis.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

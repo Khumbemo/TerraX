@@ -1,139 +1,95 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
-const GEEGuidance = () => {
-  const [activeStep, setActiveStep] = useState(0);
+const STEPS = [
+  {
+    title: 'Set up access',
+    body: 'Open code.earthengine.google.com and sign in. Earth Engine needs a registered Google Cloud project (free for non-commercial and research use). Create a new script for your TerraX exports.',
+    code: null,
+  },
+  {
+    title: 'Define the study area',
+    body: 'Search for your site (for example “Kohima, Nagaland”), draw a polygon with the geometry tools, then rename the import at the top of the script from “geometry” to “roi”. Or define it in code:',
+    code: `// Example: a box around Kohima (lon/lat, WGS84)
+var roi = ee.Geometry.Rectangle([94.05, 25.62, 94.16, 25.72]);
+Map.centerObject(roi, 12);`,
+  },
+  {
+    title: 'Select Sentinel-2 imagery',
+    body: 'Use the harmonised Level-2A surface reflectance collection, filter to your area and dates, and mask clouds with the scene classification (SCL) band.',
+    code: `function maskClouds(img) {
+  var scl = img.select('SCL');
+  // Keep vegetation (4), bare soil (5), water (6); drop cloud, shadow, cirrus, snow.
+  var clear = scl.eq(4).or(scl.eq(5)).or(scl.eq(6));
+  return img.updateMask(clear);
+}
 
-  const steps = [
-    {
-      title: "01. INITIALIZE ACCESS",
-      content: "Navigate to code.earthengine.google.com. Ensure your Google account is authorized for Earth Engine. Create a new repository for your 'Forest-Capture' scripts.",
-      code: "// No code needed for this step"
-    },
-    {
-      title: "02. DEFINE BOUNDARIES",
-      content: "Search for your study area (e.g., 'Kohima, Nagaland'). Use the Polygon Tool to draw your Area of Interest (AOI). Rename the import to 'roi'.",
-      code: "var roi = ui.import && ui.import.roi;"
-    },
-    {
-      title: "03. SELECT SATELLITE FEED",
-      content: "Filter Sentinel-2 imagery for the best vegetation data. Choose a date range and filter for cloud cover below 10%.",
-      code: "var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')\n  .filterBounds(roi)\n  .filterDate('2025-01-01', '2025-05-31')\n  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10));"
-    },
-    {
-      title: "04. RENDER & CLIP",
-      content: "Generate a median composite to remove transient shadows and clip it to your study area boundary.",
-      code: "var median = s2.median().clip(roi);"
-    },
-    {
-      title: "05. EXPORT FOR TERRASENSE",
-      content: "Run the export script. The file will appear in your Google Drive as a .TIF. This is the file you upload to the dashboard.",
-      code: "Export.image.toDrive({\n  image: median.select(['B4', 'B8']),\n  description: 'Kohima_S2_Data',\n  scale: 10,\n  region: roi\n});"
-    }
-  ];
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(roi)
+  .filterDate('2025-01-01', '2025-05-31')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+  .map(maskClouds);`,
+  },
+  {
+    title: 'Export an NDVI GeoTIFF',
+    body: 'Compute NDVI from B8 (near-infrared) and B4 (red), take the median composite, and export it at 10 m. Upload the resulting .tif to TerraX. Alternatively export B4 and B8 together and use “Compute NDVI” in TerraX (band 1 = red, band 2 = NIR).',
+    code: `var ndvi = s2.map(function (img) {
+  return img.normalizedDifference(['B8', 'B4']).rename('NDVI');
+}).median().clip(roi);
 
+Export.image.toDrive({
+  image: ndvi.toFloat(),
+  description: 'TerraX_NDVI',
+  region: roi,
+  scale: 10,
+  crs: 'EPSG:4326',
+  maxPixels: 1e10
+});`,
+  },
+  {
+    title: 'Export an NDVI time series (CSV)',
+    body: 'For trend analysis in TerraX, export the mean NDVI of the area for every image as a table with a date column. Run the task from the Tasks tab, then upload the CSV.',
+    code: `var series = s2.map(function (img) {
+  var mean = img.normalizedDifference(['B8', 'B4'])
+    .reduceRegion({ reducer: ee.Reducer.mean(), geometry: roi, scale: 10, maxPixels: 1e10 })
+    .get('nd');
+  return ee.Feature(null, { date: img.date().format('YYYY-MM-dd'), NDVI: mean });
+}).filter(ee.Filter.notNull(['NDVI']));
+
+Export.table.toDrive({
+  collection: series,
+  description: 'TerraX_NDVI_series',
+  fileFormat: 'CSV',
+  selectors: ['date', 'NDVI']
+});`,
+  },
+];
+
+export default function GEEGuidance() {
+  const [active, setActive] = useState(0);
+  const step = STEPS[active];
   return (
-    <div style={styles.container}>
-      <h2 style={styles.header}>SYSTEM MANUAL: SATELLITE DATA EXTRACTION</h2>
-      <p style={styles.subtext}>Follow these protocols to extract .TIF imagery from Google Earth Engine for analysis.</p>
-      
-      <div style={styles.stepWrapper}>
-        <div style={styles.sidebar}>
-          {steps.map((step, index) => (
-            <button 
-              key={index} 
-              onClick={() => setActiveStep(index)}
-              style={{
-                ...styles.stepBtn,
-                color: activeStep === index ? '#0ea5e9' : '#94a3b8',
-                borderLeft: activeStep === index ? '2px solid #0ea5e9' : '2px solid #1a3a5a'
-              }}
-            >
-              {step.title}
-            </button>
+    <div className="gee">
+      <h3>Google Earth Engine export manual</h3>
+      <p className="muted">These steps produce files TerraX can read: a Sentinel-2 NDVI GeoTIFF and an NDVI time-series CSV.</p>
+      <div className="gee-layout">
+        <ol className="gee-steps">
+          {STEPS.map((s, i) => (
+            <li key={s.title}>
+              <button type="button" className={i === active ? 'active' : ''} aria-current={i === active ? 'step' : undefined} onClick={() => setActive(i)}>
+                <span className="gee-num">{i + 1}</span> {s.title}
+              </button>
+            </li>
           ))}
-        </div>
-
-        <div style={styles.contentArea}>
-          <div style={styles.instructionCard}>
-            <p style={styles.instructionText}>{steps[activeStep].content}</p>
-            {steps[activeStep].code !== "// No code needed for this step" && (
-              <pre style={styles.codeBlock}>
-                <code>{steps[activeStep].code}</code>
-              </pre>
-            )}
-          </div>
+        </ol>
+        <div className="gee-body">
+          <p>{step.body}</p>
+          {step.code && (
+            <pre className="code-block">
+              <code>{step.code}</code>
+            </pre>
+          )}
         </div>
       </div>
     </div>
   );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    background: '#030712',
-    border: '1px solid #1a3a5a',
-    padding: '20px',
-    fontFamily: "'Space Mono', monospace",
-    color: '#f8fafc',
-    borderRadius: '4px',
-    marginTop: '20px'
-  },
-  header: {
-    fontSize: '18px',
-    color: '#0ea5e9',
-    letterSpacing: '2px',
-    marginBottom: '10px'
-  },
-  subtext: {
-    fontSize: '12px',
-    color: '#94a3b8',
-    marginBottom: '25px'
-  },
-  stepWrapper: {
-    display: 'flex',
-    gap: '20px',
-    minHeight: '300px'
-  },
-  sidebar: {
-    width: '200px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '5px'
-  },
-  stepBtn: {
-    background: 'none',
-    border: 'none',
-    textAlign: 'left',
-    padding: '10px',
-    fontSize: '11px',
-    cursor: 'pointer',
-    transition: 'all 0.2s'
-  },
-  contentArea: {
-    flex: 1,
-    background: 'rgba(15, 23, 42, 0.5)',
-    border: '1px solid #1a3a5a',
-    padding: '20px',
-    borderRadius: '4px'
-  },
-  instructionCard: {
-    display: 'block'
-  },
-  instructionText: {
-    fontSize: '14px',
-    lineHeight: '1.6',
-    color: '#e2e8f0',
-    marginBottom: '15px'
-  },
-  codeBlock: {
-    background: '#000',
-    padding: '15px',
-    borderRadius: '4px',
-    fontSize: '12px',
-    color: '#10b981',
-    overflowX: 'auto',
-    border: '1px solid #064e3b'
-  }
-};
-
-export default GEEGuidance;
+}

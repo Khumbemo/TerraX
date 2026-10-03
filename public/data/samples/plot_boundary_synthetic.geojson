@@ -1,0 +1,38 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Sample residential plot (fictional)"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              94.0766666,
+              25.6961029
+            ],
+            [
+              94.0769858,
+              25.6961366
+            ],
+            [
+              94.0769427,
+              25.6957758
+            ],
+            [
+              94.0766235,
+              25.695742
+            ],
+            [
+              94.0766666,
+              25.6961029
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}
