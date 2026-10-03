@@ -35,7 +35,7 @@ Settings → Map (or **Layers** on the map) picks one base map and any number of
 | Tectonic plate boundaries with type and speed | Bird 2003, *G3* 4(3):1027, via Ahlenius/Nordpil (ODC-BY 1.0) |
 | Latitude/longitude grid, tropics and polar circles | Computed (obliquity of the ecliptic, IAU 2006) |
 
-The climate and biome rasters come from the harmonised 10 km stack of Fischer et al. 2022 (*Global Ecol. Biogeogr.* 31:2172, CC BY 4.0); clicking the map reads the class under the cursor. Pictures are about 10 km per pixel at the equator, for overview rather than plot-scale work. `python3 scripts/make-world-maps.py <source-dir>` rebuilds every file (its header lists where each source comes from).
+The climate and biome rasters come from the harmonised 10 km stack of Fischer et al. 2022 (*Global Ecol. Biogeogr.* 31:2172, CC BY 4.0); clicking the map reads the class under the cursor. Picture maps keep their source's full detail (Black Marble 3 km, shaded relief 3.7 km, Blue Marble and ETOPO1 about 7 km per pixel): a 4096 px overview serves the world view, and full-detail 4096 px chunks load only for the area on screen. Natural Earth switches from 1:50m to 1:10m at zoom 5, loaded per 45° cell. Everything is drawn at the screen's pixel density. For street-level detail use the online maps (Esri World Imagery, Sentinel-2 cloudless, OpenStreetMap). `python3 scripts/make-world-maps.py <source-dir>` rebuilds every file (its header lists where each source comes from).
 
 ## Run locally
 
@@ -48,6 +48,16 @@ npm run dev                  # http://localhost:3001
 ```
 
 The Gemini key is read by the server (the Vite dev server in development, `server/index.ts` in production) and is never included in the browser bundle. Users can also add their own key in **Settings**; it is stored only in their browser.
+
+## Hosting as a website
+
+TerraX is a static site plus an optional small server for the Gemini key.
+
+- **GitHub Pages** (free): `.github/workflows/pages.yml` builds and publishes on every push to `main` (or run it by hand from the Actions tab). One-time setup: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**. The site appears at `https://<owner>.github.io/<repo>/`.
+- **Netlify or Cloudflare Pages** (free): import the repository; `netlify.toml` sets the build (`npm run build`, output `dist`), and `public/_headers` sets caching.
+- **With AI answers from your key**: run the server (`npm start`, or the `Dockerfile` on Render, Fly.io or similar) and set `GEMINI_API_KEY`.
+
+On static hosts the AI falls back to the built-in assistant (users can still add their own key in Settings); all maps, tools and reports work.
 
 ## Production
 

@@ -3,7 +3,7 @@
 import L from 'leaflet';
 import type { Feature, FeatureCollection, LineString, MultiLineString } from 'geojson';
 import type { MapDef } from '../lib/basemaps';
-import { MERCATOR_MAX_LAT, PLATE_CLASSES, obliquityDeg, platePair, worldMapUrl } from '../lib/world-maps';
+import { MERCATOR_MAX_LAT, PLATE_CLASSES, cellIds, obliquityDeg, platePair, worldMapUrl } from '../lib/world-maps';
 
 const cache = new Map<string, Promise<unknown>>();
 function once<T>(key: string, load: () => Promise<T>): Promise<T> {
@@ -61,38 +61,105 @@ function mipmaps(img: HTMLImageElement): (HTMLImageElement | HTMLCanvasElement)[
   return levels;
 }
 
-/** A square Web Mercator world picture shown as map tiles. */
+/** Chunk size of the full-detail pictures (see scripts/make-world-maps.py). */
+const CHUNK = 4096;
+/** Pixels each chunk file overlaps its neighbours by on every side. */
+const PAD = 4;
+/** Decoded full-detail chunks kept in memory (each 4096² ≈ 64 MB of pixels). */
+const MAX_CHUNKS = 6;
+const chunks = new Map<string, Promise<ImageBitmap>>();
+
+function loadChunk(file: string): Promise<ImageBitmap> {
+  const hit = chunks.get(file);
+  if (hit) {
+    // Most recently used goes last.
+    chunks.delete(file);
+    chunks.set(file, hit);
+    return hit;
+  }
+  const p = fetch(worldMapUrl(file)).then(async res => {
+    if (!res.ok) throw new Error(`${file}: HTTP ${res.status}`);
+    return createImageBitmap(await res.blob());
+  });
+  p.catch(() => chunks.delete(file));
+  chunks.set(file, p);
+  while (chunks.size > MAX_CHUNKS) {
+    const [oldest, bmp] = chunks.entries().next().value!;
+    chunks.delete(oldest);
+    bmp.then(b => b.close(), () => undefined);
+  }
+  return p;
+}
+
+/**
+ * Draws the square source region (sx, sy, size) onto a square canvas of `out` pixels. The
+ * region is widened by `margin` source pixels and the canvas clips the excess, so smoothing
+ * at a tile's edge blends with the real neighbouring pixels instead of leaving a seam.
+ */
+function drawRegion(ctx: CanvasRenderingContext2D, img: CanvasImageSource & { width: number; height: number }, sx: number, sy: number, size: number, out: number, margin: number) {
+  const m = Math.max(0, Math.min(margin, sx, sy, img.width - sx - size, img.height - sy - size));
+  const k = out / size;
+  ctx.drawImage(img, sx - m, sy - m, size + 2 * m, size + 2 * m, -m * k, -m * k, out + 2 * m * k, out + 2 * m * k);
+}
+
+interface ImageSource {
+  mips: (HTMLImageElement | HTMLCanvasElement)[];
+  pixelated: boolean;
+  /** Width of the full-detail picture, cut into CHUNK-sized files in `folder`. */
+  full?: number;
+  folder?: string;
+}
+
+type ImageLayer = L.GridLayer & { _src: ImageSource };
+
+/**
+ * A square Web Mercator world picture shown as map tiles, drawn at the screen's pixel
+ * density. Low zooms come from the overview; closer in, each tile is first drawn from the
+ * overview and then redrawn from the full-detail chunk once that has loaded.
+ */
 const MercatorImageLayer = L.GridLayer.extend({
-  initialize(this: L.GridLayer & { _mips?: ReturnType<typeof mipmaps>; _pixelated: boolean }, levels: Promise<ReturnType<typeof mipmaps>>, pixelated: boolean, options: L.GridLayerOptions) {
+  initialize(this: ImageLayer, src: ImageSource, options: L.GridLayerOptions) {
     (L.GridLayer.prototype as unknown as { initialize: (o: L.GridLayerOptions) => void }).initialize.call(this, options);
-    this._pixelated = pixelated;
-    levels.then(l => {
-      this._mips = l;
-      this.redraw();
-    });
+    this._src = src;
   },
-  createTile(this: L.GridLayer & { _mips?: ReturnType<typeof mipmaps>; _pixelated: boolean }, coords: L.Coords) {
+  createTile(this: ImageLayer, coords: L.Coords, done: L.DoneCallback) {
+    const { mips, pixelated, full, folder } = this._src;
     const tile = document.createElement('canvas');
     const size = this.getTileSize();
-    tile.width = size.x;
-    tile.height = size.y;
-    const levels = this._mips;
-    if (!levels) return tile;
-    const n = 2 ** coords.z;
-    // Smallest level that still has at least one source pixel per tile pixel; class maps always use the full picture.
-    let lvl = levels[0];
-    if (!this._pixelated) for (const l of levels) if (l.width / n >= size.x) lvl = l;
-    const s = lvl.width / n;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    tile.width = Math.round(size.x * dpr);
+    tile.height = Math.round(size.y * dpr);
     const ctx = tile.getContext('2d')!;
-    ctx.imageSmoothingEnabled = !this._pixelated;
-    ctx.drawImage(lvl, coords.x * s, coords.y * s, s, s, 0, 0, size.x, size.y);
+    ctx.imageSmoothingEnabled = !pixelated;
+    ctx.imageSmoothingQuality = 'high';
+    const n = 2 ** coords.z;
+    // Smallest overview level that still has a source pixel for every canvas pixel.
+    let lvl = mips[0];
+    if (!pixelated) for (const l of mips) if (l.width / n >= tile.width) lvl = l;
+    const s = lvl.width / n;
+    drawRegion(ctx, lvl, coords.x * s, coords.y * s, s, tile.width, pixelated ? 0 : 2);
+    setTimeout(() => done(undefined, tile), 0);
+
+    if (full && folder && (n * tile.width) > mips[0].width * 1.01) {
+      const fs = full / n; // full-detail pixels per tile (never more than one chunk)
+      const fx = coords.x * fs, fy = coords.y * fs;
+      const cx = Math.floor(fx / CHUNK), cy = Math.floor(fy / CHUNK);
+      loadChunk(`${folder}/${cx}-${cy}.jpg`)
+        .then(bmp => {
+          drawRegion(ctx, bmp, fx - cx * CHUNK + PAD, fy - cy * CHUNK + PAD, fs, tile.width, Math.min(2, PAD));
+          tile.dataset.detail = 'full';
+        })
+        .catch(() => undefined); // keep the overview if a chunk is missing or was released meanwhile
+    }
     return tile;
   },
-}) as unknown as new (levels: Promise<ReturnType<typeof mipmaps>>, pixelated: boolean, options: L.GridLayerOptions) => L.GridLayer;
+}) as unknown as new (src: ImageSource, options: L.GridLayerOptions) => L.GridLayer;
 
 // GeoJSON passes its options on to each path, so `renderer` works there even though Leaflet's types omit it.
 const geo = (data: unknown, o: L.GeoJSONOptions & { renderer?: L.Renderer }) => L.geoJSON(data as never, o as L.GeoJSONOptions);
 
+/** Zoom from which the 1:10m Natural Earth cells replace the 1:50m layers. */
+const DETAIL_ZOOM = 5;
 interface Opts {
   opacity: number;
   zIndex: number;
@@ -213,9 +280,9 @@ export async function createBuiltinLayer(def: MapDef, map: L.Map, o: Opts): Prom
   const kind = def.builtin!;
   if (kind === 'image' || kind === 'classes') {
     const pixelated = kind === 'classes';
-    const levels = loadImage(def.file!).then(img => (pixelated ? [img] : mipmaps(img)));
-    await levels;
-    return new MercatorImageLayer(levels, pixelated, { opacity: o.opacity, zIndex: o.zIndex, attribution: def.attribution, maxZoom: 22, className: pixelated ? 'pixelated-tiles' : '' } as L.GridLayerOptions);
+    const img = await loadImage(def.file!);
+    const src: ImageSource = { mips: pixelated ? [img] : mipmaps(img), pixelated, full: def.fullSize, folder: def.fullSize ? def.file!.replace(/\.\w+$/, '') : undefined };
+    return new MercatorImageLayer(src, { opacity: o.opacity, zIndex: o.zIndex, attribution: def.attribution, maxZoom: 22, className: pixelated ? 'pixelated-tiles' : '' } as L.GridLayerOptions);
   }
 
   const pane = paneFor(map, def.id, o, kind === 'plates');
@@ -240,6 +307,24 @@ export async function createBuiltinLayer(def: MapDef, map: L.Map, o: Opts): Prom
     water: kind === 'ne-detailed' || kind === 'ne-water',
     places: kind === 'ne-detailed' || kind === 'ne-places',
   };
+  // Fills, water and lines each get a canvas in a nested pane, so their order holds across 1:10m cells.
+  const sub = (name: string, z: number) => {
+    const full = `${pane}-${name}`;
+    const el = map.getPane(full) ?? map.createPane(full, map.getPane(pane));
+    el.style.zIndex = String(z);
+    el.style.pointerEvents = 'none';
+    return { pane: full, renderer: L.canvas({ pane: full, padding: 0.3 }) };
+  };
+  const fill = sub('land', 10), water = sub('water', 20), line = sub('lines', 30);
+  const style = {
+    land: { stroke: false, fillColor: p.land, fillOpacity: 1 },
+    lake: { color: p.water, weight: 0.6, fillColor: needs.land ? p.lake : p.water, fillOpacity: needs.land ? 1 : 0.35 },
+    river: { color: p.water, weight: 0.9, opacity: 0.9 },
+    admin1: { color: p.admin1, weight: 0.6, dashArray: '3 3', opacity: 0.9 },
+    border: { color: p.border, weight: 1.1, opacity: 0.95 },
+  };
+  const draw = (data: unknown, target: { pane: string; renderer: L.Renderer }, st: L.PathOptions) => geo(data, { ...target, interactive: false, style: st });
+
   const [countries, admin1, rivers, lakes, places] = await Promise.all([
     needs.land || needs.borders ? Promise.all([import('world-atlas/countries-50m.json'), import('topojson-client')]) : null,
     needs.borders ? loadJson('admin1.json') : null,
@@ -247,27 +332,63 @@ export async function createBuiltinLayer(def: MapDef, map: L.Map, o: Opts): Prom
     needs.water ? loadJson('lakes.json') : null,
     needs.places ? loadJson<Places>('places.json') : null,
   ]);
-  if (needs.land) {
-    L.rectangle(
-      [
-        [-90, -540],
-        [90, 540],
-      ],
-      { pane, renderer, stroke: false, fillColor: p.sea, fillOpacity: 1, interactive: false },
-    ).addTo(group);
-  }
+  if (needs.land) L.rectangle([[-90, -540], [90, 540]], { ...fill, stroke: false, fillColor: p.sea, fillOpacity: 1, interactive: false }).addTo(group);
+
+  // 1:50m for the world view …
+  const coarse = L.layerGroup();
+  const coarseLand = L.layerGroup(); // stays under the 1:10m cells while they load
   if (countries) {
     const [topo, { feature, mesh }] = countries;
     const t = topo.default;
-    if (needs.land) geo(feature(t, t.objects.countries) as unknown as FeatureCollection, { pane, renderer, interactive: false, style: { stroke: false, fillColor: p.land, fillOpacity: 1 } }).addTo(group);
+    if (needs.land) draw(feature(t, t.objects.countries), fill, style.land).addTo(coarseLand);
     if (needs.borders) {
-      if (admin1) lines(admin1, p.admin1, 0.6, '3 3');
-      const borders = mesh(t, t.objects.countries as never, (a, b) => a !== b) as MultiLineString;
-      geo(borders, { pane, renderer, interactive: false, style: { color: p.border, weight: 1.1, opacity: 0.95 } }).addTo(group);
+      if (admin1) draw(admin1, line, style.admin1).addTo(coarse);
+      draw(mesh(t, t.objects.countries as never, (a, b) => a !== b), line, style.border).addTo(coarse);
     }
   }
-  if (lakes) geo(lakes as FeatureCollection, { pane, renderer, interactive: false, style: { color: p.water, weight: 0.6, fillColor: needs.land ? p.lake : p.water, fillOpacity: needs.land ? 1 : 0.35 } }).addTo(group);
-  if (rivers) lines(rivers, p.water, 0.9);
+  if (lakes) draw(lakes, water, style.lake).addTo(coarse);
+  if (rivers) draw(rivers, water, style.river).addTo(coarse);
+
+  // … and 1:10m from zoom DETAIL_ZOOM, loaded per 45° cell as the view moves.
+  const fine = L.layerGroup();
+  const cells = new Map<string, L.LayerGroup>();
+  const addCell = (id: string) => {
+    if (cells.has(id)) return;
+    const g = L.layerGroup().addTo(fine);
+    cells.set(id, g);
+    loadJson<Record<'land' | 'borders' | 'admin1' | 'rivers' | 'lakes', FeatureCollection>>(`vector/${id}.json`)
+      .then(c => {
+        if (needs.land) draw(c.land, fill, style.land).addTo(g);
+        if (needs.water) {
+          draw(c.lakes, water, style.lake).addTo(g);
+          draw(c.rivers, water, style.river).addTo(g);
+        }
+        if (needs.borders) {
+          draw(c.admin1, line, style.admin1).addTo(g);
+          draw(c.borders, line, style.border).addTo(g);
+        }
+      })
+      .catch(() => cells.delete(id)); // the 1:50m layers are still underneath
+  };
+  const update = () => {
+    const detail = map.getZoom() >= DETAIL_ZOOM;
+    if (detail) {
+      if (!group.hasLayer(fine)) group.addLayer(fine);
+      if (group.hasLayer(coarse)) group.removeLayer(coarse);
+      const b = map.getBounds().pad(0.25);
+      for (const id of cellIds(b.getWest(), b.getSouth(), b.getEast(), b.getNorth())) addCell(id);
+    } else {
+      if (group.hasLayer(fine)) group.removeLayer(fine);
+      if (!group.hasLayer(coarse)) group.addLayer(coarse);
+    }
+  };
+  coarseLand.addTo(group);
+  coarse.addTo(group);
+  group.on('add', () => {
+    update();
+    map.on('moveend', update);
+  });
+  group.on('remove', () => map.off('moveend', update));
   if (places) placesLayer(map, pane, o.dark, places).addTo(group);
   return group;
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { MAPS, normaliseMapSettings } from '../src/lib/basemaps';
-import { BIOMES, KOPPEN, KOPPEN_LEGEND, MERCATOR_MAX_LAT, PLATE_CLASSES, PLATES, classFromColor, mercatorPixel, obliquityDeg, platePair } from '../src/lib/world-maps';
+import { BIOMES, KOPPEN, cellIds, KOPPEN_LEGEND, MERCATOR_MAX_LAT, PLATE_CLASSES, PLATES, classFromColor, mercatorPixel, obliquityDeg, platePair } from '../src/lib/world-maps';
 
 test('obliquity of the ecliptic follows IAU 2006', () => {
   // ε0 at J2000.0 is 84381.406″ = 23.4392794°.
@@ -73,4 +73,12 @@ test('built-in maps have their files and credits', () => {
     normaliseMapSettings({ overlays: [{ id: 'koppen', opacity: 0.7 }, { id: 'koppen', opacity: 0.5 }] }).overlays,
     [{ id: 'koppen', opacity: 0.7 }],
   );
+});
+
+test('1:10m cell lookup', () => {
+  assert.deepEqual(cellIds(90, 20, 100, 30), ['6-1']); // Bay of Bengal: 90–135° E, 45° N–0°
+  assert.deepEqual(cellIds(-10, 40, 10, 50), ['3-0', '3-1', '4-0', '4-1']); // straddles 0° and 45° N
+  assert.deepEqual(cellIds(170, -10, 190, 10), ['0-1', '0-2', '7-1', '7-2']); // across the antimeridian
+  assert.equal(cellIds(-400, -90, 400, 90).length, 32); // whole world, each cell once
+  for (const id of cellIds(-180, -90, 180, 90)) assert.ok(existsSync(`public/data/maps/vector/${id}.json`), id);
 });

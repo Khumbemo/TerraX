@@ -20,10 +20,13 @@ Sources (download them to a folder and pass it as the first argument):
   ne_50m_admin_1_states_provinces_lines, ne_50m_rivers_lake_centerlines, ne_50m_lakes,
   ne_10m_populated_places_simple (.geojson)
       github.com/nvkelso/natural-earth-vector (public domain), default (de facto) worldview.
+  ne_10m_land, ne_10m_admin_0_boundary_lines_land, ne_10m_admin_1_states_provinces_lines,
+  ne_10m_rivers_lake_centerlines, ne_10m_lakes (.geojson)
+      Natural Earth 1:10 million, used from zoom 5 upward, cut into 45° cells (vector/<col>-<row>.json).
   PB2002_steps.json
       github.com/fraxen/tectonicplates (ODC-BY 1.0), from Bird (2003) G3 4(3):1027.
 
-Requires: numpy, pillow, rasterio.  Usage: python3 scripts/make-world-maps.py <source-dir>
+Requires: numpy, pillow, rasterio, shapely.  Usage: python3 scripts/make-world-maps.py <source-dir>
 """
 
 import json
@@ -57,14 +60,41 @@ def to_mercator(arr, src_transform, src_crs, resampling, nodata=None):
     return out
 
 
-def image_layer(name, out_name, quality=82):
+CHUNK = 4096
+# Each chunk carries PAD extra pixels from its neighbours on every side, so smooth scaling at a
+# chunk's edge samples real neighbours instead of nothing (which showed as a 1 px seam).
+PAD = 4
+
+
+def image_layer(name, out_name, full=None, quality=82):
+    """A 4096 px overview, plus (if `full`) the picture at `full` px cut into 4096 px chunks in <name>/<col>-<row>.jpg.
+
+    `full` is chosen so the equator gets at least the source's own detail; nothing finer is invented.
+    """
     im = np.asarray(Image.open(SRC / name).convert('RGB')).transpose(2, 0, 1)
     h, w = im.shape[1:]
     t = from_bounds(-180, -90, 180, 90, w, h)
-    # Average when shrinking (Black Marble, relief), bilinear when enlarging toward the poles.
-    merc = to_mercator(im, t, 'EPSG:4326', Resampling.average if w > SIZE * 2 else Resampling.bilinear)
+    # Average when shrinking, Lanczos when enlarging toward the poles (Mercator stretches high latitudes).
+    merc = to_mercator(im, t, 'EPSG:4326', Resampling.average if w > SIZE * 2 else Resampling.lanczos)
     Image.fromarray(merc.transpose(1, 2, 0)).save(OUT / out_name, quality=quality, optimize=True, progressive=True)
-    print(out_name, (OUT / out_name).stat().st_size)
+    total = (OUT / out_name).stat().st_size
+    if full:
+        folder = OUT / out_name.rsplit('.', 1)[0]
+        folder.mkdir(exist_ok=True)
+        n = full // CHUNK
+        step = 2 * M / n
+        for cy in range(n):
+            for cx in range(n):
+                px = step / CHUNK
+                dst_t = from_bounds(-M + cx * step - PAD * px, M - (cy + 1) * step - PAD * px, -M + (cx + 1) * step + PAD * px, M - cy * step + PAD * px, CHUNK + 2 * PAD, CHUNK + 2 * PAD)
+                out = np.zeros((3, CHUNK + 2 * PAD, CHUNK + 2 * PAD), dtype=np.uint8)
+                for b in range(3):
+                    reproject(im[b], out[b], src_transform=t, src_crs='EPSG:4326', dst_transform=dst_t, dst_crs=DST_CRS,
+                              resampling=Resampling.average if w > full * 2 else Resampling.lanczos)
+                f = folder / f'{cx}-{cy}.jpg'
+                Image.fromarray(out.transpose(1, 2, 0)).save(f, quality=quality, optimize=True, progressive=True)
+                total += f.stat().st_size
+    print(out_name, full, total)
 
 
 # Köppen–Geiger colours from Beck et al. (2018) legend.txt; biome colours are TerraX's own.
@@ -171,15 +201,62 @@ def plates():
     print('plates.json', len(out), (OUT / 'plates.json').stat().st_size)
 
 
+def vector_cells(cell=45, tolerance=0.004, digits=3):
+    """Natural Earth 1:10m layers cut into cell×cell degree tiles, simplified to ~400 m (finer than the 1:10m source accuracy needs)."""
+    from shapely.geometry import box, mapping, shape
+    layers = {
+        'land': ('ne_10m_land', False),
+        'borders': ('ne_10m_admin_0_boundary_lines_land', True),
+        'admin1': ('ne_10m_admin_1_states_provinces_lines', True),
+        'rivers': ('ne_10m_rivers_lake_centerlines', True),
+        'lakes': ('ne_10m_lakes', False),
+    }
+    geoms = {}
+    for key, (name, _) in layers.items():
+        src = json.loads((SRC / f'{name}.geojson').read_text())
+        geoms[key] = [shape(f['geometry']).simplify(tolerance, preserve_topology=True) for f in src['features'] if f.get('geometry')]
+    folder = OUT / 'vector'
+    folder.mkdir(exist_ok=True)
+    total = 0
+    for row, lat in enumerate(range(90, -90, -cell)):
+        for col, lon in enumerate(range(-180, 180, cell)):
+            # A 0.02° overlap hides hairline seams between neighbouring cells' fills.
+            b = box(lon - 0.02, lat - cell - 0.02, lon + cell + 0.02, lat + 0.02)
+            cellfc = {}
+            for key in layers:
+                parts = []
+                for g in geoms[key]:
+                    if not g.intersects(b):
+                        continue
+                    c = g.intersection(b)
+                    if c.is_empty:
+                        continue
+                    m = mapping(c)
+                    if m['type'] == 'GeometryCollection':
+                        continue
+                    parts.append({'type': 'Feature', 'properties': {}, 'geometry': {'type': m['type'], 'coordinates': rnd(json.loads(json.dumps(m['coordinates'])), digits)}})
+                cellfc[key] = {'type': 'FeatureCollection', 'features': parts}
+            f = folder / f'{col}-{row}.json'
+            f.write_text(json.dumps(cellfc, separators=(',', ':')))
+            total += f.stat().st_size
+    print('vector cells', total)
+
+
 if __name__ == '__main__':
-    image_layer('bmng.jpg', 'bluemarble.jpg')
-    image_layer('shadedrelief.jpg', 'relief.jpg')
-    image_layer('etopo1.jpg', 'etopo.jpg', quality=72)
-    image_layer('earth-night.jpg', 'blackmarble.jpg', quality=85)
-    class_layer(3, 'koppen.png', [KOPPEN[c] for c in KOPPEN_VALUES])
-    class_layer(5, 'biomes.png', [rgb for _, rgb in BIOMES])
-    vector('ne_50m_admin_1_states_provinces_lines', 'admin1.json', [])
-    vector('ne_50m_rivers_lake_centerlines', 'rivers.json', ['name', 'scalerank'])
-    vector('ne_50m_lakes', 'lakes.json', ['name', 'scalerank'])
-    places()
-    plates()
+    only = sys.argv[2:]  # optional: names of steps to run
+    run = lambda step: not only or step in only
+    if run('images'):
+        image_layer('bmng.jpg', 'bluemarble.jpg', full=8192)
+        image_layer('shadedrelief.jpg', 'relief.jpg', full=16384, quality=78)
+        image_layer('etopo1.jpg', 'etopo.jpg', full=8192, quality=72)
+        image_layer('earth-night.jpg', 'blackmarble.jpg', full=16384, quality=85)
+    if run('vectors'):
+        vector_cells()
+    if run('rest'):
+        class_layer(3, 'koppen.png', [KOPPEN[c] for c in KOPPEN_VALUES])
+        class_layer(5, 'biomes.png', [rgb for _, rgb in BIOMES])
+        vector('ne_50m_admin_1_states_provinces_lines', 'admin1.json', [])
+        vector('ne_50m_rivers_lake_centerlines', 'rivers.json', ['name', 'scalerank'])
+        vector('ne_50m_lakes', 'lakes.json', ['name', 'scalerank'])
+        places()
+        plates()

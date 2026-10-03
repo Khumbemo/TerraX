@@ -139,3 +139,20 @@ export function classFromColor(r: number, g: number, b: number, a: number, class
 
 /** URL of a built-in map file, relative to the app so it works under any base path. */
 export const worldMapUrl = (file: string) => new URL(`data/maps/${file}`, document.baseURI).href;
+
+/** Size in degrees of the 1:10m Natural Earth cells (public/data/maps/vector/<col>-<row>.json). */
+export const CELL = 45;
+
+/** Ids ("col-row") of the cells covering a box; longitudes wrap round the globe, latitudes are clamped. */
+export function cellIds(west: number, south: number, east: number, north: number): string[] {
+  const ids: string[] = [];
+  const nCols = 360 / CELL, nRows = 180 / CELL;
+  const r0 = Math.max(0, Math.floor((90 - Math.min(90, north)) / CELL));
+  const r1 = Math.min(nRows - 1, Math.floor((90 - Math.max(-90, south)) / CELL - 1e-9));
+  const c0 = Math.floor((west + 180) / CELL);
+  const c1 = east - west >= 360 ? c0 + nCols - 1 : Math.floor((east + 180) / CELL - 1e-9);
+  const cols = new Set<number>();
+  for (let c = c0; c <= c1; c++) cols.add(((c % nCols) + nCols) % nCols);
+  for (const c of [...cols].sort((a, b) => a - b)) for (let r = r0; r <= r1; r++) ids.push(`${c}-${r}`);
+  return ids;
+}

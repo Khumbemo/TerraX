@@ -1,6 +1,6 @@
 // TerraX service worker: lets the app open offline after one online visit.
 // Same-origin files only; the AI proxy (/api) and other servers are never cached.
-const CACHE = 'terrax-v1';
+const CACHE = 'terrax-v2';
 
 // Every built file (from Vite's asset manifest), so tools never opened online still work offline.
 async function buildFiles() {
@@ -57,18 +57,26 @@ self.addEventListener('fetch', event => {
     );
     return;
   }
+  const save = res => {
+    if (res.ok && res.type === 'basic') {
+      const copy = res.clone();
+      caches.open(CACHE).then(c => c.put(req, copy));
+    }
+    return res;
+  };
   // Built assets have content hashes in their names, so cache-first is safe.
+  if (url.pathname.includes('/assets/')) {
+    event.respondWith(caches.match(req).then(hit => hit || fetch(req).then(save)));
+    return;
+  }
+  // Other files (maps, samples) keep their names between releases: answer from the cache at once,
+  // and refresh it in the background so an update arrives on the next visit.
   event.respondWith(
-    caches.match(req).then(
-      hit =>
-        hit ||
-        fetch(req).then(res => {
-          if (res.ok && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(CACHE).then(c => c.put(req, copy));
-          }
-          return res;
-        }),
-    ),
+    caches.match(req).then(hit => {
+      const fresh = fetch(req).then(save);
+      if (!hit) return fresh;
+      fresh.catch(() => undefined);
+      return hit;
+    }),
   );
 });

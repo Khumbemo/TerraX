@@ -1,0 +1,8 @@
+# Netlify (also works as a template for Cloudflare Pages: build command `npm run build`, output `dist`).
+# Static hosting: AI answers fall back to the built-in assistant unless you run the server (`npm start` or Docker).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"

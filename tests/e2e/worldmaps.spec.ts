@@ -69,3 +69,30 @@ test('climate zone and biome under a click', async ({ page }) => {
   await expect(popup).toContainText('Biome: Tropical & subtropical moist broadleaf forests');
   expect(errors).toEqual([]);
 });
+
+test.describe('sharp at close zoom', () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test('full-detail picture chunks and retina tiles', async ({ page }) => {
+    const errors = await start(page);
+    const chunk = page.waitForResponse(r => /data\/maps\/relief\/\d+-\d+\.jpg$/.test(r.url()) && r.status() === 200);
+    await openLayers(page);
+    await page.selectOption('#layers-map-base', 'relief');
+    await chunk; // the map opens at zoom 10, past what the overview holds
+    await expect(page.locator('.leaflet-tile-pane canvas[data-detail="full"]').first()).toBeAttached();
+    // Tiles are drawn at the screen's pixel density (256 CSS px → 512 canvas px here).
+    expect(await page.locator('.leaflet-tile-pane canvas').first().evaluate(c => (c as HTMLCanvasElement).width)).toBe(512);
+    expect(errors).toEqual([]);
+  });
+
+  test('Natural Earth 1:10m cells load for the view when zoomed in', async ({ page }) => {
+    const errors = await start(page);
+    // Kohima (94.1° E, 25.7° N) is in the 90–135° E, 0–45° N cell.
+    const cell = page.waitForResponse(r => r.url().endsWith('data/maps/vector/6-1.json') && r.status() === 200);
+    await openLayers(page);
+    await page.selectOption('#layers-map-base', 'ne-detailed');
+    await cell;
+    await expect(page.locator('.leaflet-builtin-ne-detailed-lines-pane canvas')).toBeAttached();
+    expect(errors).toEqual([]);
+  });
+});
