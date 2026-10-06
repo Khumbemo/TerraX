@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import date
+from typing import TypedDict
 
 from .climate import compute_spi, monthly_anomalies, seasonal_kendall, to_monthly
 from .dates import MONTHS, decimal_year, format_date
@@ -15,35 +17,46 @@ SPI_SCALES = [1, 3, 6, 12]
 SPI_MIN_YEARS = 10
 
 
+class Point(TypedDict):
+    """One usable value of a column: its row, date (None in tables without dates), label and value."""
+
+    row: int
+    time: date | None
+    label: str
+    value: float
+
+
 @dataclass
 class MetricAnalysis:
     column: str
-    points: list[dict]
+    points: list[Point]
     summary: Summary | None
     trend: Trend | None
     monthly: list[dict] | None
     classification: Classification
     class_counts: list[int]
     trend_caveat: str | None
-    start: object
-    end: object
+    start: date | None
+    end: date | None
     climate: dict | None
+
+    def _point_public(self, p: Point) -> dict:
+        t = p["time"]
+        return {"label": p["label"], "time": format_date(t) if t else None, "value": p["value"],
+                "t": decimal_year(t) if t else None, "cls": self.classification.classify(p["value"])}
 
     def public(self, max_points: int = 1500) -> dict:
         from .stats import quantile_sorted, sample_indices
 
         idx = sample_indices(len(self.points), max_points)
         intercept = None
-        if self.trend and self.points and self.points[0]["time"]:
+        dated = [(t, p["value"]) for p in self.points if (t := p["time"]) is not None]
+        if self.trend and dated:
             # Theil–Sen intercept: median of y − slope·t over all values, for drawing the trend line.
-            intercept = quantile_sorted(sorted(p["value"] - self.trend.sen_slope * decimal_year(p["time"]) for p in self.points), 0.5)
+            intercept = quantile_sorted(sorted(v - self.trend.sen_slope * decimal_year(t) for t, v in dated), 0.5)
         return {
             "column": self.column,
-            "points": [
-                {"label": self.points[i]["label"], "time": format_date(self.points[i]["time"]) if self.points[i]["time"] else None, "value": self.points[i]["value"],
-                 "t": decimal_year(self.points[i]["time"]) if self.points[i]["time"] else None, "cls": self.classification.classify(self.points[i]["value"])}
-                for i in idx
-            ],
+            "points": [self._point_public(self.points[i]) for i in idx],
             "sampled": len(idx) < len(self.points),
             "pointCount": len(self.points),
             "trendIntercept": intercept,
@@ -70,7 +83,7 @@ def _climate_public(c: dict) -> dict:
 
 
 def analyze_metric(ds: Table, column: str) -> MetricAnalysis:
-    points = []
+    points: list[Point] = []
     for i, row in enumerate(ds.rows):
         v = row.get(column)
         if not isinstance(v, float) or not math.isfinite(v):
@@ -80,8 +93,10 @@ def analyze_metric(ds: Table, column: str) -> MetricAnalysis:
             continue
         points.append({"row": i, "time": t, "label": format_date(t) if t else f"Row {i + 1}", "value": v})
     if ds.times:
-        points.sort(key=lambda p: p["time"])
+        points.sort(key=lambda p: p["time"] or date.min)
     values = [p["value"] for p in points]
+    # (date, value) pairs; in a table with dates every point has one.
+    dated = [(t, p["value"]) for p in points if (t := p["time"]) is not None]
     summary = summarize(values)
     spacing = None if ds.interval_days is None else (ds.interval_days, ds.min_interval_days if ds.min_interval_days is not None else ds.interval_days)
     cls = build_classification(column, values, spacing)
@@ -91,12 +106,14 @@ def analyze_metric(ds: Table, column: str) -> MetricAnalysis:
         if k >= 0:
             counts[k] += 1
 
-    trend = monthly = caveat = None
-    start = points[0]["time"] if points else None
-    end = points[-1]["time"] if points else None
+    trend: Trend | None = None
+    monthly: list[dict] | None = None
+    caveat: str | None = None
+    start = dated[0][0] if dated else None
+    end = dated[-1][0] if dated else None
     span = (end - start).days / 365.25 if start and end else 0.0
-    if ds.times and len(points) >= 4:
-        trend = trend_test([decimal_year(p["time"]) for p in points], values)
+    if ds.times and len(dated) >= 4:
+        trend = trend_test([decimal_year(t) for t, _ in dated], [v for _, v in dated])
         if span < 1.9:
             if span < 1:
                 months = max(1, round(span * 12))
@@ -105,17 +122,18 @@ def analyze_metric(ds: Table, column: str) -> MetricAnalysis:
                 caveat = f"The record covers {span:.1f} years, less than two seasonal cycles, so this trend mostly reflects the seasonal cycle, not a long-term change."
         if span >= 1.9 and (ds.interval_days if ds.interval_days is not None else 999) <= 31:
             sums, ns = [0.0] * 12, [0] * 12
-            for p in points:
-                m = p["time"].month - 1
-                sums[m] += p["value"]
+            for t, v in dated:
+                m = t.month - 1
+                sums[m] += v
                 ns[m] += 1
             monthly = [{"month": m, "label": MONTHS[m], "mean": sums[m] / ns[m], "n": ns[m]} for m in range(12) if ns[m]]
 
-    climate = None
+    climate: dict | None = None
     if ds.times and span >= 1.9 and (ds.interval_days if ds.interval_days is not None else 999) <= 31:
-        mv = to_monthly([(p["time"], p["value"]) for p in points], ds.interval_days)
+        mv = to_monthly(dated, ds.interval_days)
         usable = [m for m in mv if m.coverage >= 0.8]
-        spi = note = None
+        spi: list[dict] | None = None
+        note: str | None = None
         if detect_metric(column) == "precip":
             years = len({m.year for m in usable})
             if years >= SPI_MIN_YEARS:

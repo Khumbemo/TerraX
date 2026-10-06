@@ -26,6 +26,8 @@ jobs:
       - run: pip install -e '.[dev]'
       - name: Lint (ruff)
         run: ruff check terrax scripts tests
+      - name: Type-check (mypy)
+        run: mypy
       - name: Tests (pytest)
         run: pytest -p no:warnings
 

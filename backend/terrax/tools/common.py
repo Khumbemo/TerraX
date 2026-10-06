@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, overload
 
 import numpy as np
 
@@ -47,19 +48,23 @@ def boundary(params: dict) -> dict | None:
     return {"name": str(b.get("name") or "boundary"), "geojson": b["geojson"], "areaM2": float(b.get("areaM2") or 0)}
 
 
+@overload
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: Literal[True] = ...) -> Raster: ...
+@overload
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool) -> Raster | None: ...
 def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True) -> Raster | None:
     fid = inputs.get(slot)
     if not fid:
         if required:
             raise ToolError(f"Choose a file for “{slot}”.")
         return None
-    f = ctx.file(fid)
+    f = ctx.file(str(fid))
     if f.kind != "raster":
         raise ToolError(f"{f.name} is not a GeoTIFF raster TerraX can read.")
     return Raster(f.path, f.name)
 
 
-def class_overlay(ctx: ToolContext, name: str, classes: np.ndarray, legend: list[dict], r: Raster, label: str) -> dict | None:
+def class_overlay(ctx: ToolContext, name: str, classes: np.ndarray, legend: Sequence[Mapping[str, Any]], r: Raster, label: str) -> dict | None:
     """Saves a class map as PNG and returns the map-image description (None without a WGS84 footprint)."""
     palette = {c["id"]: tuple(c["color"]) for c in legend}
     url = ctx.png(name, classes_rgba(classes, palette, alpha=255))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, overload
 
 import numpy as np
 
@@ -23,7 +23,12 @@ class ToolContext:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     # Inputs
+    @overload
+    def file(self, file_id: str) -> storage.StoredFile: ...
+    @overload
+    def file(self, file_id: None) -> None: ...
     def file(self, file_id: str | None) -> storage.StoredFile | None:
+        """The stored upload for an id; an empty id (an unused input slot) gives None."""
         if not file_id:
             return None
         try:
@@ -33,7 +38,8 @@ class ToolContext:
 
     def path(self, file_id: str) -> Path:
         f = self.file(file_id)
-        assert f is not None
+        if f is None:
+            raise ToolError("Choose an input file.")
         return f.path
 
     # Progress

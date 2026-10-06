@@ -121,3 +121,15 @@ def test_neighbour_extension_crossing_the_boundary():
     assert "Patches crossing the boundary | 1 (50 m² of them inside)" in md and "not proof of encroachment" in md
     same = enc.compare_layers({**stack, "layers": [stack["layers"][0], {**stack["layers"][0], "label": "copy"}]}, 0, 1, enc.DEFAULT_PARAMS)
     assert not same["patches"]
+
+
+def test_survey_geometry_without_coordinates_is_a_readable_error():
+    import pytest
+
+    from terrax.processing import survey
+
+    for g in ({"type": "Polygon"}, {"type": "LineString", "coordinates": None}, {"type": "Point", "coordinates": []}, {"type": "MultiPoint", "coordinates": [[]]}):
+        assert survey.measure_geometry("x", g) == []
+    fc = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": {"type": "Polygon"}}]}
+    with pytest.raises(ValueError, match="no measurable"):
+        survey.measure_survey("plot.geojson", "GeoJSON", fc, [])

@@ -20,6 +20,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from ..config import settings
 
 TILE = 512
@@ -191,11 +193,12 @@ def class_from_color(r: int, g: int, b: int, a: int, classes: list[dict]) -> int
 
 
 @lru_cache(maxsize=2)
-def _class_pixels(file: str):
+def _class_pixels(file: str) -> np.ndarray:
+    """A class map as an RGBA array (rows × columns × 4)."""
     from PIL import Image
 
     with Image.open(maps_dir() / file) as im:
-        return im.convert("RGBA").load(), im.size
+        return np.asarray(im.convert("RGBA"))
 
 
 def identify(lat: float, lon: float) -> dict[str, Any]:
@@ -203,12 +206,16 @@ def identify(lat: float, lon: float) -> dict[str, Any]:
     out: dict[str, Any] = {"lat": lat, "lon": lon}
     for key, file, classes in (("koppen", "koppen.png", KOPPEN), ("biome", "biomes.png", BIOMES)):
         try:
-            px, (w, _h) = _class_pixels(file)
+            px = _class_pixels(file)
         except FileNotFoundError:
             out[key] = None
             continue
-        p = mercator_pixel(lat, lon, w)
-        c = class_from_color(*px[p[0], p[1]], classes) if p else 0
+        p = mercator_pixel(lat, lon, px.shape[1])
+        if p:
+            r, g, b, alpha = (int(v) for v in px[p[1], p[0]])
+            c = class_from_color(r, g, b, alpha, classes)
+        else:
+            c = 0
         out[key] = {"code": classes[c - 1]["code"], "name": classes[c - 1]["name"], "color": classes[c - 1]["color"]} if c else None
     return out
 
@@ -255,7 +262,7 @@ def tile(layer: str, z: int, x: int, y: int) -> tuple[bytes, str]:
     n = 2**z
     if not (0 <= z <= 22 and 0 <= x < n and 0 <= y < n):
         raise KeyError(f"{z}/{x}/{y}")
-    resample = Image.NEAREST if pic.classes else Image.LANCZOS
+    resample = Image.Resampling.NEAREST if pic.classes else Image.Resampling.LANCZOS
     over = _image(pic.file)
     if pic.full and over.width / n < TILE:
         fs = pic.full / n  # full-detail pixels per tile (never more than one chunk)
@@ -334,8 +341,8 @@ def graticule(dt: datetime | None = None) -> dict[str, Any]:
         (90 - eps, f"Arctic Circle {90 - eps:.2f}° N"),
         (-(90 - eps), f"Antarctic Circle {90 - eps:.2f}° S"),
     ]
-    for lat, label in special:
-        feats.append({"type": "Feature", "properties": {"kind": "special", "label": label, "equator": lat == 0}, "geometry": {"type": "LineString", "coordinates": line(lat)}})
+    for special_lat, label in special:
+        feats.append({"type": "Feature", "properties": {"kind": "special", "label": label, "equator": special_lat == 0}, "geometry": {"type": "LineString", "coordinates": line(special_lat)}})
         for lon in (-150, -30, 90):
-            feats.append({"type": "Feature", "properties": {"kind": "label", "label": label}, "geometry": {"type": "Point", "coordinates": [lon, lat]}})
+            feats.append({"type": "Feature", "properties": {"kind": "label", "label": label}, "geometry": {"type": "Point", "coordinates": [lon, special_lat]}})
     return {"type": "FeatureCollection", "features": feats, "obliquity": eps}

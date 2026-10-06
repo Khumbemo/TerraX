@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import date
+from typing import Any
 
 import numpy as np
 from scipy.special import gammainc
@@ -81,16 +83,18 @@ def seasonal_kendall(monthly: list[MonthValue], alpha: float = 0.05) -> dict | N
 
 def monthly_anomalies(monthly: list[MonthValue]) -> dict:
     clim = []
+    means: list[float] = []
+    sds: list[float | None] = []
     for m in range(12):
         xs = np.array([v.value for v in monthly if v.month == m], dtype=float)
-        mean = float(xs.mean()) if xs.size else 0.0
-        sd = float(xs.std(ddof=1)) if xs.size > 1 else None
-        clim.append({"month": m, "mean": mean, "sd": sd, "years": int(xs.size)})
+        means.append(float(xs.mean()) if xs.size else 0.0)
+        sds.append(float(xs.std(ddof=1)) if xs.size > 1 else None)
+        clim.append({"month": m, "mean": means[m], "sd": sds[m], "years": int(xs.size)})
     rows = []
     for v in monthly:
-        c = clim[v.month]
-        a = v.value - c["mean"]
-        rows.append({**asdict(v), "anomaly": a, "z": a / c["sd"] if c["sd"] else None})
+        a = v.value - means[v.month]
+        sd = sds[v.month]
+        rows.append({**asdict(v), "anomaly": a, "z": a / sd if sd else None})
     return {"climatology": clim, "rows": rows}
 
 
@@ -114,14 +118,14 @@ def compute_spi(monthly: list[MonthValue], scale: int, daily_input: bool) -> dic
         totals[v.year * 12 + v.month - first] = v.value * days_in_month(v.year, v.month + 1) if daily_input else v.value
     acc: list[float | None] = []
     for i in range(len(totals)):
-        win = totals[i - scale + 1 : i + 1] if i + 1 >= scale else None
-        acc.append(None if win is None or any(x is None for x in win) else float(sum(win)))
+        win = [x for x in totals[i - scale + 1 : i + 1] if x is not None] if i + 1 >= scale else []
+        acc.append(float(sum(win)) if len(win) == scale else None)
     rows = [{"year": (first + i) // 12, "month": (first + i) % 12, "total": acc[i], "spi": None} for i in range(len(totals))]
     min_years = math.inf
     for m in range(12):
-        idx = [i for i, r in enumerate(rows) if r["month"] == m and r["total"] is not None]
+        idx = [i for i in range(len(rows)) if (first + i) % 12 == m and acc[i] is not None]
         min_years = min(min_years, len(idx))
-        xs = np.array([rows[i]["total"] for i in idx], dtype=float)
+        xs = np.array([acc[i] for i in idx], dtype=float)
         pos = xs[xs > 0]
         if xs.size < 2 or pos.size < 2:
             continue
@@ -133,7 +137,9 @@ def compute_spi(monthly: list[MonthValue], scale: int, daily_input: bool) -> dic
         alpha = (1 + math.sqrt(1 + 4 * A / 3)) / (4 * A)
         beta = mean / alpha
         for i in idx:
-            x = rows[i]["total"]
+            x = acc[i]
+            if x is None:
+                continue
             H = q + (1 - q) * (float(gammainc(alpha, x / beta)) if x > 0 else 0.0)
             rows[i]["spi"] = float(norm.ppf(min(1 - 1e-6, max(1e-6, H))))
     years = 0 if math.isinf(min_years) else int(min_years)
@@ -149,7 +155,7 @@ def compute_spi(monthly: list[MonthValue], scale: int, daily_input: bool) -> dic
     return {"scale": scale, "rows": rows, "years": years, "reliable": reliable, "notes": notes}
 
 
-def rainfall_summary(points: list[dict], metric: str, min_interval: float | None, start: date | None, end: date | None) -> dict | None:
+def rainfall_summary(points: Sequence[Mapping[str, Any]], metric: str, min_interval: float | None, start: date | None, end: date | None) -> dict | None:
     """Rainfall indices for daily series (points sorted by time with 'time', 'value', 'label')."""
     if metric != "precip" or min_interval is None or abs(min_interval - 1) > 0.25 or not start or not end or not points:
         return None

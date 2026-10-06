@@ -65,9 +65,9 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
     m2 = np.zeros(k)
     if geo:
         rows = np.flatnonzero(valid) // w
-        m2 = np.bincount(raw, weights=geo.cell_area[rows], minlength=k)
+        m2 = np.bincount(raw, weights=geo.cell_area[rows], minlength=k).astype(float)
     sums = np.stack([np.bincount(raw, weights=X[:, a], minlength=k) for a in range(X.shape[1])], axis=1)
-    ndvi = [None] * k
+    ndvi: list[float | None] = [None] * k
     ri = bands.index(roles["red"]) if roles.get("red") is not None and roles["red"] in bands else -1
     ni = bands.index(roles["nir"]) if roles.get("nir") is not None and roles["nir"] in bands else -1
     if ri >= 0 and ni >= 0:
@@ -78,8 +78,9 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
         c = np.bincount(raw[ok], minlength=k)
         ndvi = [float(s[j] / c[j]) if c[j] else None for j in range(k)]
     # Order clusters by NDVI (or overall brightness) so class numbers are stable and readable.
-    if all(v is not None for v in ndvi):
-        order = sorted(range(k), key=lambda j: ndvi[j])
+    known = [v for v in ndvi if v is not None]
+    if len(known) == k:
+        order = sorted(range(k), key=lambda j: known[j])
     else:
         order = sorted(range(k), key=lambda j: sums[j].sum() / (areas_px[j] or 1))
     rank = np.empty(k, dtype=np.int64)

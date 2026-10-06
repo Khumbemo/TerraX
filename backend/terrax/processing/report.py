@@ -53,8 +53,8 @@ def trend_sentence(a: MetricAnalysis) -> str:
     return f"{s} **Caution:** {a.trend_caveat}" if a.trend_caveat else s
 
 
-def climate_markdown(a: MetricAnalysis) -> str:
-    c = a.climate
+def climate_markdown(c: dict) -> str:
+    """Seasonal Kendall, anomalies and SPI of a monthly series (MetricAnalysis.climate)."""
     out: list[str] = []
     sk = c["seasonalKendall"]
     if sk:
@@ -104,7 +104,7 @@ def metric_section(ds: Table, a: MetricAnalysis) -> str:
         lo = min(a.monthly, key=lambda m: m["mean"])
         lines += [f"Seasonal cycle: highest mean in {hi['label']} ({fmt(hi['mean'])}), lowest in {lo['label']} ({fmt(lo['mean'])}).", ""]
     if a.climate:
-        lines += [climate_markdown(a), ""]
+        lines += [climate_markdown(a.climate), ""]
     total = sum(a.class_counts)
     if total:
         lines += [f"Class distribution ({a.classification.basis.rstrip('.')}):", ""]

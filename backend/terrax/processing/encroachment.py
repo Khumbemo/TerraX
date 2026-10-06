@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 from numba import njit
@@ -95,8 +96,9 @@ def prepare_geo_stack(images: list[dict], boundary: dict, buffer_m: float = 20, 
     min_e, max_e = min(e for e, _ in en) - buffer_m, max(e for e, _ in en) + buffer_m
     min_n, max_n = min(n for _, n in en) - buffer_m, max(n for _, n in en) + buffer_m
     notes: list[str] = []
-    sizes = [_native_cell_m(i["raster"], clat) for i in images]
-    if any(s is None or s <= 0 for s in sizes):
+    native = [_native_cell_m(i["raster"], clat) for i in images]
+    sizes = [s for s in native if s is not None and s > 0]
+    if len(sizes) < len(native):
         raise ValueError("Every image must be georeferenced (WGS84, Web Mercator or UTM) to be placed on the property.")
     cell = max(0.1, min(sizes))
     span = max(max_e - min_e, max_n - min_n)
@@ -178,7 +180,7 @@ def prepare_photo_stack(photos: list[dict], outline: list[list[float]], ground_w
         layers.append({"label": p["label"], "date": p.get("date"), "rgb": [np.where(opaque, sub[..., b], np.nan) for b in range(3)]})
     if len(outline) < 3:
         raise ValueError("Trace the property outline on the current image (at least three corners).")
-    prop = _rasterize_rings([[tuple(x) for x in outline]], width, height)
+    prop = _rasterize_rings([[(float(x[0]), float(x[1])) for x in outline]], width, height)
     cell = ground_width_m / width if ground_width_m and ground_width_m > 0 else None
     scale = f" Scale from the entered ground width: {fmt(cell, 3)} m per pixel." if cell else " Without a ground width, sizes are in pixels."
     notes.insert(0, f"Photos were compared pixel by pixel on a {width} × {height} grid; they are not georeferenced, so they must show exactly the same view.{scale}")
@@ -306,7 +308,7 @@ def compare_layers(stack: dict, i_from: int, i_to: int, p: dict) -> dict:
             has_reach[bid] = True
             reach_depth[bid] = max(reach_depth[bid], rmax[rid])
             reach_inside[bid] += rins[rid]
-    patches = []
+    patches: list[dict[str, Any]] = []
     zone_of = {}
     for i in ids[1:]:
         if not cells[i] or cells[i] * unit < p["minArea"]:
