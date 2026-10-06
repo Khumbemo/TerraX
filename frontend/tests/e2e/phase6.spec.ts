@@ -106,7 +106,10 @@ test('installed app works offline after one visit', async ({ page, context }) =>
     await navigator.serviceWorker.ready;
   });
   // Let the worker finish precaching, then go offline and reload.
-  await expect.poll(async () => page.evaluate(async () => (await caches.keys()).includes('terrax-v2') && (await (await caches.open('terrax-v2')).keys()).length), { timeout: 20_000 }).toBeGreaterThan(20);
+  // The cache name is read from the worker, so bumping its version cannot break this test.
+  const cacheName = await page.evaluate(async () => (await (await fetch('./sw.js')).text()).match(/const CACHE = '([^']+)'/)?.[1] ?? '');
+  expect(cacheName).toMatch(/^terrax-v\d+$/);
+  await expect.poll(async () => page.evaluate(async name => ((await caches.keys()).includes(name) ? (await (await caches.open(name)).keys()).length : 0), cacheName), { timeout: 20_000 }).toBeGreaterThan(20);
   await context.setOffline(true);
   await page.reload();
   await expect(page.locator('.tool-card').first()).toBeVisible();

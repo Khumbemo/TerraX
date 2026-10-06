@@ -77,11 +77,15 @@ jobs:
       - name: Start it and check the API through nginx
         run: |
           docker compose up -d
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/api/health | tee /tmp/health.json; then break; fi
+          for i in $(seq 1 60); do
+            if curl -fsS -o /tmp/health.json http://localhost:8080/api/health && grep -q '"redis":true' /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
             sleep 2
           done
-          grep -q '"redis":true' /tmp/health.json
+          echo "API did not become healthy through nginx" >&2
+          exit 1
       - name: Logs on failure
         if: failure()
         run: docker compose logs --tail 100
