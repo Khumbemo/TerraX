@@ -9,3 +9,8 @@ coverage/
 !.env.example
 test-results/
 playwright-report/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/storage/
+*.egg-info/

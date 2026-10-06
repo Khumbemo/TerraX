@@ -1,0 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { openGeoTiff } from '/home/user/TerraX/frontend/src/lib/rasterio';
+import { analyzeNdviChange, analyzeBurn, forestMarkdown, lossPolygons } from '/home/user/TerraX/frontend/src/lib/tools/forest';
+const S = '/home/user/TerraX/backend/data/samples/';
+const open = async (n: string) => openGeoTiff(new File([readFileSync(S + n)], n));
+const [mode, a, b, mmu] = process.argv.slice(2);
+const ra = await open(a), rb = await open(b);
+const r = mode === 'burn' ? await analyzeBurn({ raster: ra, bands: {} }, { raster: rb, bands: {} }, null, { mmuHa: Number(mmu) }) : await analyzeNdviChange({ raster: ra, bands: {} }, { raster: rb, bands: {} }, 0.5, -0.2, null, { mmuHa: Number(mmu) });
+process.stdout.write(forestMarkdown(r, [a, b]));
+const p = lossPolygons(r, ra.meta)!;
+process.stdout.write(`\nPOLYGONS ${p.fc.features.length} ${JSON.stringify(p.fc.features.slice(0, 2).map(f => f.properties))}\n`);
