@@ -1,0 +1,42 @@
+{
+  "name": "terrax",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@protomaps/basemaps": "^5.7.2",
+    "jspdf": "^4.2.1",
+    "maplibre-gl": "^6.11.2",
+    "pmtiles": "^4.5.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "react-markdown": "^10.1.0",
+    "recharts": "^3.8.1",
+    "remark-gfm": "^4.0.1",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^22.14.0",
+    "@types/topojson-client": "^3.1.5",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.8.2",
+    "vite": "^6.4.3"
+  },
+  "description": "TerraX web app (React + TypeScript + MapLibre); analysis runs on the TerraX Python API.",
+  "engines": {
+    "node": ">=20"
+  }
+}

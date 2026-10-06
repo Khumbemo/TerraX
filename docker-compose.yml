@@ -1,0 +1,57 @@
+# TerraX: web app (nginx), Python API (FastAPI), job workers (Celery) and Redis.
+#   cp .env.example .env    # optional: GEMINI_API_KEY and limits
+#   docker compose up --build
+#   open http://localhost:8080
+x-backend: &backend
+  build: ./backend
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    REDIS_URL: redis://redis:6379/0
+    TERRAX_STORAGE: /data/storage
+  volumes:
+    - storage:/data/storage
+  depends_on:
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+
+  worker:
+    <<: *backend
+    # Each worker process runs one job at a time; raise --concurrency on bigger machines.
+    command: ["celery", "-A", "terrax.tasks", "worker", "--loglevel=INFO", "--concurrency=2"]
+    healthcheck:
+      disable: true
+
+  beat:
+    <<: *backend
+    # Deletes uploads and results older than TERRAX_RETENTION_HOURS (hourly).
+    command: ["celery", "-A", "terrax.tasks", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    healthcheck:
+      disable: true
+
+  web:
+    build: ./frontend
+    ports:
+      - "${TERRAX_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  storage:
