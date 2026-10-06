@@ -13,8 +13,8 @@ import io
 import json
 import math
 import re
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 from pyproj import Geod, Transformer
@@ -162,7 +162,7 @@ def parse_shapefile_zip(path: Path, filename: str) -> tuple[dict, list[str]]:
     shp = next(n for n in names if n.lower().endswith(".shp"))
     try:
         gdf = gpd.read_file(f"zip://{path}!{shp}")
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         raise ValueError(f"{filename} could not be read as a shapefile: {err}") from None
     warnings = []
     if gdf.crs is None:

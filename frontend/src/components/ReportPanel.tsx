@@ -17,7 +17,7 @@ interface Props {
   onOpenSettings: () => void;
 }
 
-export function composeReport(output: ToolOutput, operator: string, ai: { text: string; model: string } | null): ReportRecord {
+function composeReport(output: ToolOutput, operator: string, ai: { text: string; model: string } | null): ReportRecord {
   const createdAt = new Date();
   const title = `TerraX ${toolInfo(output.tool).name} report · ${output.name}`;
   const meta = [`Created ${createdAt.toISOString().slice(0, 16).replace('T', ' ')} UTC`, operator && `by ${operator}`].filter(Boolean).join(' ');

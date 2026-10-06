@@ -9,7 +9,7 @@ import { useJob } from '../../lib/useJob';
 import type { ToolOutput } from '../../lib/tools/registry';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { Stat, useUpload } from '../ToolKit';
+import { Notes, Stat, useUpload } from '../ToolKit';
 
 type ForestType = 'dry' | 'moist' | 'wet';
 interface CarbonParams {
@@ -304,11 +304,7 @@ export default function CarbonTool({ onOutput }: Props) {
             <p className="field-hint">* default wood density. Equations used: {result.equations['chave2014-h']} trees with height (Chave 2014), {result.equations.chave2005 + result.equations['chave2014-e']} diameter-only.</p>
           </div>
 
-          <ul className="hint-list">
-            {result.notes.map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={result.notes} />
         </div>
       )}
     </div>

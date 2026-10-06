@@ -15,7 +15,7 @@ import math
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -161,7 +161,7 @@ def plate_pair(code: str) -> str:
 
 def obliquity_deg(dt: datetime) -> float:
     """Mean obliquity of the ecliptic (IAU 2006, Capitaine et al. 2003), degrees."""
-    u = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    u = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
     T = (u.timestamp() / 86_400 + 2_440_587.5 - 2_451_545.0) / 36_525
     arcsec = 84_381.406 - 46.836769 * T - 0.0001831 * T**2 + 0.0020034 * T**3 - 0.000000576 * T**4 - 0.0000000434 * T**5
     return arcsec / 3600
@@ -214,7 +214,7 @@ def identify(lat: float, lon: float) -> dict[str, Any]:
 
 
 def legends() -> dict[str, Any]:
-    strip = lambda items: [{k: v for k, v in i.items() if k != "rgb"} for i in items]  # noqa: E731
+    strip = lambda items: [{k: v for k, v in i.items() if k != "rgb"} for i in items]
     return {"koppen": strip(KOPPEN_LEGEND), "biomes": strip(BIOMES), "plateClasses": PLATE_CLASSES, "plates": PLATES}
 
 
@@ -319,11 +319,11 @@ def detail(west: float, south: float, east: float, north: float, layers: list[st
 
 def graticule(dt: datetime | None = None) -> dict[str, Any]:
     """10° grid plus the equator, tropics and polar circles (from today's obliquity), with label points."""
-    eps = obliquity_deg(dt or datetime.now(timezone.utc))
+    eps = obliquity_deg(dt or datetime.now(UTC))
     feats: list[dict[str, Any]] = []
     for lon in range(-180, 181, 10):
         feats.append({"type": "Feature", "properties": {"kind": "grid", "major": lon % 30 == 0}, "geometry": {"type": "LineString", "coordinates": [[lon, -MERCATOR_MAX_LAT], [lon, MERCATOR_MAX_LAT]]}})
-    line = lambda lat: [[-180 + i * 5, lat] for i in range(73)]  # noqa: E731
+    line = lambda lat: [[-180 + i * 5, lat] for i in range(73)]
     for lat in range(-80, 81, 10):
         if lat:
             feats.append({"type": "Feature", "properties": {"kind": "grid", "major": lat % 30 == 0}, "geometry": {"type": "LineString", "coordinates": line(lat)}})

@@ -923,7 +923,7 @@ const PLATES: Record<string, string> = {
 };
 
 /** "AF-AN" (or with / or \ for subduction polarity) → "Africa – Antarctica". */
-export function platePair(code: string): string {
+function platePair(code: string): string {
   return code
     .split(/[-/\\]/)
     .map(c => PLATES[c] ?? c)

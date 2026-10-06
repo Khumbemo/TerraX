@@ -97,7 +97,7 @@ def generate(api_key: str, req: GenerateRequest) -> GenerateResult:
     contents = [types.Content(role=t["role"], parts=[types.Part(text=t["text"])]) for t in req.turns]
     try:
         response = client.models.generate_content(model=req.model, contents=contents, config=config)
-    except Exception as err:  # noqa: BLE001 — every SDK failure becomes a readable message
+    except Exception as err:  # every SDK failure becomes a readable message
         raise GeminiError(describe_error(err)) from err
 
     sources: list[dict[str, str]] = []

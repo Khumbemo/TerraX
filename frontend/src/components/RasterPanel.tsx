@@ -9,6 +9,7 @@ import { formatBytes } from '../lib/report';
 import { fmt } from '../lib/stats';
 import { useToast } from '../lib/toast';
 import type { BandMap, BandRole, HistogramBin, QaMaskRef, RasterMode, SpectralIndex } from '../lib/types';
+import { Notes } from './ToolKit';
 
 /** A raster layer as described by the server (processing/rasterset.py). */
 export interface RasterDataset {
@@ -366,11 +367,7 @@ export default function RasterPanel({ dataset: ds, fileId, guessedBands, busy, o
 
       {!pick && ds.preview && <p className="field-hint">Click the preview to read every band at a pixel.</p>}
       {ds.hints.length > 0 && (
-        <ul className="hint-list">
-          {ds.hints.map(h => (
-            <li key={h}>{h}</li>
-          ))}
-        </ul>
+        <Notes items={ds.hints} />
       )}
     </section>
   );

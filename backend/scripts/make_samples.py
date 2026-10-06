@@ -5,7 +5,9 @@ Run: python scripts/make_samples.py
 Every file is synthetic (made-up but physically plausible values) so each
 TerraX tool can be tried without real data. Do not use them as research data.
 The random numbers (mulberry32) and the arithmetic follow the original
-JavaScript generator step by step, so the files come out the same.
+JavaScript generator step by step, so the pixel values, coordinate systems and
+grids come out identical to the committed files (only the TIFF writer's
+metadata differs, because GDAL writes them now).
 """
 
 from __future__ import annotations
@@ -54,7 +56,7 @@ def noise_field(w: int, h: int, cell: float, seed: int) -> np.ndarray:
     gx = np.arange(w) / cell
     gy = np.arange(h) / cell
     x0, y0 = np.floor(gx).astype(int), np.floor(gy).astype(int)
-    s = lambda t: t * t * (3 - 2 * t)  # noqa: E731
+    s = lambda t: t * t * (3 - 2 * t)
     fx, fy = s(gx - x0)[None, :], s(gy - y0)[:, None]
     X0, Y0 = x0[None, :], y0[:, None]
     v00, v10 = g[Y0 * gw + X0], g[Y0 * gw + X0 + 1]
@@ -144,7 +146,7 @@ def main() -> None:
     riv4 = np.abs(xx - 60 - yy * 0.2) < 4
     town = (xx - 200) ** 2 + (yy - 40) ** 2 < 22**2
     f = canopy
-    pick = lambda rv, tw, fo: np.where(riv4, rv, np.where(town, tw, fo))  # noqa: E731
+    pick = lambda rv, tw, fo: np.where(riv4, rv, np.where(town, tw, fo))
     write_tif("satellite_4band_synthetic.tif", [
         pick(700, 1300 + fine * 300, 300 + (1 - f) * 250),
         pick(900, 1400 + fine * 300, 550 + (1 - f) * 250),

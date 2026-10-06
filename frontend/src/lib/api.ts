@@ -10,7 +10,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 
 export const apiUrl = (path: string) => (/^https?:\/\//.test(path) ? path : `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`);
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -107,7 +107,8 @@ export function uploadFile(file: File, onProgress?: (fraction: number) => void, 
     xhr.onload = () => (xhr.status < 300 ? resolve(xhr.response as StoredFile) : reject(new ApiError(detail(xhr.response, xhr.status), xhr.status)));
     xhr.onerror = () => reject(new ApiError(`Could not upload ${file.name}: the TerraX server is not reachable.`, 0));
     xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
-    signal?.addEventListener('abort', () => xhr.abort());
+    if (signal?.aborted) return reject(new DOMException('Upload cancelled', 'AbortError'));
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true });
     const form = new FormData();
     form.append('file', file, file.name);
     xhr.send(form);
@@ -126,7 +127,7 @@ export function checkFile<M>(f: StoredFile, kinds: FileKind[], what: string): St
 
 // ── Jobs ─────────────────────────────────────────────────────────────────
 
-export interface JobStatus<T> {
+interface JobStatus<T> {
   id: string;
   tool: string;
   state: 'queued' | 'running' | 'done' | 'error';
@@ -143,11 +144,16 @@ export interface JobProgress {
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
+    if (signal?.aborted) return reject(new DOMException('Cancelled', 'AbortError'));
+    const onAbort = () => {
       clearTimeout(t);
       reject(new DOMException('Cancelled', 'AbortError'));
-    });
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 
 /**
@@ -184,7 +190,7 @@ export interface Download {
   truncated?: number;
 }
 
-export interface LegendEntry {
+interface LegendEntry {
   color: string;
   label: string;
 }
@@ -226,16 +232,3 @@ export async function downloadArtifact(d: Pick<Download, 'url' | 'filename'>): P
   if (!res.ok) throw new Error(`The download failed (HTTP ${res.status}); the result may have expired. Run the analysis again.`);
   await downloadBlob(await res.blob(), d.filename);
 }
-
-// ── Health ───────────────────────────────────────────────────────────────
-
-export interface Health {
-  ok: boolean;
-  version: string;
-  eager: boolean;
-  redis: boolean | null;
-  tools: string[];
-  ai: boolean;
-}
-
-export const health = () => request<Health>('/api/health');

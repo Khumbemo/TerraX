@@ -4,12 +4,12 @@
 // a second URL form that is tried automatically if the first does not load.
 // Terms change; each entry links to the provider's own terms.
 
-export type MapKind = 'none' | 'raster' | 'vector' | 'pmtiles' | 'wms' | 'builtin';
+type MapKind = 'none' | 'raster' | 'vector' | 'pmtiles' | 'wms' | 'builtin';
 export type MapGroup = 'Built in (works offline)' | 'Science layers (built in)' | 'Street maps' | 'Vector maps' | 'Terrain' | 'Satellite' | 'Night lights' | 'Your own';
 export const MAP_GROUPS: MapGroup[] = ['Built in (works offline)', 'Science layers (built in)', 'Street maps', 'Vector maps', 'Terrain', 'Satellite', 'Night lights', 'Your own'];
 /** How a built-in map is drawn (see BuiltinLayers.ts). */
-export type BuiltinKind = 'image' | 'classes' | 'ne-detailed' | 'ne-borders' | 'ne-water' | 'ne-places' | 'graticule' | 'plates';
-export type KeyName = 'stadia' | 'maptiler';
+type BuiltinKind = 'image' | 'classes' | 'ne-detailed' | 'ne-borders' | 'ne-water' | 'ne-places' | 'graticule' | 'plates';
+type KeyName = 'stadia' | 'maptiler';
 
 export interface MapDef {
   id: string;
@@ -244,7 +244,7 @@ export const MAPS: MapDef[] = [
 
 export const mapDef = (id: string): MapDef => MAPS.find(m => m.id === id) ?? MAPS[0];
 
-export interface OverlaySetting {
+interface OverlaySetting {
   id: string;
   opacity: number;
 }
@@ -306,7 +306,7 @@ export function gibsDefaultDate(now = new Date()): string {
  * Fills the non-Leaflet placeholders of a template ({key}, {time}). Returns
  * null when a required key is missing.
  */
-export function fillTemplate(template: string, def: MapDef, s: MapSettings, now = new Date()): string | null {
+function fillTemplate(template: string, def: MapDef, s: MapSettings, now = new Date()): string | null {
   let url = template;
   if (url.includes('{key}')) {
     const key = def.needsKey ? s.keys[def.needsKey]?.trim() : '';

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import calendar
 import re
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
-from typing import Any, Iterable
+from itertools import pairwise
+from typing import Any
 
 ISO = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T\s].*)?$")
 YEAR_MONTH = re.compile(r"^(\d{4})[-/.](\d{1,2})$")
@@ -87,7 +89,7 @@ def format_date(d: date | None) -> str:
 def date_spacing(dates: Iterable[date | None]) -> tuple[float, float] | None:
     """(median, min) gap in days between consecutive distinct dates, or None."""
     t = sorted({d.toordinal() for d in dates if d is not None})
-    gaps = sorted(b - a for a, b in zip(t, t[1:]))
+    gaps = sorted(b - a for a, b in pairwise(t))
     if not gaps:
         return None
     mid = len(gaps) // 2

@@ -43,6 +43,6 @@ def describe(path: Path) -> tuple[str, dict[str, Any]]:
             return kind, {"entries": names[:50]}
         if ext in VECTOR_EXT:
             return "vector", {"format": ext.lstrip(".").upper()}
-    except Exception as err:  # noqa: BLE001 — unreadable files are reported, not fatal
+    except Exception as err:  # unreadable files are reported, not fatal
         return "other", {"error": f"{path.name} could not be read: {err}"}
     return "other", {}

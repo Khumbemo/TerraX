@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Sequence
 
 import numpy as np
 from scipy.stats import norm

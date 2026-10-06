@@ -7,7 +7,6 @@ Redis (or run in-process with TERRAX_EAGER=true).
 from __future__ import annotations
 
 import mimetypes
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -56,7 +55,7 @@ def health() -> dict[str, Any]:
             import redis
 
             redis_ok = bool(redis.Redis.from_url(s.redis_url, socket_connect_timeout=1).ping())
-        except Exception:  # noqa: BLE001
+        except Exception:
             redis_ok = False
     from ..tools import load_all
 
@@ -134,7 +133,7 @@ def create_job(req: JobRequest) -> dict:
     jid = storage.create_job(req.tool, req.inputs, req.params)
     try:
         submit(jid)
-    except Exception as err:  # noqa: BLE001 — broker down
+    except Exception as err:  # broker down
         storage.update_job(jid, state="error", message=f"The job queue is not reachable ({err}). Check that Redis and a worker are running.")
     return _status_with_result(jid)
 

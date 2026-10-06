@@ -1,9 +1,7 @@
-// Vector helpers: export survey features as GeoJSON, KML or GPX, build an
-// analysis boundary from surveyed polygons, and turn drawn vertices into a
-// polygon feature.
+// Vector helpers: export survey features as GeoJSON, KML or GPX, turn drawn
+// vertices into a polygon feature, and format areas, lengths and bearings.
 import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon, Position } from 'geojson';
 import { fmt } from './stats';
-import type { Boundary } from './zonal';
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

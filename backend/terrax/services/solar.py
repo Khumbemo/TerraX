@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 RAD = math.pi / 180
 DAY_S = 86_400.0
@@ -21,7 +21,7 @@ J2000 = 2451545
 
 
 def _utc(dt: datetime) -> datetime:
-    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 def _unix(dt: datetime) -> float:
@@ -78,7 +78,7 @@ def format_clock(hours: float) -> str:
 
 
 def _js_round(x: float) -> int:
-    return int(math.floor(x + 0.5))
+    return math.floor(x + 0.5)
 
 
 # ── Position and rise/set (aa.quae.nl formulas, as in SunCalc) ───────────────
@@ -92,7 +92,7 @@ def _to_days(dt: datetime) -> float:
 
 
 def _from_julian(j: float) -> datetime:
-    return datetime.fromtimestamp((j + 0.5 - J1970) * DAY_S, tz=timezone.utc)
+    return datetime.fromtimestamp((j + 0.5 - J1970) * DAY_S, tz=UTC)
 
 
 def _mean_anomaly(d: float) -> float:
@@ -158,7 +158,7 @@ class SolarReport:
     subsolar_lon: float
 
     def public(self) -> dict:
-        iso = lambda d: d.isoformat().replace("+00:00", "Z") if d else None  # noqa: E731
+        iso = lambda d: d.isoformat().replace("+00:00", "Z") if d else None
         return {
             "meanSolarTime": self.mean_solar_time,
             "apparentSolarTime": self.apparent_solar_time,

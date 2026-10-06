@@ -10,7 +10,7 @@ import type { SpectralIndex } from '../lib/types';
 import type { Boundary } from '../lib/zonal';
 import FileDrop from './FileDrop';
 import JobStatus from './JobStatus';
-import { useUpload } from './ToolKit';
+import { Notes, useUpload } from './ToolKit';
 
 interface StackResult {
   label: string;
@@ -139,11 +139,7 @@ export default function StackPanel({ onOutput, boundary }: Props) {
               </tbody>
             </table>
           </div>
-          <ul className="hint-list">
-            {result.notes.map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={result.notes} />
         </>
       )}
     </section>

@@ -1,6 +1,5 @@
 node_modules/
 dist/
-dist-preview/
 build/
 coverage/
 .DS_Store
@@ -14,3 +13,5 @@ __pycache__/
 .pytest_cache/
 backend/storage/
 *.egg-info/
+.ruff_cache/
+.mypy_cache/

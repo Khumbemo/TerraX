@@ -35,4 +35,3 @@ export function saveReports(list: ReportRecord[]): boolean {
   return setJSON(KEY, list.slice(0, MAX_REPORTS));
 }
 
-export { MAX_REPORTS };

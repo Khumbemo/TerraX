@@ -33,8 +33,9 @@ _ID = re.compile(r"^[a-f0-9]{32}$")
 
 def safe_name(name: str) -> str:
     """A file name without folders or unusual characters (keeps the extension)."""
-    base = os.path.basename(name.replace("\\", "/")).strip() or "file"
-    base = _SAFE.sub("_", base)
+    base = _SAFE.sub("_", os.path.basename(name.replace("\\", "/")).strip())
+    if not base.strip("."):  # "", "." and ".." are not file names
+        base = "file"
     return base[:180]
 
 
@@ -177,7 +178,7 @@ def job_result(jid: str) -> dict[str, Any] | None:
 def artifact_path(jid: str, name: str) -> Path:
     name = safe_name(name)
     p = job_dir(jid) / "artifacts" / name
-    if not p.exists():
+    if not p.is_file():
         raise KeyError(name)
     return p
 

@@ -18,7 +18,7 @@ import math
 import numpy as np
 from numba import njit
 
-from .rio import Ground, Grid, Raster, ground_geometry
+from .rio import Ground, Raster, ground_geometry
 from .stats import fmt, summarize
 from .zonal import clip_to_boundary
 
@@ -114,8 +114,8 @@ def terrain_markdown(t: dict, meta) -> str:
         f"| Steepest slope | {fmt(s['max'])}° |",
         f"| Hypsometric integral | {fmt(t['hypsometricIntegral'], 3)} |", "",
         "Slope classes (descriptive):", "",
-        *[f"- {c['label']}: {n / total * 100:.1f} %" for c, n in zip(SLOPE_CLASSES, t["slopeClassCounts"])], "",
-        "Aspect of non-flat slopes: " + ", ".join(f"{a} {n / asp_total * 100:.0f} %" for a, n in zip(ASPECTS, t["aspectCounts"])) + ".", "",
+        *[f"- {c['label']}: {n / total * 100:.1f} %" for c, n in zip(SLOPE_CLASSES, t["slopeClassCounts"], strict=True)], "",
+        "Aspect of non-flat slopes: " + ", ".join(f"{a} {n / asp_total * 100:.0f} %" for a, n in zip(ASPECTS, t["aspectCounts"], strict=True)) + ".", "",
         "## Method and limits", "", *[f"- {n}" for n in t["notes"]],
     ])
 
@@ -152,7 +152,7 @@ def _fill(z):
     raised = 0
     max_raise = 0.0
     while len(heap) > 0:
-        v, k = heapq.heappop(heap)
+        _, k = heapq.heappop(heap)
         r, c = k // w, k % w
         for d in range(8):
             rr, cc = r + DR[d], c + DC[d]
@@ -312,12 +312,12 @@ def stream_lines(flow: dict, to_lonlat) -> dict:
 
     stream_in = np.zeros((h, w), dtype=np.int32)
     rows, cols = np.nonzero(order)
-    for r, c in zip(rows, cols):
+    for r, c in zip(rows, cols, strict=True):
         m = down(r, c)
         if m and order[m]:
             stream_in[m] += 1
     feats = []
-    for r, c in zip(rows, cols):
+    for r, c in zip(rows, cols, strict=True):
         if stream_in[r, c] == 1:
             continue
         coords = [to_lonlat(c + 0.5, r + 0.5)]
@@ -361,7 +361,10 @@ def contour_grid(z: np.ndarray, levels: list[float]) -> list[tuple[float, list[l
             segs: list = []
             for i in np.flatnonzero(sel):
                 k = int(idx[i])
-                lerp = lambda v1, v2: (lv - v1) / (v2 - v1)
+
+                def lerp(v1: float, v2: float, lv: float = lv) -> float:
+                    return (lv - v1) / (v2 - v1)
+
                 top = (x0[i] + lerp(A[i], B[i]), y0[i])
                 right = (x0[i] + 1, y0[i] + lerp(B[i], C[i]))
                 bottom = (x0[i] + lerp(D[i], C[i]), y0[i] + 1)

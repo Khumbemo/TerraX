@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 
@@ -116,11 +116,11 @@ def compute_index_grid(raster: Raster, index: str, bands: dict) -> tuple[Grid, l
     if d.needs_reflectance and any(looks_scaled(g) for g in grids):
         scale = 1 / 10000
         notes.append(f"{d.short} uses absolute reflectance; band values look scaled by 10,000 (as in Sentinel-2 L2A from Earth Engine) and were divided by 10,000. Raw ESA L2A files from 2022 onward also need the −1000 offset removed first.")
-    b = {r: g.data.astype(np.float64) * scale for r, g in zip(d.needs, grids)}
+    b = {r: g.data.astype(np.float64) * scale for r, g in zip(d.needs, grids, strict=True)}
     with np.errstate(all="ignore"):
         out = d.compute(b)
     out = np.where(np.isfinite(out), out, np.nan).astype(np.float32)
-    band_text = ", ".join(f"band {i + 1} = {r.upper()}" for r, i in zip(d.needs, idx))
+    band_text = ", ".join(f"band {i + 1} = {r.upper()}" for r, i in zip(d.needs, idx, strict=True))
     notes.insert(0, f"{d.short} = {d.formula} ({d.reference}); {band_text}. {d.reading}")
     g0 = grids[0]
     return Grid(g0.width, g0.height, out, g0.resample_factor), notes

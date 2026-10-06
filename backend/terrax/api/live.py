@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -41,9 +41,9 @@ def current_kp() -> tuple[dict | None, str | None]:
 
 @router.get("/solar")
 def solar(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180), at: datetime | None = None) -> dict[str, Any]:
-    now = at or datetime.now(timezone.utc)
+    now = at or datetime.now(UTC)
     out = solar_report(now, lat, lon).public()
-    out["at"] = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    out["at"] = now.astimezone(UTC).isoformat().replace("+00:00", "Z")
     return out
 
 

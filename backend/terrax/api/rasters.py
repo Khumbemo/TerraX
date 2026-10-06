@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from .. import storage
 from ..processing.render import composite_rgba, png_bytes, preview
-from ..processing.rio import Raster, apply_qa, ground_geometry, qa_masked
+from ..processing.rio import Raster, apply_qa, qa_masked
 
 router = APIRouter()
 
@@ -70,7 +70,8 @@ class OutletRequest(BaseModel):
 def watershed(job_id: str, req: OutletRequest) -> dict:
     """Watershed draining to the clicked cell (snapped to the strongest flow nearby) of a hydrology job."""
     from ..processing.patches import patches_to_geojson
-    from ..processing.terrain import snap_outlet, watershed as basin_mask
+    from ..processing.terrain import snap_outlet
+    from ..processing.terrain import watershed as basin_mask
     from ..tools.terrain import flow_rgba
 
     st = storage.job_status(job_id)

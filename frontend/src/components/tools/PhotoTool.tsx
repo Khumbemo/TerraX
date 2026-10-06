@@ -8,7 +8,7 @@ import { useJob } from '../../lib/useJob';
 import type { ToolOutput } from '../../lib/tools/registry';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { ArtifactImage, Stat, useUpload } from '../ToolKit';
+import { ArtifactImage, Notes, Stat, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -123,11 +123,7 @@ export default function PhotoTool({ onOutput }: Props) {
               </figcaption>
             )}
           </figure>
-          <ul className="hint-list">
-            {result.notes.map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={result.notes} />
         </div>
       )}
     </div>

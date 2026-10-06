@@ -12,7 +12,7 @@ import type { ToolOutput } from '../../lib/tools/registry';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { ArtifactImage, Downloads, Stat, useUpload } from '../ToolKit';
+import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -319,11 +319,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
             </div>
           </div>
 
-          <ul className="hint-list">
-            {[...result.notes, ...out.warnings].map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={[...result.notes, ...out.warnings]} />
         </div>
       )}
     </div>

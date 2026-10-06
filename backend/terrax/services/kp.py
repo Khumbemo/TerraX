@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 KP_URL = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
@@ -42,7 +42,7 @@ def _parse_time(v: Any) -> datetime | None:
         d = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return d.astimezone(timezone.utc)
+    return d.astimezone(UTC)
 
 
 def _num(v: Any) -> float | None:

@@ -12,7 +12,7 @@
 
 const RAD = Math.PI / 180;
 /** Land mask size (equirectangular). 4096 × 2048 stays within every browser's canvas limit. */
-export const MASK_W = 4096, MASK_H = 2048;
+const MASK_W = 4096, MASK_H = 2048;
 
 function rng(seed: number) {
   return () => {

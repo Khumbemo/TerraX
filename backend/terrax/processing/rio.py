@@ -103,7 +103,7 @@ class Raster:
                         latlng = [[s, w], [n, e]]
                     else:
                         warnings.append("The file declares no coordinate reference system, so its footprint cannot be drawn on the map.")
-                except Exception:  # noqa: BLE001 — any CRS failure only loses the footprint
+                except Exception:  # any CRS failure only loses the footprint
                     warnings.append(f"EPSG:{epsg} could not be converted to WGS84 for the map footprint." if epsg else "The file uses a custom projection that could not be converted to WGS84 for the map footprint.")
             total = ds.width * ds.height
             scale = math.sqrt(ANALYSIS_PIXEL_LIMIT / total) if total > ANALYSIS_PIXEL_LIMIT else 1.0
@@ -156,7 +156,7 @@ def same_grid(a: Meta, b: Meta) -> bool:
     if not a.bbox or not b.bbox:
         return not a.bbox and not b.bbox
     tol = max(a.pixel_size or (0, 0)) / 2
-    return all(abs(x - y) <= tol for x, y in zip(a.bbox, b.bbox)) and a.epsg == b.epsg
+    return all(abs(x - y) <= tol for x, y in zip(a.bbox, b.bbox, strict=True)) and a.epsg == b.epsg
 
 
 def is_utm(epsg: int | None) -> bool:

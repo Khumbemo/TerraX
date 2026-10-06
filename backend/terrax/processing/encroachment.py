@@ -30,7 +30,7 @@ from rasterio.features import geometry_mask
 from rasterio.transform import from_bounds
 from scipy import ndimage
 
-from .patches import EIGHT, label_patches, patch_areas, patches_to_geojson
+from .patches import label_patches, patch_areas, patches_to_geojson
 from .rio import Raster
 from .stats import fmt
 
@@ -118,7 +118,7 @@ def prepare_geo_stack(images: list[dict], boundary: dict, buffer_m: float = 20, 
             raise ValueError(f"{r.meta.filename} is not in a supported CRS (WGS84, Web Mercator or UTM).")
         idx = _rgb_bands(r.meta.bands)
         uniq = sorted(set(idx))
-        grids = dict(zip(uniq, r.read_bands(uniq)))
+        grids = dict(zip(uniq, r.read_bands(uniq), strict=True))
         g0 = grids[uniq[0]]
         dst = "EPSG:4326" if r.meta.geographic else r.crs
         x, y = Transformer.from_crs(epsg, dst, always_xy=True).transform(E, N)
