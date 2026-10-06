@@ -22,7 +22,7 @@ def load_all() -> dict[str, Runner]:
     """Imports the tool modules so they register themselves."""
     from . import forest  # noqa: F401
 
-    for mod in ("raster", "table", "survey", "carbon", "terrain", "landcover", "photo", "residential", "stack"):
+    for mod in ("raster", "table", "survey", "carbon", "terrain", "landcover", "photo", "residential", "stack", "sentinel"):
         try:
             __import__(f"{__name__}.{mod}")
         except ModuleNotFoundError as err:
