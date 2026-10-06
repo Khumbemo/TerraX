@@ -79,7 +79,7 @@ def test_metric_detection_uses_whole_words(name, metric):
 
 def test_imd_rainfall_categories():
     c = build_classification("precipitation", [0, 1, 20], (2, 1))
-    label = lambda v: c.buckets[c.classify(v)]["label"]  # noqa: E731
+    label = lambda v: c.buckets[c.classify(v)]["label"]
     assert "No rain" in label(0.05) and "Very light" in label(2.4)
     assert label(2.5).startswith("Light") and label(15.5).startswith("Light")
     assert "Moderate" in label(15.6) and label(64.5).startswith("Heavy") and "Extremely heavy" in label(204.5)
@@ -264,4 +264,4 @@ def test_images_without_exif(tmp_path):
     bad = tmp_path / "bad.jpg"
     bad.write_bytes(b"not an image at all")
     assert read_exif(bad) is None
-    assert io  # noqa: B018
+    assert io

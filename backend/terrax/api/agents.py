@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -94,7 +94,7 @@ def _offline(req: ChatRequest, note: str = "") -> dict[str, Any]:
         target_lon=req.target.lon,
         target_name=req.target.name,
         operator=req.operator,
-        now=req.now or datetime.now(timezone.utc),
+        now=req.now or datetime.now(UTC),
         tz_offset_min=req.tzOffsetMinutes,
         results=req.results.model_dump() if req.results else None,
         table=_table_for(req.results) if req.agent == "results" else None,

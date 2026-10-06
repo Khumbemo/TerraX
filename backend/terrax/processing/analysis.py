@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .climate import MonthValue, compute_spi, monthly_anomalies, seasonal_kendall, to_monthly
+from .climate import compute_spi, monthly_anomalies, seasonal_kendall, to_monthly
 from .dates import MONTHS, decimal_year, format_date
 from .metrics import Classification, build_classification, detect_metric
 from .stats import Summary, Trend, summarize, trend_test
@@ -30,9 +30,7 @@ class MetricAnalysis:
     climate: dict | None
 
     def public(self, max_points: int = 1500) -> dict:
-        from .stats import sample_indices
-
-        from .stats import quantile_sorted
+        from .stats import quantile_sorted, sample_indices
 
         idx = sample_indices(len(self.points), max_points)
         intercept = None

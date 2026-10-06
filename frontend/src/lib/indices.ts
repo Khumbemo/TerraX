@@ -1,5 +1,5 @@
 // Spectral indices with their published definitions (computed on the server, processing/indices.py).
-import type { BandMap, BandRole, SpectralIndex } from './types';
+import type { BandRole, SpectralIndex } from './types';
 
 export interface IndexDef {
   id: SpectralIndex;

@@ -7,11 +7,6 @@
 //    2 cirrus, 3 cloud, 4 cloud shadow, 5 snow (USGS LSDS-1619).
 export type QaKind = 'scl' | 'landsat';
 
-export interface QaMask {
-  band: number;
-  kind: QaKind;
-}
-
 export const QA_KINDS: Record<QaKind, { label: string; rule: string }> = {
   scl: { label: 'Sentinel-2 SCL', rule: 'SCL classes 0, 1, 3, 8, 9, 10 and 11 (no data, defective, cloud shadow, clouds, cirrus, snow)' },
   landsat: { label: 'Landsat QA_PIXEL', rule: 'QA_PIXEL bits 0–5 (fill, dilated cloud, cirrus, cloud, cloud shadow, snow)' },

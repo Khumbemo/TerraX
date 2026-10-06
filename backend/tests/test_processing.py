@@ -172,8 +172,8 @@ def test_soil_moisture_detection_and_units():
 
 def test_boundary_mask_geographic_holes_and_errors(tmp_path):
     r = tif(tmp_path, "g.tif", [np.ones((100, 100))], res=0.01, epsg=4326, tie=(94, 26))
-    sq = lambda x0, x1, y0, y1: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]  # noqa: E731
-    fc = lambda *rings: {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": list(rings)}}]}  # noqa: E731
+    sq = lambda x0, x1, y0, y1: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]
+    fc = lambda *rings: {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": list(rings)}}]}
     grid = r.read_bands([0])[0]
     assert boundary_mask(r, grid, {"name": "sq", "areaM2": 1, "geojson": fc(sq(94.2, 94.5, 25.3, 25.6))})[1] == 900
     holed = {"name": "sq", "areaM2": 1, "geojson": fc(sq(94.2, 94.5, 25.3, 25.6), sq(94.3, 94.4, 25.4, 25.5))}
@@ -258,7 +258,7 @@ def test_multi_date_series_declines(tmp_path):
     assert [x["date"] for x in r["rows"]] == dates
     assert all(r["rows"][i]["mean"] < r["rows"][i - 1]["mean"] for i in range(1, 6))
     assert r["trend"]["direction"] == "decreasing" and r["trend"]["p"] < 0.05 and r["trend"]["s"] == -15
-    with pytest.raises(ValueError, match="No date found in: nodate.tif"):
+    with pytest.raises(ValueError, match=r"No date found in: nodate\.tif"):
         rasterset.analyze_stack([rs[0], tif(tmp_path, "nodate.tif", [np.zeros((4, 4))])], None, {})
 
 

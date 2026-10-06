@@ -11,8 +11,6 @@ import type { Boundary } from '../lib/zonal';
 import MapChooser from './MapChooser';
 import { MapController, PLATE_CLASSES, type DrawState, type LayerStatus, type LayerVis } from './map/MapController';
 
-export type { DrawState };
-
 interface Props {
   target: { lat: number; lon: number; name: string };
   /** Area to fly to and outline (e.g. a raster footprint). */

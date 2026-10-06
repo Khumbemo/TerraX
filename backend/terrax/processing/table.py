@@ -123,7 +123,7 @@ def build_table(filename: str, fmt_name: str, size: int, matrix: list[list[Any]]
         raw = [r[time_col] for r in rows]
         order, ambiguous = detect_day_month_order(raw)
         times = [parse_date_cell(v, order, bool(year_col)) for v in raw]
-        bad = sum(1 for t, v in zip(times, raw) if t is None and v is not None)
+        bad = sum(1 for t, v in zip(times, raw, strict=True) if t is None and v is not None)
         if bad:
             warnings.append(f'{bad} value{"" if bad == 1 else "s"} in "{time_col}" are not valid calendar dates and were left off the time axis.')
         if ambiguous and any(isinstance(v, str) and re.match(r"^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}$", v.strip()) for v in raw):

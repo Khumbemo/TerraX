@@ -53,7 +53,7 @@ def run_job(job_id: str) -> dict:
         return storage.update_job(job_id, state="error", message=str(err), error=str(err))
     except ValueError as err:  # data problems raised by the processing modules
         return storage.update_job(job_id, state="error", message=str(err), error=str(err))
-    except Exception as err:  # noqa: BLE001 — record any failure so the UI stops waiting
+    except Exception as err:  # record any failure so the UI stops waiting
         log.exception("job %s failed", job_id)
         msg = f"The analysis failed unexpectedly ({type(err).__name__}: {err})."
         return storage.update_job(job_id, state="error", message=msg, error=msg, trace=traceback.format_exc()[-4000:])

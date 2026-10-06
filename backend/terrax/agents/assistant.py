@@ -12,7 +12,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -114,7 +114,7 @@ class Context:
 
     @property
     def local_now(self) -> datetime:
-        return self._local(self.now or datetime.now(timezone.utc))
+        return self._local(self.now or datetime.now(UTC))
 
     def _local(self, d: datetime) -> datetime:
         return d.astimezone(timezone(timedelta(minutes=self.tz_offset_min)))
@@ -312,7 +312,7 @@ def reply(question: str, ctx: Context, mode: str = "guide", state: dict[str, Any
     st = {"lastTopic": None, "pending": None, "gaveMore": False, **(state or {})}
     start = starter()
     last = topic_by_id(st["lastTopic"])
-    now = ctx.now or datetime.now(timezone.utc)
+    now = ctx.now or datetime.now(UTC)
     local = ctx.local_now
     norm = normalize(question)
     word_count = len(words(question))
@@ -397,7 +397,7 @@ def reply(question: str, ctx: Context, mode: str = "guide", state: dict[str, Any
         s = solar_report(now, ctx.target_lat, ctx.target_lon)
         return done(
             _reply(
-                f"It’s **{_hhmm(local)}** on your device ({_hhmm(now.astimezone(timezone.utc))} UTC). At {ctx.target_name}, local mean solar time is {format_clock(s.mean_solar_time)[:5]}.",
+                f"It’s **{_hhmm(local)}** on your device ({_hhmm(now.astimezone(UTC))} UTC). At {ctx.target_name}, local mean solar time is {format_clock(s.mean_solar_time)[:5]}.",
                 ["When is sunrise?", "What is solar time?"],
             )
         )

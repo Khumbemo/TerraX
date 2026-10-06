@@ -1,6 +1,6 @@
 """Built-in assistant and Gemini request handling (ported from the TypeScript tests)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -11,7 +11,7 @@ from terrax.processing.table import read_table
 
 from .conftest import SAMPLES
 
-NOW = datetime(2026, 9, 28, 4, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 28, 4, 0, tzinfo=UTC)
 
 
 def ctx(**kw):

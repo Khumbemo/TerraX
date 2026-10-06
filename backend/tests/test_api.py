@@ -31,3 +31,15 @@ def test_job_errors_are_reported(client, sample):
     assert client.get("/api/jobs/" + "0" * 32).status_code == 404
     assert client.post("/api/jobs", json={"tool": "nope"}).status_code == 400
     assert client.post("/api/samples", json={"name": "../../etc/passwd"}).status_code == 404
+
+
+def test_dot_names_cannot_reach_folders(client, sample):
+    from terrax import storage
+
+    assert storage.safe_name("..") == "file" and storage.safe_name("a/../..") == "file" and storage.safe_name(".env") == ".env"
+    a = client.post("/api/samples", json={"name": "forest_ndvi_2016_synthetic.tif"}).json()
+    job = client.post("/api/jobs", json={"tool": "forest", "inputs": {"a": a["id"], "b": a["id"]}, "params": {"mode": "ndvi"}}).json()
+    assert job["state"] == "done"
+    assert client.get(f"/api/jobs/{job['id']}/artifacts/%2E%2E").status_code == 404
+    up = client.post("/api/files", files={"file": ("..", b"x,y\n1,2\n", "text/csv")})
+    assert up.status_code in (200, 201, 400) and (up.status_code == 400 or up.json()["name"] == "file")

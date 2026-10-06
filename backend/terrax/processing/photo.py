@@ -47,7 +47,7 @@ def read_exif(path: Path) -> dict | None:
     try:
         with Image.open(path) as im:
             ex = im.getexif()
-    except Exception:  # noqa: BLE001 — malformed EXIF is not fatal
+    except Exception:  # malformed EXIF is not fatal
         return None
     if not ex:
         return None
@@ -90,7 +90,7 @@ def analyze_photo(path: Path, filename: str) -> dict:
         im = Image.open(path)
         im = ImageOps.exif_transpose(im)
         im.load()
-    except Exception:  # noqa: BLE001
+    except Exception:
         raise ValueError(f"{filename} could not be decoded as an image. Use JPG, PNG or WebP (for GeoTIFFs use the Satellite imagery tool).") from None
     width, height = im.size
     s = min(1.0, MAX_SIDE / max(width, height))

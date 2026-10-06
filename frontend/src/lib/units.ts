@@ -4,8 +4,8 @@ import { fmt } from './stats';
 export type Units = 'metric' | 'imperial';
 
 export const ACRES_PER_HA = 2.4710538147; // 1 ha = 10,000 m²; 1 acre = 4,046.8564224 m²
-export const M_PER_FT = 0.3048;
-export const M_PER_MI = 1609.344;
+const M_PER_FT = 0.3048;
+const M_PER_MI = 1609.344;
 /** Metric tonnes per hectare → US short tons per acre (1 short ton = 907.18474 kg). */
 export const T_HA_TO_STON_ACRE = 1000 / 907.18474 / ACRES_PER_HA;
 /** m²/ha → ft²/acre. */

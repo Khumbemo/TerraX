@@ -12,9 +12,7 @@ import type { BandMap } from '../../lib/types';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { ArtifactImage, Downloads, Stat, useUpload } from '../ToolKit';
-
-export { Stat };
+import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -337,11 +335,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
             </div>
           )}
 
-          <ul className="hint-list">
-            {result.notes.map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={result.notes} />
         </div>
       )}
     </div>

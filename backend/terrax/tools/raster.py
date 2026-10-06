@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 from ..processing.indices import INDICES
 from ..processing.rasterset import analyze_stack, dataset, raster_report, stack_markdown
 from ..processing.render import preview, ramp_rgba

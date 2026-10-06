@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { Summary, TableMeta, Trend } from '../lib/api';
 import { fmt, fmtP } from '../lib/stats';
+import { Notes } from './ToolKit';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SPI_SCALES = [1, 3, 6, 12];
 
 /** SPI classes of McKee et al. (1993), with the same boundaries as the server (processing/climate.py). */
-export function spiClass(v: number): string {
+function spiClass(v: number): string {
   if (v >= 2) return 'Extremely wet';
   if (v >= 1.5) return 'Very wet';
   if (v >= 1) return 'Moderately wet';
@@ -296,11 +297,7 @@ export default function CoreAnalysisDashboard({ dataset, analyses, metric, onMet
                         Latest: SPI-{spiScale} = {last ? `${fmt(last.spi!, 2)} in ${MONTHS[last.month]} ${last.year} (${spiClass(last.spi!)})` : '—'}. {rows.filter(x => x.spi! <= -1).length} of {rows.length} months were moderately dry or
                         worse (≤ −1).
                       </p>
-                      <ul className="hint-list">
-                        {r.notes.map(n => (
-                          <li key={n}>{n}</li>
-                        ))}
-                      </ul>
+                      <Notes items={r.notes} />
                     </>
                   );
                 })()}

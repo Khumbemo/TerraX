@@ -1,6 +1,6 @@
 """Solar geometry, Kp, live-data parsers, the Sentinel-2 window reader and the built-in maps."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
@@ -13,7 +13,6 @@ from terrax.processing.table import read_table
 from terrax.services import kp, live, solar, worldmaps
 
 approx = pytest.approx
-UTC = timezone.utc
 
 
 def test_equation_of_time_and_declination_match_noaa():

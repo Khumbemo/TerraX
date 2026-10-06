@@ -14,7 +14,7 @@ loss/burn patches are exported as polygons.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -159,7 +159,7 @@ def analyze_hansen(loss_year: Raster, tree_cover: Raster | None, canopy_thr: flo
     s = ly.data.ravel()[::11]
     s = s[np.isfinite(s)]
     if s.size and ((s != np.round(s)) | (s < 0) | (s > 60)).any():
-        raise ValueError(f"{loss_year.meta.filename} does not look like a Hansen lossyear layer (values should be whole numbers 0–{datetime.now(timezone.utc).year - 2000}).")
+        raise ValueError(f"{loss_year.meta.filename} does not look like a Hansen lossyear layer (values should be whole numbers 0–{datetime.now(UTC).year - 2000}).")
     clip = _clip(loss_year, boundary, ly, tc)
     acc = _Acc(loss_year, ly)
     v = ly.data.astype(np.float64)
@@ -259,7 +259,7 @@ def forest_markdown(r: dict, names: list[str]) -> str:
         v = r["validPixels"]
         lines += ["| Measure | Value |", "|---|---|", f"| Burned area (dNBR ≥ 0.1) | {fa(r['burned'])} |", f"| Mean dNBR (all valid pixels) | {fmt(r['meanDnbr'])} |",
                   f"| Valid pixels compared | {v:,} |", "", "### Severity classes", "", "| Class | Area | Share |", "|---|---|---|",
-                  *[f"| {c['label']} | {fa(a)} | {_share(a['pixels'], v)} % |" for c, a in zip(BURN_CLASSES, r["classAreas"])], ""]
+                  *[f"| {c['label']} | {fa(a)} | {_share(a['pixels'], v)} % |" for c, a in zip(BURN_CLASSES, r["classAreas"], strict=True)], ""]
     else:
         base = r["baseline"]
         pct = r["totalLoss"]["pixels"] / base["pixels"] * 100 if base and base["pixels"] else None

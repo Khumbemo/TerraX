@@ -7,7 +7,7 @@ import math
 import numpy as np
 
 from ..processing.render import hex_rgb, viridis
-from ..processing.rio import grid_to_lonlat, ground_geometry
+from ..processing.rio import grid_to_lonlat
 from ..processing.terrain import ASPECTS, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
 from . import tool
 from .common import boundary, clean, number, raster

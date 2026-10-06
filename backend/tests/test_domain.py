@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 from scipy.stats import t as student_t
 
-from terrax.processing import carbon, encroachment as enc
+from terrax.processing import carbon
+from terrax.processing import encroachment as enc
 
 from .conftest import SAMPLES
 

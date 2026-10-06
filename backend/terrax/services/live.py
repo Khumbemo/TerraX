@@ -331,7 +331,7 @@ def read_s2_window(item: StacItem, bbox: list[float], out: Path) -> list[str]:
 
     profile = {"driver": "GTiff", "width": gw, "height": gh, "count": 5, "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan, "compress": "deflate", "tiled": True}
     with rasterio.open(out, "w", **profile) as dst:
-        for i, (band, name) in enumerate(zip(stack, ["blue (B2)", "green (B3)", "red (B4)", "nir (B8)", "scl"]), start=1):
+        for i, (band, name) in enumerate(zip(stack, ["blue (B2)", "green (B3)", "red (B4)", "nir (B8)", "scl"], strict=True), start=1):
             dst.write(band, i)
             dst.set_band_description(i, name)
     cloud = _js_num(item.cloud) if item.cloud is not None else "?"

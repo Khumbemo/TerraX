@@ -40,7 +40,7 @@ async function toPng(src: string, w: number, h: number, background: string | nul
   return c.toDataURL('image/png');
 }
 
-export async function svgToPng(svg: SVGSVGElement): Promise<{ dataUrl: string; width: number; height: number } | null> {
+async function svgToPng(svg: SVGSVGElement): Promise<{ dataUrl: string; width: number; height: number } | null> {
   const box = svg.getBoundingClientRect();
   if (box.width < 10 || box.height < 10) return null;
   const clone = svg.cloneNode(true) as SVGSVGElement;

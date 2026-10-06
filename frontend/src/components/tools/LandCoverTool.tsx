@@ -9,7 +9,7 @@ import type { ToolOutput } from '../../lib/tools/registry';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { ArtifactImage, useUpload } from '../ToolKit';
+import { ArtifactImage, Notes, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -194,11 +194,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
               Export class table (CSV)
             </button>
           </div>
-          <ul className="hint-list">
-            {result.notes.map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={result.notes} />
         </div>
       )}
     </div>

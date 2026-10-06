@@ -60,6 +60,19 @@ export function Stat({ label, value, tone }: { label: string; value: string; ton
   );
 }
 
+/** A result's method notes and caveats; repeated texts are shown once. */
+export function Notes({ items }: { items: readonly string[] }) {
+  const unique = [...new Set(items)];
+  if (!unique.length) return null;
+  return (
+    <ul className="hint-list">
+      {unique.map(n => (
+        <li key={n}>{n}</li>
+      ))}
+    </ul>
+  );
+}
+
 /** Uploads a user file or copies a bundled sample, checking that the server could read it. */
 export function useUpload<M = StoredFile['meta']>(kinds: FileKind[], what: string) {
   const [progress, setProgress] = useState<number | null>(null);

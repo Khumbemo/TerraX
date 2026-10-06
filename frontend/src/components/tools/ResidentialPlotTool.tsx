@@ -9,7 +9,7 @@ import type { ToolOutput } from '../../lib/tools/registry';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { Downloads, Stat, useUpload } from '../ToolKit';
+import { Downloads, Notes, Stat, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -510,11 +510,7 @@ export default function ResidentialPlotTool({ onOutput, boundary, onBoundary }: 
             This screening shows where the ground changed; it cannot establish ownership or prove encroachment. Check every flagged patch on the images, use the boundary from
             your registered survey or land record, and for a dispute ask a licensed surveyor to demarcate the boundary on the ground.
           </p>
-          <ul className="hint-list">
-            {s.notes.map(n => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
+          <Notes items={s.notes} />
         </div>
       )}
     </div>

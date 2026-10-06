@@ -4,8 +4,8 @@
 import type { ReportRecord } from './types';
 import type { Boundary } from './zonal';
 
-export const PROJECT_FORMAT = 'terrax-project';
-export const PROJECT_VERSION = 1;
+const PROJECT_FORMAT = 'terrax-project';
+const PROJECT_VERSION = 1;
 
 export interface Project {
   format: typeof PROJECT_FORMAT;

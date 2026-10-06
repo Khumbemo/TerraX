@@ -108,7 +108,7 @@ def metric_section(ds: Table, a: MetricAnalysis) -> str:
     total = sum(a.class_counts)
     if total:
         lines += [f"Class distribution ({a.classification.basis.rstrip('.')}):", ""]
-        for b, n in zip(a.classification.buckets, a.class_counts):
+        for b, n in zip(a.classification.buckets, a.class_counts, strict=True):
             if n:
                 lines.append(f"- {b['label']}: {n} ({n / total * 100:.1f} %)")
         if a.classification.note:

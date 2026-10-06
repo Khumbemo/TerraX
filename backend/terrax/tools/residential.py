@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from PIL import Image, ImageOps
 import numpy as np
+from PIL import Image, ImageOps
 
-from ..processing.encroachment import (DEFAULT_PARAMS, ZONE_ORDER, ZONES, change_polygons, change_rgba, compare_layers, encroachment_markdown, layer_rgba,
-                                       prepare_geo_stack, prepare_photo_stack, stack_bounds)
+from ..processing.encroachment import (
+    DEFAULT_PARAMS,
+    ZONE_ORDER,
+    ZONES,
+    change_polygons,
+    change_rgba,
+    compare_layers,
+    encroachment_markdown,
+    layer_rgba,
+    prepare_geo_stack,
+    prepare_photo_stack,
+    stack_bounds,
+)
 from ..processing.rio import Raster
 from . import tool
 from .common import boundary, clean, number
@@ -41,7 +52,7 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
             f = ctx.file(it.get("file"))
             try:
                 im = ImageOps.exif_transpose(Image.open(f.path)).convert("RGBA")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 raise ToolError(f"{f.name} could not be decoded as an image.") from None
             s = min(1.0, 1600 / max(im.size))
             if s < 1:

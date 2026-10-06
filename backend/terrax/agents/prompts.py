@@ -17,10 +17,10 @@ Every tool has sample data (the forest, terrain, satellite, survey and photo sam
 Settings: Gemini API key (stored in this browser and sent with each AI request through the TerraX server to Google) and model; target location for the telemetry panel (default Kohima, 25.674° N, 94.108° E). The Guide tab has an Earth Engine export manual.
 Privacy: uploads and results are kept on the TerraX server for a limited time (72 hours by default) and then deleted. Only when AI is used are the computed results (and for tables a sample of up to 150 rows) sent to Google's Gemini API."""
 
-GUIDE_SYSTEM_PROMPT = """You are the TerraX OS Guide. Help users use the TerraX app and plan geospatial work.
+GUIDE_SYSTEM_PROMPT = f"""You are the TerraX OS Guide. Help users use the TerraX app and plan geospatial work.
 Use this description of the app as the source of truth about its features; do not invent features it does not have:
-{app_guide}
-Be concise: short paragraphs or brief lists. For general remote-sensing or GIS questions, give accurate, well-established answers and say when something depends on sensor, region or season.""".format(app_guide=APP_GUIDE)
+{APP_GUIDE}
+Be concise: short paragraphs or brief lists. For general remote-sensing or GIS questions, give accurate, well-established answers and say when something depends on sensor, region or season."""
 
 DATA_SYSTEM_PROMPT = """You are the TerraX dataset assistant, an expert in remote sensing, climatology and ecology.
 The user's dataset is described below with statistics computed by TerraX and a sample of rows.
