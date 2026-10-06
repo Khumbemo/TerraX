@@ -1,6 +1,6 @@
 // TerraX service worker: lets the app open offline after one online visit.
-// Same-origin files only; the AI proxy (/api) and other servers are never cached.
-const CACHE = 'terrax-v2';
+// Same-origin app files only; the TerraX API (/api: jobs, results, maps) and other servers are never cached.
+const CACHE = 'terrax-v3';
 
 // Every built file (from Vite's asset manifest), so tools never opened online still work offline.
 async function buildFiles() {

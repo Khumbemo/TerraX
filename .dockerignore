@@ -1,8 +1,6 @@
-node_modules
-dist
-dist-preview
-test-results
-playwright-report
-.env*
-!.env.example
+**/node_modules
+**/dist
+**/storage
+**/__pycache__
 .git
+.env

@@ -37,7 +37,7 @@ export interface MapDef {
   light?: boolean;
   /** Mostly transparent; meant to sit on top of another map. */
   overlayOnly?: boolean;
-  /** Built-in maps: how they are drawn, and their file in public/data/maps/. */
+  /** Built-in maps: how they are drawn, and their file in backend/data/maps/ (served by the API). */
   builtin?: BuiltinKind;
   file?: string;
   /** Width in pixels of the full-detail version, stored as 4096 px chunks in a folder named after `file`. */
@@ -134,7 +134,7 @@ const eox = (id: string, name: string, year: number, terms: string): MapDef => (
 const NE = 'Made with <a href="https://www.naturalearthdata.com">Natural Earth</a>';
 const BUILT_IN = 'Built into TerraX; works without internet.';
 
-/** Maps shipped with TerraX in public/data/maps/ (made by scripts/make-world-maps.py). */
+/** Maps shipped with TerraX in backend/data/maps/ (made by backend/scripts/make_world_maps.py). */
 const BUILTIN_MAPS: MapDef[] = [
   { id: 'ne-detailed', name: 'Natural Earth detailed (borders, rivers, cities)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'ne-detailed', attribution: NE, terms: `${BUILT_IN} Natural Earth 1:50 million for the world view and 1:10 million from zoom 5 (borders, states and provinces, coastline, rivers, lakes), with 7,300 places; public domain. Borders show the situation on the ground (Natural Earth's default view).`, termsUrl: 'https://www.naturalearthdata.com/about/terms-of-use/' },
   { id: 'relief', name: 'Shaded relief (natural colour)', group: 'Built in (works offline)', kind: 'builtin', builtin: 'image', file: 'relief.jpg', fullSize: 16384, attribution: 'Shaded relief by Tom Patterson, <a href="https://www.shadedrelief.com">shadedrelief.com</a>', terms: `${BUILT_IN} Public domain. Full source detail (about 3.7 km per pixel), loaded in pieces as you zoom in.`, termsUrl: 'https://www.shadedrelief.com', light: true },

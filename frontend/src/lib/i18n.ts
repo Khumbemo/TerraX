@@ -43,7 +43,7 @@ const HI: Record<string, string> = {
   'session.hint': 'आपकी बनाई रिपोर्टों पर दिखाया जाता है।',
   'session.start': 'सत्र शुरू करें',
   'session.note':
-    'TerraX आपके ब्राउज़र में चलता है और इसमें कोई उपयोगकर्ता खाता नहीं है। आपकी फ़ाइलें इसी डिवाइस पर पढ़ी जाती हैं। यदि आप AI चालू करते हैं, तो व्याख्या माँगने पर लोड किए गए डेटा का सारांश Google के Gemini API को भेजा जाता है।',
+    'TerraX में कोई उपयोगकर्ता खाता नहीं है। आपकी फ़ाइलें विश्लेषण के लिए उस TerraX सर्वर पर अपलोड होती हैं जिसका आप उपयोग कर रहे हैं, और सीमित समय (डिफ़ॉल्ट 72 घंटे) बाद हटा दी जाती हैं। यदि आप AI चालू करते हैं, तो व्याख्या माँगने पर परिणामों का सारांश Google के Gemini API को भेजा जाता है।',
   'prefs.display': 'प्रदर्शन',
   'prefs.theme': 'थीम',
   'prefs.dark': 'गहरा',
@@ -97,7 +97,7 @@ const EN: Record<string, string> = {
   'session.hint': 'Shown on the reports you create.',
   'session.start': 'Start session',
   'session.note':
-    "TerraX runs in your browser and has no user accounts. Your files are read on this device. If you set up AI, a summary of the loaded dataset is sent to Google's Gemini API when you ask for an interpretation.",
+    "TerraX has no user accounts. Files you add are uploaded to the TerraX server you are using, analysed there, and deleted after a limited time (72 hours by default). If you set up AI, a summary of the results is sent to Google's Gemini API when you ask for an interpretation.",
   'prefs.display': 'Display',
   'prefs.theme': 'Theme',
   'prefs.dark': 'Dark',

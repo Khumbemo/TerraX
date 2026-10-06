@@ -231,8 +231,8 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                     )}
                   </form>
                   <p className="field-hint">
-                    Your key is stored only in this browser's local storage and sent only to Google. Anyone with access to this browser profile can read it. To keep a key off
-                    user devices, run TerraX with <code>GEMINI_API_KEY</code> set on the server instead.
+                    Your key is stored in this browser's local storage and sent with each AI request to the TerraX server, which passes it to Google and does not store it.
+                    Anyone with access to this browser profile can read it. To keep keys off user devices, set <code>GEMINI_API_KEY</code> on the server instead.
                   </p>
                   <div className="field-row">
                     <label htmlFor="model" className="field-label">
@@ -280,9 +280,10 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
               <div className="prose">
                 <h3>How TerraX works</h3>
                 <p>
-                  TerraX is a set of tools: Forest loss, Land survey, Weather &amp; climate, Satellite imagery, Terrain, and Space &amp; aerial photos. Each reads your GIS
-                  files in the browser; files are not uploaded to a TerraX server. When AI is on and you ask for an interpretation or use an assistant, TerraX sends the
-                  computed results (and for tables a sample of up to 150 rows) to Google's Gemini API.
+                  TerraX is a set of tools: Forest loss, Carbon &amp; biomass, Land survey, Residential plot, Weather &amp; climate, Satellite imagery, Land cover, Terrain,
+                  and Space &amp; aerial photos. Files you add are uploaded to the TerraX server, which runs each analysis in Python (rasterio, GeoPandas, scikit-learn,
+                  SciPy) as a background job and keeps uploads and results for a limited time (72 hours by default). When AI is on and you ask for an interpretation or use an
+                  assistant, the server sends the computed results (and for tables a sample of up to 150 rows) to Google's Gemini API.
                 </p>
                 <h4>Forest loss</h4>
                 <p>
@@ -329,12 +330,16 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
             {tab === 'about' && (
               <div className="prose">
                 <h3>About TerraX</h3>
-                <p>TerraX is an Earth-observation workbench for climate, forest and land analysis.</p>
+                <p>
+                  TerraX is an Earth-observation workbench for climate, forest and land analysis: a React and TypeScript web app with MapLibre maps, and a Python server
+                  (FastAPI, Celery workers with Redis; rasterio, GeoPandas, scikit-learn, SciPy) that runs every analysis.
+                </p>
                 <h4>Data and services</h4>
                 <ul>
                   <li>Basemap: © OpenStreetMap contributors, © CARTO. Globe coastlines: Natural Earth 1:110m (public domain) via world-atlas.</li>
                   <li>Planetary K-index: NOAA Space Weather Prediction Center.</li>
-                  <li>Sun position and times: SunCalc; equation of time and declination: NOAA Solar Calculator equations.</li>
+                  <li>Sun position and rise/set times: the formulas of aa.quae.nl (as in SunCalc); equation of time and declination: NOAA Solar Calculator equations (Meeus).</li>
+                  <li>Live data (fetched by the server): Open-Meteo (ERA5), NASA POWER and Earth Search (Sentinel-2 L2A).</li>
                   <li>AI: Google Gemini API (optional).</li>
                 </ul>
                 <h4>Sample data</h4>

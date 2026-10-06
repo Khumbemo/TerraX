@@ -1,7 +1,7 @@
-"""Builds TerraX's built-in world maps (public/data/maps/) from open datasets.
+"""Builds TerraX's built-in world maps (backend/data/maps/) from open datasets.
 
 All outputs are in Web Mercator (EPSG:3857), cut at ±85.0511° like every web
-map, so Leaflet can draw them tile by tile without reprojecting in the browser.
+map, so the TerraX API can serve them as XYZ tiles without reprojecting.
 
 Sources (download them to a folder and pass it as the first argument):
 
@@ -41,7 +41,7 @@ from rasterio.warp import Resampling, reproject
 
 Image.MAX_IMAGE_PIXELS = None
 SRC = Path(sys.argv[1])
-OUT = Path(__file__).resolve().parent.parent / 'public' / 'data' / 'maps'
+OUT = Path(__file__).resolve().parent.parent / 'data' / 'maps'
 OUT.mkdir(parents=True, exist_ok=True)
 
 M = 20037508.342789244  # half the Web Mercator world width in metres

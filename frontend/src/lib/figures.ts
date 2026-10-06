@@ -1,5 +1,5 @@
 // Figures for PDF reports: the tool's result map and the charts on screen,
-// rendered to PNG in the browser.
+// rendered to PNG in the browser (result pictures come from the server).
 import { apiUrl } from './api';
 import type { ToolOutput } from './tools/registry';
 
