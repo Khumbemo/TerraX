@@ -19,17 +19,33 @@ import csv
 import io
 import math
 import re
+from collections.abc import Callable
+from typing import TypedDict
 
 from scipy.stats import t as student_t
 
 from .stats import fmt
 
-CHAVE2005 = {
+
+class Chave2005(TypedDict):
+    a: float
+    b: float
+    label: str
+
+
+class RootShootZone(TypedDict):
+    id: str
+    label: str
+    ratio: Callable[[float], float]  # root-to-shoot ratio for an AGB in t/ha
+    rule: str
+
+
+CHAVE2005: dict[str, Chave2005] = {
     "dry": {"a": -0.667, "b": 1.784, "label": "Dry (< 1,500 mm rain, > 5 dry months)"},
     "moist": {"a": -1.499, "b": 2.148, "label": "Moist (1,500–3,500 mm rain)"},
     "wet": {"a": -1.239, "b": 1.98, "label": "Wet (> 3,500 mm rain, no dry season)"},
 }
-ROOT_SHOOT = [
+ROOT_SHOOT: list[RootShootZone] = [
     {"id": "trop-rain", "label": "Tropical rainforest", "ratio": lambda a: 0.37, "rule": "0.37"},
     {"id": "trop-moist", "label": "Tropical moist deciduous forest", "ratio": lambda a: 0.2 if a < 125 else 0.24, "rule": "0.20 if AGB < 125 t/ha, else 0.24"},
     {"id": "trop-dry", "label": "Tropical dry forest", "ratio": lambda a: 0.56 if a < 20 else 0.28, "rule": "0.56 if AGB < 20 t/ha, else 0.28"},
@@ -213,10 +229,10 @@ def compute_carbon(inv: dict, p: dict) -> dict:
         warnings.append(f"Plots with rows giving different sizes (the first size was used): {', '.join(conflicts[:5])}.")
     per_ha = None
     if with_area and len(with_area) == len(plot_list):
-        agb = _estimate([x["agbHa"] for x in with_area])
-        rs = zone["ratio"](agb["mean"])
-        carbon = _scale(agb, (1 + rs) * p["carbonFraction"])
-        per_ha = {"plots": len(with_area), "areaHa": sum(x["areaM2"] for x in with_area) / 10_000, "agb": agb, "bgb": _scale(agb, rs), "carbon": carbon,
+        agb_ha = _estimate([x["agbHa"] for x in with_area])
+        rs = zone["ratio"](agb_ha["mean"])
+        carbon = _scale(agb_ha, (1 + rs) * p["carbonFraction"])
+        per_ha = {"plots": len(with_area), "areaHa": sum(x["areaM2"] for x in with_area) / 10_000, "agb": agb_ha, "bgb": _scale(agb_ha, rs), "carbon": carbon,
                   "co2e": _scale(carbon, 44 / 12), "basalArea": _estimate([x["baHa"] for x in with_area]), "stems": _estimate([x["stemsHa"] for x in with_area]), "rootShoot": rs}
     elif with_area:
         warnings.append(f"{len(plot_list) - len(with_area)} of {len(plot_list)} plots have no size, so per-hectare values are not given. Enter a plot size to use for all plots.")

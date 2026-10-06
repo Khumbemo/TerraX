@@ -3,6 +3,8 @@ preview and report; plus multi-date series with a trend test."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from .dates import date_from_filename, decimal_year
@@ -105,15 +107,17 @@ MIN_VALID = 0.2
 def analyze_stack(rasters: list[Raster], index: str | None, bands: dict, qa: dict | None = None, boundary=None) -> dict:
     if len(rasters) < 2:
         raise ValueError("Add at least two images from different dates.")
-    undated = [r.meta.filename for r in rasters if not date_from_filename(r.meta.filename)]
+    found = [(r, date_from_filename(r.meta.filename)) for r in rasters]
+    undated = [r.meta.filename for r, d in found if d is None]
     if undated:
         raise ValueError(f"No date found in: {', '.join(undated)}. Put the acquisition date in each file name (for example S2_2024-03-15_ndvi.tif or LC09_20240315.tif).")
+    dated = sorted(((r, d) for r, d in found if d is not None), key=lambda x: x[1])
     notes = []
     if not all(same_grid(rasters[0].meta, r.meta) for r in rasters):
         notes.append("The images are not all on the same grid, so each value covers a slightly different area. Export every date with the same region, scale and CRS for a like-for-like series.")
     label = index_def(index).short if index else "Band 1"
-    rows = []
-    for r in rasters:
+    rows: list[dict[str, Any]] = []
+    for r, when in dated:
         grid = compute_index_grid(r, index, bands)[0] if index and r.meta.bands > 1 else r.read_bands([0])[0]
         if qa and qa.get("band") is not None and qa["band"] < r.meta.bands and r.meta.bands > 1:
             apply_qa(r, [grid], qa)
@@ -121,9 +125,8 @@ def analyze_stack(rasters: list[Raster], index: str | None, bands: dict, qa: dic
             clip_to_boundary(r, grid, boundary)
         vals = np.sort(grid.data[np.isfinite(grid.data)].astype(np.float64))
         frac = vals.size / grid.data.size if grid.data.size else 0.0
-        rows.append({"filename": r.meta.filename, "date": date_from_filename(r.meta.filename), "mean": float(vals.mean()) if vals.size else None,
+        rows.append({"filename": r.meta.filename, "date": when, "mean": float(vals.mean()) if vals.size else None,
                      "median": quantile_sorted(vals, 0.5) if vals.size else None, "validFraction": frac, "sparse": frac < MIN_VALID})
-    rows.sort(key=lambda x: x["date"])
     used = [x for x in rows if not x["sparse"] and x["mean"] is not None]
     trend = trend_test([decimal_year(x["date"]) for x in used], [x["mean"] for x in used])
     if index and any(r.meta.bands == 1 for r in rasters):

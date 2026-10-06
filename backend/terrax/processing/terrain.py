@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from typing import TypedDict
 
 import numpy as np
 from numba import njit
@@ -22,7 +23,14 @@ from .rio import Ground, Raster, ground_geometry
 from .stats import fmt, summarize
 from .zonal import clip_to_boundary
 
-SLOPE_CLASSES = [
+
+class SlopeClass(TypedDict):
+    upTo: float
+    label: str
+    color: str
+
+
+SLOPE_CLASSES: list[SlopeClass] = [
     {"upTo": 2, "label": "Flat (< 2°)", "color": "#2f6c5a"},
     {"upTo": 5, "label": "Gentle (2–5°)", "color": "#6aa84f"},
     {"upTo": 15, "label": "Moderate (5–15°)", "color": "#d8c558"},
@@ -429,7 +437,7 @@ def contours_geojson(z: np.ndarray, to_lonlat, interval: float, max_levels: int 
     if not interval > 0 or not v.size:
         return {"fc": {"type": "FeatureCollection", "features": []}, "levels": 0}
     lo, hi = float(v.min()), float(v.max())
-    levels = []
+    levels: list[float] = []
     x = math.ceil(lo / interval) * interval
     while x <= hi and len(levels) < max_levels:
         levels.append(round(x * 1e6) / 1e6)

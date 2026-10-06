@@ -15,6 +15,7 @@ loss/burn patches are exported as polygons.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TypedDict
 
 import numpy as np
 
@@ -24,13 +25,24 @@ from .rio import Grid, Raster, ground_geometry, same_grid
 from .stats import fmt
 from .zonal import apply_mask, boundary_mask, clip_note
 
-CHANGE_CLASSES = [
+
+class ChangeClass(TypedDict):
+    id: int
+    label: str
+    color: list[int]
+
+
+class BurnClass(ChangeClass):
+    upTo: float  # dNBR upper bound (exclusive)
+
+
+CHANGE_CLASSES: list[ChangeClass] = [
     {"id": 1, "label": "Stable forest", "color": [46, 125, 72]},
     {"id": 2, "label": "Forest loss", "color": [229, 72, 77]},
     {"id": 3, "label": "Non-forest", "color": [58, 72, 88]},
     {"id": 4, "label": "Vegetation gain", "color": [126, 211, 132]},
 ]
-BURN_CLASSES = [
+BURN_CLASSES: list[BurnClass] = [
     {"id": 1, "label": "Enhanced regrowth, high (< −0.25)", "upTo": -0.25, "color": [122, 135, 55]},
     {"id": 2, "label": "Enhanced regrowth, low (−0.25 to −0.1)", "upTo": -0.1, "color": [172, 190, 77]},
     {"id": 3, "label": "Unburned (−0.1 to 0.1)", "upTo": 0.1, "color": [10, 224, 66]},
@@ -279,7 +291,7 @@ def forest_markdown(r: dict, names: list[str]) -> str:
     return "\n".join(lines)
 
 
-def legend(mode: str) -> list[dict]:
+def legend(mode: str) -> list[ChangeClass]:
     if mode == "burn":
-        return BURN_CLASSES
+        return list(BURN_CLASSES)
     return [c for c in CHANGE_CLASSES if mode == "ndvi" or c["id"] != 4]

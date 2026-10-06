@@ -85,17 +85,22 @@ def read_exif(path: Path) -> dict | None:
     return info if any(v is not None for v in info.values()) else None
 
 
+def _stats(values: np.ndarray) -> dict | None:
+    """Summary statistics of a pixel sample, or None when it is empty."""
+    s = summarize(values)
+    return s.dict() if s else None
+
+
 def analyze_photo(path: Path, filename: str) -> dict:
     try:
-        im = Image.open(path)
-        im = ImageOps.exif_transpose(im)
+        im: Image.Image = ImageOps.exif_transpose(Image.open(path))
         im.load()
     except Exception:
         raise ValueError(f"{filename} could not be decoded as an image. Use JPG, PNG or WebP (for GeoTIFFs use the Satellite imagery tool).") from None
     width, height = im.size
     s = min(1.0, MAX_SIDE / max(width, height))
     aw, ah = max(1, round(width * s)), max(1, round(height * s))
-    rgba = np.asarray(im.convert("RGBA").resize((aw, ah), Image.BILINEAR) if (aw, ah) != (width, height) else im.convert("RGBA"))
+    rgba = np.asarray(im.convert("RGBA").resize((aw, ah), Image.Resampling.BILINEAR) if (aw, ah) != (width, height) else im.convert("RGBA"))
     opaque = rgba[..., 3] >= 128
     px = rgba[opaque][:, :3].astype(np.float64)
     if not px.size:
@@ -114,9 +119,9 @@ def analyze_photo(path: Path, filename: str) -> dict:
     veg = float((exg > thr).sum() / exg.size)
     return {
         "filename": filename, "sizeBytes": path.stat().st_size, "width": width, "height": height, "aw": aw, "ah": ah,
-        "channels": {"r": summarize(R).dict(), "g": summarize(G).dict(), "b": summarize(B).dict()},
-        "vari": summarize(vari).dict() if vari.size else None, "exgThreshold": thr, "vegetationFraction": veg,
-        "brightness": summarize(L).dict(), "exif": read_exif(path),
+        "channels": {"r": _stats(R), "g": _stats(G), "b": _stats(B)},
+        "vari": _stats(vari), "exgThreshold": thr, "vegetationFraction": veg,
+        "brightness": _stats(L), "exif": read_exif(path),
         "notes": [
             "VARI = (G − R) / (G + R − B) (Gitelson et al. 2002); ExG = 2g − r − b on chromatic coordinates (Woebbecke et al. 1995).",
             f"Vegetation cover: pixels with ExG above an Otsu (1979) threshold of {thr:.3f} (never below 0).",

@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from .dates import date_spacing, detect_day_month_order, parse_date_cell
 from .metrics import is_known_metric, tokenize
@@ -20,12 +20,18 @@ NUMERIC = re.compile(r"^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$")
 MISSING = re.compile(r"^(nan|na|n/a|null|none)$", re.I)
 
 
+class Column(TypedDict):
+    name: str
+    kind: str  # "number", "date" or "text"
+    filled: int  # non-empty cells
+
+
 @dataclass
 class Table:
     filename: str
     format: str
     size_bytes: int
-    columns: list[dict]
+    columns: list[Column]
     rows: list[dict[str, Any]]
     time_column: str | None
     times: list[date | None] | None
@@ -95,7 +101,7 @@ def build_table(filename: str, fmt_name: str, size: int, matrix: list[list[Any]]
         body = body[:MAX_ROWS]
     rows = [{h: normalise_cell(r[i] if i < len(r) else None) for i, h in enumerate(headers)} for r in body]
 
-    columns = []
+    columns: list[Column] = []
     for name in headers:
         vals = [r[name] for r in rows if r[name] is not None]
         numeric = sum(1 for v in vals if isinstance(v, float))

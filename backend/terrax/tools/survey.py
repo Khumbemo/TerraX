@@ -16,7 +16,8 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         raise ToolError("Declination must be between −90° and 90° (east positive).")
     if params.get("geojson"):
         fc = params["geojson"]
-        name, fmt_name, warnings = params.get("name") or "Drawn boundary", "Drawn on map", []
+        name, fmt_name = params.get("name") or "Drawn boundary", "Drawn on map"
+        warnings: list[str] = []
     else:
         f = ctx.file(inputs.get("file"))
         if f is None:

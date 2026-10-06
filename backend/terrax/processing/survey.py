@@ -16,6 +16,7 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from pyproj import Geod, Transformer
 
@@ -138,6 +139,7 @@ def parse_coordinate_csv(src: bytes, filename: str, close_ring: bool) -> tuple[d
     if not pts:
         raise ValueError(f"{filename} has no valid decimal-degree coordinates.")
     name = re.sub(r"\.[^.]+$", "", filename)
+    geom: dict[str, Any]
     if close_ring and len(pts) >= 3:
         geom = {"type": "Polygon", "coordinates": [[*pts, pts[0]]]}
     elif len(pts) >= 2:
@@ -280,7 +282,8 @@ def _ring_area(ring: list) -> float:
 
 def measure_geometry(name: str, g: dict) -> list[dict]:
     t = g.get("type")
-    c = g.get("coordinates")
+    raw = g.get("coordinates")
+    c: list = raw if isinstance(raw, list) else []  # a geometry without coordinates measures as nothing
     if t == "Polygon":
         outer = _open_ring(c[0] if c else [])
         if len(outer) < 3:
@@ -301,6 +304,8 @@ def measure_geometry(name: str, g: dict) -> list[dict]:
         return [x for i, l in enumerate(c) for x in measure_geometry(f"{name} (part {i + 1})", {"type": "LineString", "coordinates": l})]
     if t in ("Point", "MultiPoint"):
         pts = [c] if t == "Point" else c
+        if not pts or not all(isinstance(q, list) and len(q) >= 2 for q in pts):
+            return []
         return [{"name": name, "kind": "Points", "area": None, "length": None, "vertices": _vertices(pts), "legs": [], "centroid": _centroid(pts), "holes": 0, "method": "point positions", "elevation": _elev_range(pts)}]
     if t == "GeometryCollection":
         return [x for i, sub in enumerate(g.get("geometries", [])) for x in measure_geometry(f"{name} ({i + 1})", sub)]

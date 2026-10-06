@@ -94,7 +94,7 @@ def generate(api_key: str, req: GenerateRequest) -> GenerateResult:
         temperature=req.temperature,
         tools=[types.Tool(google_search=types.GoogleSearch())] if req.use_search else None,
     )
-    contents = [types.Content(role=t["role"], parts=[types.Part(text=t["text"])]) for t in req.turns]
+    contents: list[types.ContentUnionDict] = [types.Content(role=t["role"], parts=[types.Part(text=t["text"])]) for t in req.turns]
     try:
         response = client.models.generate_content(model=req.model, contents=contents, config=config)
     except Exception as err:  # every SDK failure becomes a readable message

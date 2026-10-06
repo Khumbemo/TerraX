@@ -56,7 +56,7 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
                 raise ToolError(f"{f.name} could not be decoded as an image.") from None
             s = min(1.0, 1600 / max(im.size))
             if s < 1:
-                im = im.resize((round(im.width * s), round(im.height * s)), Image.BILINEAR)
+                im = im.resize((round(im.width * s), round(im.height * s)), Image.Resampling.BILINEAR)
             photos.append({"rgba": np.asarray(im), "label": it.get("label") or f.name, "date": it.get("date")})
         gw = params.get("groundWidthM")
         stack = prepare_photo_stack(photos, params.get("outline") or [], float(gw) if gw not in (None, "") else None)
