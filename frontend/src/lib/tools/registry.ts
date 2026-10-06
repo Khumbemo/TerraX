@@ -1,6 +1,6 @@
 import type { FeatureCollection } from 'geojson';
 import type { LatLngBounds } from '../geo';
-import type { Dataset } from '../types';
+import type { ResultImage } from '../api';
 
 export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'terrain' | 'photo';
 
@@ -109,20 +109,16 @@ export interface ToolOutput {
   tool: ToolId;
   /** Name of the analysed file(s), used for report titles. */
   name: string;
-  /** Computed results as Markdown (the local report). */
+  /** Computed results as Markdown (the report, from the server). */
   markdown: string;
   /** Extra context for the AI (e.g. a data sample); markdown is always included. */
   extraContext?: string;
-  /** Present for table/raster datasets so assistants can answer from statistics offline. */
-  dataset?: Dataset;
+  /** Uploaded table the results came from, so the assistant can answer from its statistics. */
+  fileId?: string;
   focus?: string | null;
-  map?: { bounds?: LatLngBounds | null; geojson?: FeatureCollection | null; image?: MapImage | null };
-}
-
-/** A result picture placed on the map over the raster footprint. */
-export interface MapImage {
-  url: string;
-  bounds: LatLngBounds;
-  label: string;
-  legend: { color: string; label: string }[];
+  /** Summary for "Export summary (JSON)". */
+  summary?: unknown;
+  /** Pictures to embed in a saved report (artifact URLs). */
+  figures?: { title: string; url: string }[];
+  map?: { bounds?: LatLngBounds | null; geojson?: FeatureCollection | null; image?: ResultImage | null };
 }

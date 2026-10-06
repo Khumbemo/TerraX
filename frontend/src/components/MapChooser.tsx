@@ -19,7 +19,7 @@ export default function MapChooser({ idPrefix, compact }: Props) {
       <label className="inline-select">
         <span>{t('map.base', 'Base map')}</span>
         <select id={`${idPrefix}-base`} value={map.base} onChange={e => updateMap({ base: e.target.value, overlays: map.overlays.filter(o => o.id !== e.target.value) })}>
-          <option value="auto">{__TERRAX_PREVIEW__ ? 'Automatic (built-in Natural Earth map in this preview)' : t('map.auto', 'Automatic (CARTO, follows the theme)')}</option>
+          <option value="auto">{t('map.auto', 'Automatic (CARTO, follows the theme)')}</option>
           {GROUPS.filter(g => MAPS.some(m => m.group === g && !m.overlayOnly)).map(g => (
             <optgroup key={g} label={g}>
               {MAPS.filter(m => m.group === g && !m.overlayOnly).map(m => (

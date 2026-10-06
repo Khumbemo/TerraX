@@ -1,100 +1,97 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { runJob, type Download, type RasterMeta, type ResultImage, type StoredFile } from '../../lib/api';
 import { downloadText, safeFilename } from '../../lib/download';
-import { guessBandMap } from '../../lib/indices';
-import { mapImage } from '../../lib/overlay';
-import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
-import { fetchSample } from '../../lib/samples';
+import type { LatLngBounds } from '../../lib/geo';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
-import { PALETTE, classifyLandCover, landCoverMarkdown, type LandCoverResult } from '../../lib/tools/landcover';
+import { useJob } from '../../lib/useJob';
 import type { ToolOutput } from '../../lib/tools/registry';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
-import RgbaCanvas from '../RgbaCanvas';
+import JobStatus from '../JobStatus';
+import { ArtifactImage, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
   boundary: Boundary | null;
 }
 
-function hexRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
+const MAX_K = 10;
 
-function classRgba(r: LandCoverResult): Uint8ClampedArray {
-  const colors = PALETTE.map(hexRgb);
-  const out = new Uint8ClampedArray(r.classes.length * 4);
-  for (let i = 0; i < r.classes.length; i++) {
-    const c = r.classes[i];
-    if (c) out.set([...colors[c - 1], 255], i * 4);
-  }
-  return out;
+interface LandCoverJob {
+  name: string;
+  markdown: string;
+  landcover: {
+    filename: string;
+    bands: number[];
+    k: number;
+    width: number;
+    height: number;
+    stats: { id: number; pixels: number; ha: number | null; share: number; bandMeans: number[]; ndvi: number | null; suggestion: string | null }[];
+    notes: string[];
+  };
+  palette: string[];
+  map: { bounds: LatLngBounds | null; image: ResultImage };
+  downloads: Download[];
 }
 
 export default function LandCoverTool({ onOutput, boundary }: Props) {
   const notify = useToast();
-  const [busy, setBusy] = useState(false);
-  const [raster, setRaster] = useState<OpenRaster | null>(null);
+  const job = useJob();
+  const busy = Boolean(job.busy);
+  const files = useUpload<RasterMeta>(['raster'], 'a GeoTIFF raster TerraX can read');
+  const [raster, setRaster] = useState<StoredFile<RasterMeta> | null>(null);
   const [bands, setBands] = useState<number[]>([]);
   const [k, setK] = useState('5');
-  const [result, setResult] = useState<LandCoverResult | null>(null);
+  const [out, setOut] = useState<LandCoverJob | null>(null);
+  const result = out?.landcover ?? null;
   const [labels, setLabels] = useState<string[]>([]);
+  const fail = (m: string) => notify(m, 'error');
+  const serverLabels = useRef(false);
 
-  const load = async (file: File) => {
-    setBusy(true);
-    try {
-      const r = await openGeoTiff(file);
-      setRaster(r);
-      setBands(Array.from({ length: r.meta.bands }, (_, i) => i));
-      setResult(null);
-      onOutput(null);
-      if (r.meta.bands < 2) notify(`${file.name} has one band; clusters will split it into value ranges only.`);
-      return r;
-    } catch (err) {
-      notify(err instanceof Error ? err.message : `Could not read ${file.name}.`, 'error');
-      return null;
-    } finally {
-      setBusy(false);
-    }
+  const load = async (picked: File | string) => {
+    const f = await job.run('upload', signal => (typeof picked === 'string' ? files.sample(picked) : files.upload(picked, signal)), fail);
+    if (!f) return null;
+    setRaster(f);
+    setBands(Array.from({ length: f.meta.bands }, (_, i) => i));
+    setOut(null);
+    onOutput(null);
+    if (f.meta.bands < 2) notify(`${f.name} has one band; clusters will split it into value ranges only.`);
+    return f;
   };
 
-  const run = async (r = raster, b = bands) => {
+  const run = async (r = raster, b = bands, names: string[] = []) => {
     if (!r) return;
     const kk = Number(k);
-    if (!Number.isInteger(kk) || kk < 2 || kk > PALETTE.length) {
-      notify(`Choose a whole number of classes from 2 to ${PALETTE.length}.`, 'error');
-      return;
+    if (!Number.isInteger(kk) || kk < 2 || kk > MAX_K) return fail(`Choose a whole number of classes from 2 to ${MAX_K}.`);
+    const res = await job.run(
+      'run',
+      (signal, onProgress) => runJob<LandCoverJob>('landcover', { file: r.id }, { bands: b, k: kk, roles: r.meta.guessedBands, boundary, labels: names, seed: 7 }, { signal, onProgress }),
+      msg => {
+        fail(msg);
+        setOut(null);
+        onOutput(null);
+      },
+    );
+    if (!res) return;
+    setOut(res);
+    if (!names.length) {
+      serverLabels.current = true;
+      setLabels(res.landcover.stats.map(c => (c.suggestion ? `${c.suggestion} (suggested)` : `Class ${c.id}`)));
     }
-    setBusy(true);
-    try {
-      const res = await classifyLandCover(r, { bands: b, k: kk, roles: guessBandMap(r.meta.bands), boundary });
-      setResult(res);
-      setLabels(res.stats.map(c => (c.suggestion ? `${c.suggestion} (suggested)` : `Class ${c.id}`)));
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Classification failed.', 'error');
-      setResult(null);
-      onOutput(null);
-    } finally {
-      setBusy(false);
-    }
+    onOutput({ tool: 'landcover', name: res.name, markdown: res.markdown, map: res.map, summary: res.landcover, figures: [{ title: 'Land-cover clusters', url: res.map.image.url }] });
   };
 
-  const image = useMemo(() => (result ? classRgba(result) : null), [result]);
-
+  // Renamed classes go into the report and map legend (same seed, so the clusters do not change).
   useEffect(() => {
-    if (!result || !raster || !image) return;
-    onOutput({
-      tool: 'landcover',
-      name: result.filename,
-      markdown: landCoverMarkdown(result, labels),
-      map: {
-        bounds: raster.meta.latLngBounds,
-        image: mapImage(image, result.width, result.height, raster.meta.latLngBounds, 'Land-cover clusters', result.stats.map((c, i) => ({ color: PALETTE[c.id - 1], label: labels[i] || `Class ${c.id}` }))),
-      },
-    });
+    if (serverLabels.current || !out) {
+      serverLabels.current = false;
+      return;
+    }
+    const t = setTimeout(() => run(raster, out.landcover.bands, labels), 800);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, labels]);
+  }, [labels]);
 
   const lastBoundary = useRef(boundary);
   useEffect(() => {
@@ -118,7 +115,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
         Upload a multispectral GeoTIFF (for example Sentinel-2 B2, B3, B4, B8, B11, B12). TerraX groups pixels with similar spectra into clusters (k-means), maps them and
         reports their areas. You then name each cluster.
       </p>
-      <FileDrop id="landcover-file" label="Multispectral image" accept=".tif,.tiff" hint="Multiband GeoTIFF" busy={busy && !raster} loaded={raster?.meta.filename} onFile={load} />
+      <FileDrop id="landcover-file" label="Multispectral image" accept=".tif,.tiff" hint="Multiband GeoTIFF" busy={job.busy === 'upload'} loaded={raster?.name} onFile={f => load(f)} />
       <div className="param-row">
         {raster && raster.meta.bands > 1 && (
           <fieldset className="band-checks">
@@ -132,7 +129,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
         )}
         <label className="param">
           <span>Clusters</span>
-          <input id="landcover-k" type="number" min="2" max={PALETTE.length} step="1" value={k} onChange={e => setK(e.target.value)} />
+          <input id="landcover-k" type="number" min="2" max={MAX_K} step="1" value={k} onChange={e => setK(e.target.value)} />
         </label>
         <div className="button-row push-right">
           <button
@@ -140,26 +137,23 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
             className="btn"
             disabled={busy}
             onClick={async () => {
-              try {
-                const r = await load(await fetchSample('samples/satellite_4band_synthetic.tif'));
-                if (r) await run(r, Array.from({ length: r.meta.bands }, (_, i) => i));
-              } catch (err) {
-                notify(err instanceof Error ? err.message : 'Could not load the sample.', 'error');
-              }
+              const r = await load('satellite_4band_synthetic.tif');
+              if (r) await run(r, Array.from({ length: r.meta.bands }, (_, i) => i));
             }}
           >
             Try synthetic scene
           </button>
           <button type="button" id="landcover-run" className="btn btn-primary" disabled={!raster || busy || !bands.length} onClick={() => run()}>
-            {busy && raster ? 'Classifying…' : 'Classify'}
+            {job.busy === 'run' ? 'Classifying…' : 'Classify'}
           </button>
         </div>
       </div>
 
-      {result && image && (
+      <JobStatus job={job} onCancel={job.cancel} />
+      {result && out && (
         <div className="result-block">
           <figure className="raster-figure">
-            <RgbaCanvas rgba={image} width={result.width} height={result.height} label="Land-cover clusters" />
+            <ArtifactImage url={out.map.image.url} width={result.width} height={result.height} label="Land-cover clusters" />
           </figure>
           <div className="tabular-view">
             <table>
@@ -176,7 +170,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
                 {result.stats.map((c, i) => (
                   <tr key={c.id}>
                     <td>
-                      <i className="class-swatch" style={{ background: PALETTE[c.id - 1] }} /> {c.id}
+                      <i className="class-swatch" style={{ background: out.palette[c.id - 1] }} /> {c.id}
                     </td>
                     <td>
                       <input

@@ -70,6 +70,6 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     return clean({
         "tool": "residential", "name": f"{cmp['from']} → {cmp['to']}", "markdown": encroachment_markdown(stack, cmp, timeline, p),
         "comparison": strip(cmp), "timeline": [strip(t) for t in timeline], "base": base, "zones": ZONES, "zoneOrder": ZONE_ORDER,
-        "grid": {"width": stack["width"], "height": stack["height"], "cellM": stack["cellM"], "layers": [{"label": l["label"], "date": l.get("date")} for l in stack["layers"]]},
+        "grid": {"width": stack["width"], "height": stack["height"], "cellM": stack["cellM"], "layers": [{"label": l["label"], "date": l.get("date")} for l in stack["layers"]], "notes": stack["notes"]},
         "views": views, "settings": p, "map": {"bounds": bounds, "image": image} if bounds else None, "downloads": downloads,
     })

@@ -9,7 +9,6 @@
 //    composites, but it is a model, not satellite night-light data.
 //    Land colours are illustrative; there are no clouds.
 //  • Galaxy: procedural star field and Milky-Way-like band (not a real sky map).
-import { solarAngles } from './solar';
 
 const RAD = Math.PI / 180;
 /** Land mask size (equirectangular). 4096 × 2048 stays within every browser's canvas limit. */
@@ -48,15 +47,6 @@ function makeNoise(seed: number) {
     }
     return v / norm;
   };
-}
-
-/** Subsolar point (degrees) for a date, from the NOAA solar position formulas. */
-export function subsolarPoint(date: Date): { lat: number; lon: number } {
-  const { declination, equationOfTime } = solarAngles(date);
-  const utc = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
-  let lon = (12 - utc - equationOfTime / 60) * 15;
-  lon = ((((lon + 180) % 360) + 360) % 360) - 180;
-  return { lat: declination, lon };
 }
 
 type Ring = number[][];
@@ -168,14 +158,15 @@ function blur(src: Float32Array, w: number, h: number, r: number, passes = 3): F
   return a;
 }
 
-/** Earth seen from orbit, centred below `target`; "live" uses the sun at `date`, "night" a night-side view. */
+/** Earth seen from orbit, centred below `target`; "live" lights it from the subsolar point `sun`, "night" shows a night-side view. */
 export function renderEarth(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   mask: Uint8Array,
   target: { lat: number; lon: number },
-  date: Date,
+  /** Subsolar point (degrees), from the server's solar geometry. */
+  sun: { lat: number; lon: number },
   mode: 'live' | 'night' = 'live',
   cities: Cities | null = null,
 ) {
@@ -201,7 +192,6 @@ export function renderEarth(
     sy = Math.cos(a) * cyv + Math.sin(a) * ny0;
     sz = Math.cos(a) * czv + Math.sin(a) * nz0;
   } else {
-    const sun = subsolarPoint(date);
     const sl = sun.lat * RAD, sL = sun.lon * RAD;
     sx = Math.cos(sl) * Math.cos(sL);
     sy = Math.cos(sl) * Math.sin(sL);

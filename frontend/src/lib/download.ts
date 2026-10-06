@@ -2,37 +2,7 @@ export function safeFilename(name: string): string {
   return name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'terrax';
 }
 
-interface HostDownloads {
-  save(req: { filename: string; data: Blob }): Promise<unknown>;
-}
-
-/**
- * In the sandboxed preview build, plain download links are blocked, so
- * files are offered through the host's download prompt when it exists.
- */
-async function hostDownloads(): Promise<HostDownloads | null> {
-  if (!__TERRAX_PREVIEW__) return null;
-  const host = (window as unknown as { claude?: { use?: (name: string) => Promise<unknown> } }).claude;
-  if (!host?.use) return null;
-  try {
-    return (await host.use('downloads')) as HostDownloads | null;
-  } catch {
-    return null;
-  }
-}
-
 export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
-  const host = await hostDownloads();
-  if (host) {
-    try {
-      await host.save({ filename, data: blob });
-    } catch (err) {
-      const code = (err as { code?: string })?.code;
-      if (code === 'declined') return;
-      throw new Error(code === 'rate_limited' ? 'A save prompt is already open. Finish it, then try again.' : 'This preview could not save the file. Run TerraX locally to download it.');
-    }
-    return;
-  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

@@ -306,7 +306,7 @@ def _cell(cid: str) -> dict[str, Any]:
 def detail(west: float, south: float, east: float, north: float, layers: list[str]) -> dict[str, Any]:
     """1:10m features of the cells covering a box, merged per layer."""
     ids = cell_ids(west, south, east, north)
-    if len(ids) > 8:
+    if len(ids) > 12:
         raise ValueError("The area is too large for 1:10m detail; zoom in.")
     out: dict[str, Any] = {"cells": ids}
     for layer in layers:

@@ -19,7 +19,7 @@ createRoot(document.getElementById('root')!).render(
 );
 
 // Offline support for the installed app; not in development or the sandboxed preview.
-if (import.meta.env.PROD && !__TERRAX_PREVIEW__ && 'serviceWorker' in navigator) {
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(err => console.warn('TerraX: offline support unavailable', err));
   });

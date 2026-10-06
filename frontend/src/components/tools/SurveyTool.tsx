@@ -1,19 +1,49 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { FeatureCollection } from 'geojson';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { runJob, type StoredFile } from '../../lib/api';
 import { downloadText, safeFilename } from '../../lib/download';
-import { toDms } from '../../lib/geo';
-import { fetchSample } from '../../lib/samples';
+import { toDms, type LatLngBounds } from '../../lib/geo';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
 import { usePrefs } from '../../lib/prefs';
 import { areaHa, elevationM, lengthM } from '../../lib/units';
+import { useJob } from '../../lib/useJob';
 import type { ToolOutput } from '../../lib/tools/registry';
-import { elevationProfile, formatAreaM2, formatLength, magneticBearing, measureSurvey, parseSurveyFile, surveyMarkdown, type SurveyResult } from '../../lib/tools/survey';
 import { getJSON, setJSON } from '../../lib/storage';
-import { drawnPolygon, editableVertices, makeBoundary, toGpx, toKml } from '../../lib/vector';
+import { drawnPolygon, editableVertices, formatAreaM2, formatLength, magneticBearing, toGpx, toKml } from '../../lib/vector';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
-import { Stat } from './ForestLossTool';
+import JobStatus from '../JobStatus';
+import { Stat, useUpload } from '../ToolKit';
+
+interface Feature {
+  name: string;
+  kind: 'Polygon' | 'Line' | 'Points';
+  area: number | null;
+  length: number | null;
+  vertices: { index: number; lat: number; lon: number; elevation: number | null; utm: string }[];
+  legs: { from: number; to: number; distance: number; bearing: number }[];
+  centroid: [number, number];
+  method: string;
+  elevation: { min: number; max: number } | null;
+  profile: { points: { distance: number; elevation: number }[]; gain: number; loss: number; threshold: number } | null;
+}
+interface SurveyResult {
+  filename: string;
+  format: string;
+  features: Feature[];
+  geojson: FeatureCollection;
+  bounds: LatLngBounds | null;
+  warnings: string[];
+}
+interface SurveyJob {
+  name: string;
+  markdown: string;
+  survey: SurveyResult;
+  boundary: Boundary | null;
+  map: { bounds: LatLngBounds | null; geojson: FeatureCollection };
+}
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -29,51 +59,52 @@ const ACCEPT = '.geojson,.json,.kml,.gpx,.csv,.txt,.zip';
 export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints, onDraw }: Props) {
   const notify = useToast();
   const { units } = usePrefs();
-  const [busy, setBusy] = useState(false);
+  const job = useJob();
+  const busy = Boolean(job.busy);
+  const files = useUpload(['vector', 'table', 'archive', 'other'], 'a GeoJSON, KML, GPX, CSV or zipped shapefile');
   const [closeRing, setCloseRing] = useState(true);
-  const [result, setResult] = useState<SurveyResult | null>(null);
-  const [lastFile, setLastFile] = useState<File | null>(null);
+  const [out, setOut] = useState<SurveyJob | null>(null);
+  const result = out?.survey ?? null;
+  const [source, setSource] = useState<{ file: StoredFile } | { geojson: FeatureCollection; name: string } | null>(null);
   const [declText, setDeclText] = useState<string>(() => getJSON<string>('declination', ''));
   const declNum = Number(declText);
   const declination = declText.trim() !== '' && Number.isFinite(declNum) && Math.abs(declNum) <= 90 ? declNum : null;
+  const fail = (m: string) => notify(m, 'error');
 
+  const measure = async (src: NonNullable<typeof source>, close = closeRing, decl = declination) => {
+    const inputs = 'file' in src ? { file: src.file.id } : {};
+    const params = 'file' in src ? { closeRing: close, declination: decl } : { geojson: src.geojson, name: src.name, declination: decl };
+    const r = await job.run('run', (signal, onProgress) => runJob<SurveyJob>('survey', inputs, params, { signal, onProgress }), fail);
+    if (!r) return;
+    setSource(src);
+    setOut(r);
+    onOutput({ tool: 'survey', name: r.name, markdown: r.markdown, map: r.map, summary: r.survey.features.map(({ vertices: _v, ...f }) => f) });
+  };
+
+  const analyse = async (picked: File | string) => {
+    const f = await job.run('upload', signal => (typeof picked === 'string' ? files.sample(picked) : files.upload(picked, signal)), fail);
+    if (f) await measure({ file: f });
+  };
+
+  // The declination only changes the report's magnetic bearings.
+  const firstDecl = useRef(true);
   useEffect(() => {
     setJSON('declination', declText);
-    if (result) onOutput({ tool: 'survey', name: result.filename, markdown: surveyMarkdown(result, declination), map: { bounds: result.bounds, geojson: result.geojson } });
+    if (firstDecl.current) {
+      firstDecl.current = false;
+      return;
+    }
+    if (!source) return;
+    const t = setTimeout(() => measure(source), 400);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [declination]);
 
-  const show = (r: SurveyResult) => {
-    setResult(r);
-    onOutput({ tool: 'survey', name: r.filename, markdown: surveyMarkdown(r, declination), map: { bounds: r.bounds, geojson: r.geojson } });
-  };
-
-  const analyse = async (file: File, close = closeRing) => {
-    setBusy(true);
-    try {
-      const { fc, format, warnings } = await parseSurveyFile(file, close);
-      show(measureSurvey(file.name, format, fc, warnings));
-      setLastFile(file);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : `Could not read ${file.name}.`, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const finishDrawing = () => {
-    if (!drawPoints || drawPoints.length < 3) {
-      notify('Click at least three points on the map to make a polygon.', 'error');
-      return;
-    }
-    try {
-      const name = result?.format === 'Drawn on map' ? result.filename : 'Drawn plot';
-      show(measureSurvey(name, 'Drawn on map', drawnPolygon(drawPoints, name), []));
-      setLastFile(null);
-      onDraw(null);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not measure the drawn polygon.', 'error');
-    }
+    if (!drawPoints || drawPoints.length < 3) return fail('Click at least three points on the map to make a polygon.');
+    const name = result?.format === 'Drawn on map' ? result.filename : 'Drawn plot';
+    onDraw(null);
+    measure({ geojson: drawnPolygon(drawPoints, name), name });
   };
 
   const editVertices = result ? editableVertices(result.geojson) : null;
@@ -86,7 +117,7 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
 
   const useAsBoundary = () => {
     if (!result) return;
-    const b = makeBoundary(boundaryName, result.geojson, polygonArea);
+    const b = out?.boundary ? { ...out.boundary, name: boundaryName } : null;
     if (!b) {
       notify('Only polygons can be used as an analysis boundary.', 'error');
       return;
@@ -119,7 +150,7 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
         Upload a plot boundary, a walked traverse or survey points. Coordinates must be WGS84 longitude/latitude (shapefiles are reprojected from their .prj). The
         boundary is drawn on the map.
       </p>
-      <FileDrop id="survey-file" label="Boundary, track or points" accept={ACCEPT} hint="GeoJSON · KML · GPX · CSV (lat, lon) · zipped Shapefile" busy={busy} loaded={result?.filename} onFile={f => analyse(f)} />
+      <FileDrop id="survey-file" label="Boundary, track or points" accept={ACCEPT} hint="GeoJSON · KML · GPX · CSV (lat, lon) · zipped Shapefile" busy={job.busy === 'upload'} loaded={result?.filename} onFile={f => analyse(f)} />
       <div className="param-row">
         <label className="check">
           <input
@@ -128,7 +159,7 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
             checked={closeRing}
             onChange={e => {
               setCloseRing(e.target.checked);
-              if (lastFile && /\.(csv|txt)$/i.test(lastFile.name)) analyse(lastFile, e.target.checked);
+              if (source && 'file' in source && /\.(csv|txt)$/i.test(source.file.name)) measure(source, e.target.checked);
             }}
           />
           CSV points form a closed boundary
@@ -145,19 +176,14 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
             type="button"
             className="btn"
             disabled={busy}
-            onClick={async () => {
-              try {
-                analyse(await fetchSample('samples/survey_plot_synthetic.geojson', 'application/geo+json'));
-              } catch (err) {
-                notify(err instanceof Error ? err.message : 'Could not load the sample.', 'error');
-              }
-            }}
+            onClick={() => analyse('survey_plot_synthetic.geojson')}
           >
             Try sample plot
           </button>
         </div>
       </div>
 
+      <JobStatus job={job} />
       {result && (
         <div className="result-block">
           <div className="button-row">
@@ -203,7 +229,7 @@ export default function SurveyTool({ onOutput, boundary, onBoundary, drawPoints,
               </div>
               <p className="field-hint">Method: {f.method}.</p>
               {(() => {
-                const prof = elevationProfile(f);
+                const prof = f.profile;
                 if (!prof) return null;
                 return (
                   <div className="render-window elevation-profile">

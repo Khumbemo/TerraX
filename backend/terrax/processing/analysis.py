@@ -32,11 +32,23 @@ class MetricAnalysis:
     def public(self, max_points: int = 1500) -> dict:
         from .stats import sample_indices
 
+        from .stats import quantile_sorted
+
         idx = sample_indices(len(self.points), max_points)
+        intercept = None
+        if self.trend and self.points and self.points[0]["time"]:
+            # Theil–Sen intercept: median of y − slope·t over all values, for drawing the trend line.
+            intercept = quantile_sorted(sorted(p["value"] - self.trend.sen_slope * decimal_year(p["time"]) for p in self.points), 0.5)
         return {
             "column": self.column,
-            "points": [{"label": self.points[i]["label"], "time": format_date(self.points[i]["time"]) if self.points[i]["time"] else None, "value": self.points[i]["value"]} for i in idx],
+            "points": [
+                {"label": self.points[i]["label"], "time": format_date(self.points[i]["time"]) if self.points[i]["time"] else None, "value": self.points[i]["value"],
+                 "t": decimal_year(self.points[i]["time"]) if self.points[i]["time"] else None, "cls": self.classification.classify(self.points[i]["value"])}
+                for i in idx
+            ],
             "sampled": len(idx) < len(self.points),
+            "pointCount": len(self.points),
+            "trendIntercept": intercept,
             "summary": self.summary.dict() if self.summary else None,
             "trend": self.trend.dict() if self.trend else None,
             "monthly": self.monthly,

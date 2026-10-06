@@ -1,15 +1,23 @@
 import { useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { INDICES, guessBandMap } from '../lib/indices';
-import { openGeoTiff } from '../lib/rasterio';
-import { fetchSample } from '../lib/samples';
-import { analyzeStack, stackMarkdown, type StackResult } from '../lib/stack';
+import { runJob, type RasterMeta, type StoredFile, type Trend } from '../lib/api';
+import { INDICES } from '../lib/indices';
 import { fmt, fmtP } from '../lib/stats';
 import { useToast } from '../lib/toast';
+import { useJob } from '../lib/useJob';
 import type { ToolOutput } from '../lib/tools/registry';
 import type { SpectralIndex } from '../lib/types';
 import type { Boundary } from '../lib/zonal';
 import FileDrop from './FileDrop';
+import JobStatus from './JobStatus';
+import { useUpload } from './ToolKit';
+
+interface StackResult {
+  label: string;
+  rows: { filename: string; date: string; mean: number; median: number; validFraction: number; sparse: boolean }[];
+  trend: Trend | null;
+  notes: string[];
+}
 
 interface Props {
   onOutput: (out: ToolOutput) => void;
@@ -22,27 +30,35 @@ const AXIS = { stroke: '#4a6580', fontSize: 11, fontFamily: 'Space Mono, monospa
 
 export default function StackPanel({ onOutput, boundary }: Props) {
   const notify = useToast();
-  const [busy, setBusy] = useState(false);
+  const job = useJob();
+  const busy = Boolean(job.busy);
+  const uploads = useUpload<RasterMeta>(['raster'], 'a GeoTIFF raster');
   const [index, setIndex] = useState<SpectralIndex>('ndvi');
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<StoredFile<RasterMeta>[]>([]);
   const [result, setResult] = useState<StackResult | null>(null);
+  const fail = (m: string) => notify(m, 'error');
 
-  const run = async (list: File[], idx: SpectralIndex = index) => {
-    setBusy(true);
-    try {
-      const rasters = await Promise.all(list.map(f => openGeoTiff(f)));
-      const r = await analyzeStack(
-        rasters.map(raster => ({ raster })),
-        { index: idx, bands: guessBandMap(rasters[0].meta.bands), boundary },
-      );
-      setFiles(list);
-      setResult(r);
-      onOutput({ tool: 'satellite', name: `${r.rows.length}-date ${r.label} series`, markdown: stackMarkdown(r) });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not build the series.', 'error');
-    } finally {
-      setBusy(false);
-    }
+  const run = async (list: StoredFile<RasterMeta>[], idx: SpectralIndex = index) => {
+    const r = await job.run(
+      'run',
+      (signal, onProgress) => runJob<{ name: string; markdown: string; series: StackResult }>('stack', { files: list.map(f => f.id) }, { index: idx, bands: list[0].meta.guessedBands, boundary }, { signal, onProgress }),
+      fail,
+    );
+    if (!r) return;
+    setFiles(list);
+    setResult(r.series);
+    onOutput({ tool: 'satellite', name: r.name, markdown: r.markdown, summary: r.series });
+  };
+
+  const add = async (picked: File[] | string[]) => {
+    const list = await job.run('upload', async signal => {
+      const out: StoredFile<RasterMeta>[] = [];
+      for (const p of picked) out.push(typeof p === 'string' ? await uploads.sample(p) : await uploads.upload(p, signal));
+      return out;
+    }, fail);
+    if (!list) return;
+    if (list.length < 2) return fail('Add at least two images from different dates (select several files at once).');
+    await run(list);
   };
 
   const t = result?.trend;
@@ -68,13 +84,7 @@ export default function StackPanel({ onOutput, boundary }: Props) {
           type="button"
           className="btn btn-small"
           disabled={busy}
-          onClick={async () => {
-            try {
-              run(await Promise.all(SERIES_SAMPLES.map(f => fetchSample(`samples/${f}`))));
-            } catch (err) {
-              notify(err instanceof Error ? err.message : 'Could not load the sample.', 'error');
-            }
-          }}
+          onClick={() => add(SERIES_SAMPLES)}
         >
           Try synthetic 6-date series
         </button>
@@ -84,13 +94,14 @@ export default function StackPanel({ onOutput, boundary }: Props) {
           </button>
         )}
       </div>
-      <FileDrop id="stack-files" compact label="Images from several dates" accept=".tif,.tiff" hint="GeoTIFFs · date in the file name" busy={busy} loaded={files.length ? `${files.length} images` : null} onFile={f => run([f])} onFiles={run} />
+      <FileDrop id="stack-files" compact label="Images from several dates" accept=".tif,.tiff" hint="GeoTIFFs · date in the file name" busy={job.busy === 'upload'} loaded={files.length ? `${files.length} images` : null} onFile={f => add([f])} onFiles={add} />
+      <JobStatus job={job} onCancel={job.cancel} />
       {result && (
         <>
           <div className="render-window">
             <div className="eyebrow">{result.label} · mean per image</div>
             <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={result.rows.filter(r => !r.sparse).map(r => ({ date: r.date.toISOString().slice(0, 10), mean: r.mean }))} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+              <LineChart data={result.rows.filter(r => !r.sparse).map(r => ({ date: r.date, mean: r.mean }))} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#16283c" />
                 <XAxis dataKey="date" {...AXIS} />
                 <YAxis {...AXIS} width={56} domain={['auto', 'auto']} tickFormatter={v => fmt(v, 3)} />
@@ -116,7 +127,7 @@ export default function StackPanel({ onOutput, boundary }: Props) {
               <tbody>
                 {result.rows.map(r => (
                   <tr key={r.filename} className={r.sparse ? 'muted' : ''}>
-                    <td>{r.date.toISOString().slice(0, 10)}</td>
+                    <td>{r.date}</td>
                     <td>{r.filename}</td>
                     <td className="num">{fmt(r.mean)}</td>
                     <td className="num">{fmt(r.median)}</td>

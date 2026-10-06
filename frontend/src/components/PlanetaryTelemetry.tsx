@@ -2,14 +2,72 @@ import { useEffect, useRef, useState } from 'react';
 import { feature } from 'topojson-client';
 import land from 'world-atlas/land-110m.json';
 import type { MultiPolygon, Polygon } from 'geojson';
-import { describeKp, fetchKp, type KpReading } from '../lib/kp';
-import { formatClock, solarReport } from '../lib/solar';
+import { request } from '../lib/api';
 
 interface Props {
   target: { lat: number; lon: number; name: string };
 }
 
 const RAD = Math.PI / 180;
+
+/** Solar geometry and Kp from the TerraX server (services/solar.py, services/kp.py). */
+interface Telemetry {
+  solar: {
+    at: string;
+    meanSolarTime: number;
+    apparentSolarTime: number;
+    equationOfTime: number;
+    declination: number;
+    altitude: number;
+    zenith: number;
+    azimuth: number;
+    sunrise: string | null;
+    sunset: string | null;
+    subsolar: { lat: number; lon: number };
+  };
+  kp: { reading: { kp: number; time: string; label: string } | null; error: string | null };
+}
+
+/** Formats hours-of-day (any real number) as HH:MM:SS, wrapping at 24 h. */
+function formatClock(hours: number): string {
+  const total = Math.round((((hours % 24) + 24) % 24) * 3600) % 86400;
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), sec = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+/** Fetches telemetry once a minute; clocks and the subsolar longitude advance locally in between. */
+function useTelemetry(target: { lat: number; lon: number }) {
+  const [data, setData] = useState<{ t: Telemetry; at: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      request<Telemetry>(`/api/live/telemetry?lat=${target.lat}&lon=${target.lon}`)
+        .then(t => {
+          if (cancelled) return;
+          setData({ t, at: Date.parse(t.solar.at) });
+          setError(null);
+        })
+        .catch(err => !cancelled && setError(err instanceof Error ? err.message : 'Telemetry unavailable'));
+    load();
+    const id = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [target.lat, target.lon]);
+  return { data, error };
+}
+
+function advance(t: Telemetry['solar'], fetchedAt: number, now: number) {
+  const dh = (now - fetchedAt) / 3_600_000;
+  return {
+    ...t,
+    meanSolarTime: t.meanSolarTime + dh,
+    apparentSolarTime: t.apparentSolarTime + dh,
+    subsolar: { lat: t.subsolar.lat, lon: ((((t.subsolar.lon - 15 * dh + 180) % 360) + 360) % 360) - 180 },
+  };
+}
 const SIZE = 200;
 const LAND = feature(land, land.objects.land) as unknown as { features: { geometry: Polygon | MultiPolygon }[] } | { geometry: Polygon | MultiPolygon };
 const LAND_RINGS: number[][][] = (() => {
@@ -182,14 +240,16 @@ const utcClock = (d: Date | null) => (d ? `${d.toISOString().slice(11, 16)} UTC`
 export default function PlanetaryTelemetry({ target }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [now, setNow] = useState(() => new Date());
-  const [kp, setKp] = useState<{ reading: KpReading | null; error: string | null; loading: boolean }>({ reading: null, error: null, loading: true });
+  const { data: tele, error: teleError } = useTelemetry(target);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const report = solarReport(now, target.lat, target.lon);
+  const report = tele ? advance(tele.t.solar, tele.at, now.getTime()) : null;
+  const subsolarRef = useRef<{ lat: number; lon: number } | null>(null);
+  subsolarRef.current = report?.subsolar ?? null;
   const minuteKey = Math.floor(now.getTime() / 60_000);
 
   const online = useOnline();
@@ -200,11 +260,11 @@ export default function PlanetaryTelemetry({ target }: Props) {
 
   // Static view (offline or paused): face the target, redraw once a minute as the terminator moves ~0.25°/min.
   useEffect(() => {
-    if (spinning || !canvasRef.current) return;
+    if (spinning || !canvasRef.current || !subsolarRef.current) return;
     lonRef.current = target.lon;
-    drawGlobe(canvasRef.current, lat0, target.lon, report.subsolar, target);
+    drawGlobe(canvasRef.current, lat0, target.lon, subsolarRef.current, target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spinning, minuteKey, lat0, target.lat, target.lon]);
+  }, [spinning, minuteKey, lat0, target.lat, target.lon, Boolean(tele)]);
 
   // Spinning view while online: the globe turns eastward; drawing stops when it is off-screen or the tab is hidden.
   useEffect(() => {
@@ -220,7 +280,7 @@ export default function PlanetaryTelemetry({ target }: Props) {
         lastDraw = t;
         // The Earth turns west to east, so surface features drift left to right: the view longitude decreases.
         lonRef.current = ((lonRef.current - SPIN_DEG_PER_S * dt + 540) % 360) - 180;
-        drawGlobe(c, lat0, lonRef.current, solarReport(new Date(), target.lat, target.lon).subsolar, target);
+        if (subsolarRef.current) drawGlobe(c, lat0, lonRef.current, subsolarRef.current, target);
       }
       raf = requestAnimationFrame(frame);
     };
@@ -232,34 +292,12 @@ export default function PlanetaryTelemetry({ target }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spinning, lat0, target.lat, target.lon]);
 
-  useEffect(() => {
-    if (__TERRAX_PREVIEW__) {
-      setKp({ reading: null, error: 'Live data is blocked in this preview', loading: false });
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
-      try {
-        const reading = await fetchKp(ctrl.signal);
-        if (!cancelled) setKp({ reading, error: reading ? null : 'No recent value', loading: false });
-      } catch {
-        if (!cancelled) setKp({ reading: null, error: 'Unavailable (offline?)', loading: false });
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-    load();
-    const id = setInterval(load, 15 * 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  const eot = report.equationOfTime;
-  const dayLength = report.sunrise && report.sunset ? (report.sunset.getTime() - report.sunrise.getTime()) / 3_600_000 : null;
+  const eot = report?.equationOfTime ?? 0;
+  const sunrise = report?.sunrise ? new Date(report.sunrise) : null;
+  const sunset = report?.sunset ? new Date(report.sunset) : null;
+  const dayLength = sunrise && sunset ? (sunset.getTime() - sunrise.getTime()) / 3_600_000 : null;
+  const dash = teleError ? 'Unavailable' : '…';
+  const kp = tele?.t.kp;
 
   return (
     <div className="telemetry-panel-inner">
@@ -297,26 +335,26 @@ export default function PlanetaryTelemetry({ target }: Props) {
       <div className="telemetry-section">
         <div className="eyebrow">Time</div>
         <Row label="UTC" value={now.toISOString().slice(11, 19)} />
-        <Row label="Mean solar time" value={formatClock(report.meanSolarTime)} title="UTC + longitude / 15" />
-        <Row label="Apparent solar time" value={formatClock(report.apparentSolarTime)} title="Sundial time: mean solar time + equation of time" />
-        <Row label="Equation of time" value={`${eot >= 0 ? '+' : '−'}${Math.abs(eot).toFixed(1)} min`} />
+        <Row label="Mean solar time" value={report ? formatClock(report.meanSolarTime) : dash} title="UTC + longitude / 15" />
+        <Row label="Apparent solar time" value={report ? formatClock(report.apparentSolarTime) : dash} title="Sundial time: mean solar time + equation of time" />
+        <Row label="Equation of time" value={report ? `${eot >= 0 ? '+' : '−'}${Math.abs(eot).toFixed(1)} min` : dash} />
       </div>
 
       <div className="telemetry-section">
         <div className="eyebrow">Sun at target</div>
-        <Row label="Altitude" value={`${report.altitude.toFixed(2)}°`} />
-        <Row label="Zenith angle" value={`${report.zenith.toFixed(2)}°`} />
-        <Row label="Azimuth (true N)" value={`${report.azimuth.toFixed(2)}°`} />
-        <Row label="Declination" value={`${report.declination.toFixed(2)}°`} />
-        <Row label="Sunrise" value={utcClock(report.sunrise)} />
-        <Row label="Sunset" value={utcClock(report.sunset)} />
+        <Row label="Altitude" value={report ? `${report.altitude.toFixed(2)}°` : dash} title="Updated every minute" />
+        <Row label="Zenith angle" value={report ? `${report.zenith.toFixed(2)}°` : dash} />
+        <Row label="Azimuth (true N)" value={report ? `${report.azimuth.toFixed(2)}°` : dash} />
+        <Row label="Declination" value={report ? `${report.declination.toFixed(2)}°` : dash} />
+        <Row label="Sunrise" value={report ? utcClock(sunrise) : dash} />
+        <Row label="Sunset" value={report ? utcClock(sunset) : dash} />
         <Row label="Day length" value={dayLength !== null ? `${Math.floor(Math.round(dayLength * 60) / 60)} h ${Math.round(dayLength * 60) % 60} min` : '—'} />
       </div>
 
       <div className="telemetry-section">
         <div className="eyebrow">Space weather (NOAA SWPC)</div>
-        <Row label="Planetary Kp" value={kp.loading ? 'Loading…' : kp.reading ? `${kp.reading.kp.toFixed(2)} · ${describeKp(kp.reading.kp)}` : kp.error ?? '—'} />
-        {kp.reading && <Row label="Interval start" value={`${kp.reading.time.toISOString().slice(0, 16).replace('T', ' ')} UTC`} />}
+        <Row label="Planetary Kp" value={!kp ? (teleError ? 'Unavailable (server not reachable)' : 'Loading…') : kp.reading ? `${kp.reading.kp.toFixed(2)} · ${kp.reading.label}` : (kp.error ?? '—')} />
+        {kp?.reading && <Row label="Interval start" value={`${kp.reading.time.slice(0, 16).replace('T', ' ')} UTC`} />}
       </div>
       <p className="panel-foot">
         Target {Math.abs(target.lat).toFixed(3)}° {target.lat >= 0 ? 'N' : 'S'}, {Math.abs(target.lon).toFixed(3)}° {target.lon >= 0 ? 'E' : 'W'} · change in Settings

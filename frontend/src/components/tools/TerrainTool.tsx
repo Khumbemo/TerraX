@@ -1,24 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { FeatureCollection } from 'geojson';
+import { request, runJob, type Download, type RasterMeta, type ResultImage, type StoredFile, type Summary } from '../../lib/api';
 import { downloadText, safeFilename } from '../../lib/download';
-import { labelPatches, patchAreas, patchesToGeoJson } from '../../lib/patches';
-import { groundGeometry } from '../../lib/rasterio';
-import { flowRoutingAsync } from '../../lib/compute';
-import { contoursGeoJson, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
-import { makeBoundary } from '../../lib/vector';
-import { viridis } from '../../lib/colormap';
-import { mapImage } from '../../lib/overlay';
-import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
-import { fetchSample } from '../../lib/samples';
+import type { LatLngBounds } from '../../lib/geo';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
 import { usePrefs } from '../../lib/prefs';
 import { ACRES_PER_HA, elevationM } from '../../lib/units';
+import { useJob } from '../../lib/useJob';
 import type { ToolOutput } from '../../lib/tools/registry';
-import { ASPECTS, SLOPE_CLASSES, analyzeTerrain, gridToRgba, terrainMarkdown, type TerrainResult } from '../../lib/tools/terrain';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
-import RgbaCanvas from '../RgbaCanvas';
-import { Stat } from './ForestLossTool';
+import JobStatus from '../JobStatus';
+import { ArtifactImage, Downloads, Stat, useUpload } from '../ToolKit';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -28,213 +22,166 @@ interface Props {
 
 type Layer = 'hillshade' | 'slope' | 'elevation' | 'flow';
 
+interface TerrainJob {
+  name: string;
+  markdown: string;
+  terrain: {
+    filename: string;
+    elevation: Summary;
+    relief: number;
+    hypsometricIntegral: number | null;
+    slope: Summary;
+    slopeClassCounts: number[];
+    aspectCounts: number[];
+    width: number;
+    height: number;
+    notes: string[];
+  };
+  layers: Record<'hillshade' | 'slope' | 'elevation', string>;
+  suggestedInterval: number;
+  slopeClasses: { label: string; color: string }[];
+  aspects: string[];
+  warnings: string[];
+  map: { bounds: LatLngBounds | null; image: ResultImage | null };
+}
+
+interface HydroJob {
+  flow: { width: number; height: number; thresholdM2: number; maxOrder: number; lengthByOrder: number[]; raisedCells: number; maxRaise: number };
+  layer: string;
+  streams: FeatureCollection | null;
+  downloads: Download[];
+  markdown: string;
+}
+
+interface ContourJob {
+  contours: { levels: number; lines: number; interval: number };
+  geojson: FeatureCollection;
+  downloads: Download[];
+}
+
 interface Basin {
-  outlet: number;
-  mask: Uint8Array;
+  outlet: [number, number];
   cells: number;
   areaM2: number;
-  meanElevation: number;
-  meanSlope: number;
+  meanElevation: number | null;
+  meanSlope: number | null;
+  layer: string;
+  geojson: FeatureCollection | null;
+  markdown: string;
 }
 
-function hexRgb(hex: string): [number, number, number] {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function slopeRgba(t: TerrainResult): Uint8ClampedArray {
-  const colors = SLOPE_CLASSES.map(c => hexRgb(c.color));
-  return gridToRgba(t.slopeGrid, v => colors[SLOPE_CLASSES.findIndex(c => v < c.upTo)]);
-}
+const jobIdOf = (artifactUrl: string) => artifactUrl.split('/')[3];
 
 export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
   const notify = useToast();
   const { units } = usePrefs();
-  const [busy, setBusy] = useState(false);
-  const [raster, setRaster] = useState<OpenRaster | null>(null);
-  const [result, setResult] = useState<TerrainResult | null>(null);
+  const job = useJob();
+  const files = useUpload<RasterMeta>(['raster'], 'a GeoTIFF elevation model');
+  const [dem, setDem] = useState<StoredFile<RasterMeta> | null>(null);
+  const [out, setOut] = useState<TerrainJob | null>(null);
   const [layer, setLayer] = useState<Layer>('hillshade');
   const [thresholdKm2, setThresholdKm2] = useState('0.5');
-  const [flow, setFlow] = useState<FlowResult | null>(null);
+  const [flow, setFlow] = useState<HydroJob | null>(null);
   const [basin, setBasin] = useState<Basin | null>(null);
   const [interval, setInterval_] = useState('');
+  const [contours, setContours] = useState<ContourJob | null>(null);
   const [showContours, setShowContours] = useState(false);
-  const baseOutput = useRef<ToolOutput | null>(null);
+  const result = out?.terrain ?? null;
+  const fail = (m: string) => notify(m, 'error');
 
-  const demGrid = (t: TerrainResult) => ({ width: t.width, height: t.height, data: t.elevationGrid, resampleFactor: 1 });
-  const geo = useMemo(() => (raster && result ? groundGeometry(raster.meta, result) : null), [raster, result]);
-
-  const analyse = async (file: File | OpenRaster) => {
-    setBusy(true);
-    try {
-      const r = file instanceof File ? await openGeoTiff(file) : file;
-      const name = r.meta.filename;
-      if (file instanceof File && r.meta.bands > 1) notify(`${name} has ${r.meta.bands} bands; band 1 was read as elevation.`);
-      const t = await analyzeTerrain(r, boundary);
-      setRaster(r);
-      setResult(t);
-      setFlow(null);
-      setBasin(null);
-      setShowContours(false);
-      setInterval_(String(niceInterval(t.relief)));
-      if (layer === 'flow') setLayer('hillshade');
-      publish({
-        tool: 'terrain',
-        name,
-        markdown: terrainMarkdown(t, r.meta) + (r.meta.warnings.length ? `\n\n## Data quality\n\n${r.meta.warnings.map(w => `- ${w}`).join('\n')}` : ''),
-        map: { bounds: r.meta.latLngBounds, image: mapImage(slopeRgba(t), t.width, t.height, r.meta.latLngBounds, 'Slope classes', SLOPE_CLASSES.map(c => ({ color: c.color, label: c.label }))) },
-      });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : `Could not read ${file instanceof File ? file.name : file.meta.filename}.`, 'error');
-      if (!(file instanceof File)) {
-        // A re-run (new boundary) failed: do not leave results for the old extent on screen.
-        setResult(null);
-        setFlow(null);
-        setBasin(null);
-        baseOutput.current = null;
-        onOutput(null);
-      }
-    } finally {
-      setBusy(false);
-    }
+  const analyse = async (f: StoredFile<RasterMeta>) => {
+    if (f.meta.bands > 1) notify(`${f.name} has ${f.meta.bands} bands; band 1 is read as elevation.`);
+    const r = await job.run('run', (signal, onProgress) => runJob<TerrainJob>('terrain', { dem: f.id }, { boundary }, { signal, onProgress }), msg => {
+      fail(msg);
+      // A re-run (new boundary) failed: do not leave results for the old extent on screen.
+      setOut(null);
+      onOutput(null);
+    });
+    if (!r) return;
+    setDem(f);
+    setOut(r);
+    setFlow(null);
+    setBasin(null);
+    setContours(null);
+    setShowContours(false);
+    setInterval_(String(r.suggestedInterval));
+    if (layer === 'flow') setLayer('hillshade');
   };
 
-  const publish = (out: ToolOutput) => {
-    baseOutput.current = out;
-    onOutput(out);
+  const pick = async (picked: File | string) => {
+    const f = await job.run('upload', signal => (typeof picked === 'string' ? files.sample(picked) : files.upload(picked, signal)), fail);
+    if (f) await analyse(f);
   };
 
-  const hydroMarkdown = (f: FlowResult | null, b: Basin | null): string => {
-    if (!f || !result) return '';
-    const validKm2 = (() => {
-      if (!geo) return NaN;
-      let a = 0;
-      for (let k = 0; k < result.elevationGrid.length; k++) if (!Number.isNaN(result.elevationGrid[k])) a += geo.cellArea(Math.floor(k / result.width));
-      return a / 1e6;
-    })();
-    const totalKm = f.lengthByOrder.reduce((x, y) => x + y, 0) / 1000;
-    const lines = [
-      '',
-      '## Hydrology',
-      '',
-      `- Channels: cells draining at least ${fmt(f.thresholdM2 / 1e6, 3)} km²; highest Strahler order ${f.maxOrder}; total length ${fmt(totalKm, 4)} km; drainage density ${fmt(totalKm / validKm2, 3)} km/km².`,
-      ...f.lengthByOrder.slice(1).map((l, i) => `- Order ${i + 1}: ${fmt(l / 1000, 4)} km`),
-      `- Depression filling raised ${f.raisedCells.toLocaleString()} cells by more than 1 mm (largest ${fmt(f.maxRaise, 3)} m).`,
-    ];
-    if (b) lines.push(`- Watershed: ${fmt(b.areaM2 / 1e6, 4)} km² (${fmt(b.areaM2 / 1e4, 4)} ha), mean elevation ${fmt(b.meanElevation)} m, mean slope ${fmt(b.meanSlope, 3)}°.`);
-    lines.push(
-      '- Method: Priority-Flood depression filling with an ε gradient (Barnes et al. 2014), D8 steepest-descent flow (O’Callaghan & Mark 1984), Strahler (1957) stream order. The threshold sets where channels start and is a choice, not a measurement; D8 cannot split flow, so it draws parallel lines on planar slopes.',
-    );
-    return lines.join('\n');
-  };
-
-  // Keep the report in step with hydrology results.
+  // Keep the report and map in step with hydrology and contour results.
   useEffect(() => {
-    const base = baseOutput.current;
-    if (!base || !raster || !result) return;
-    const contours = showContours ? contoursGeoJson(demGrid(result), raster.meta, Number(interval)) : null;
-    const streams = flow ? streamLines(flow, raster.meta) : null;
-    const features = [...(contours?.fc.features ?? []), ...(streams?.features ?? [])];
+    if (!out) return;
+    const features = [...(showContours && contours ? contours.geojson.features : []), ...(flow?.streams?.features ?? [])];
     onOutput({
-      ...base,
-      markdown: base.markdown + hydroMarkdown(flow, basin),
-      map: { ...base.map, geojson: features.length ? { type: 'FeatureCollection', features } : null },
+      tool: 'terrain',
+      name: out.name,
+      markdown: out.markdown + (flow ? flow.markdown + (basin ? `\n${basin.markdown}` : '') : ''),
+      map: { ...out.map, geojson: features.length ? { type: 'FeatureCollection', features } : null },
+      summary: out.terrain,
+      figures: [
+        { title: 'Slope classes', url: out.layers.slope },
+        { title: 'Hillshade', url: out.layers.hillshade },
+        ...(flow ? [{ title: 'Flow and streams', url: basin?.layer ?? flow.layer }] : []),
+      ],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flow, basin, showContours, interval]);
+  }, [out, flow, basin, contours, showContours]);
 
-  const [flowBusy, setFlowBusy] = useState(false);
   const computeFlow = async () => {
-    if (!result || !geo) {
-      notify('Flow routing needs a DEM with ground units (WGS84, Web Mercator or UTM).', 'error');
-      return;
-    }
+    if (!dem) return;
     const km2 = Number(thresholdKm2);
-    if (!Number.isFinite(km2) || km2 <= 0) {
-      notify('Set the channel threshold as a positive area in km², for example 0.5.', 'error');
-      return;
-    }
-    setFlowBusy(true);
-    try {
-      setFlow(await flowRoutingAsync(demGrid(result), geo, km2 * 1e6));
-      setBasin(null);
-      setLayer('flow');
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Flow routing failed.', 'error');
-    } finally {
-      setFlowBusy(false);
-    }
+    if (!Number.isFinite(km2) || km2 <= 0) return fail('Set the channel threshold as a positive area in km², for example 0.5.');
+    const r = await job.run('flow', (signal, onProgress) => runJob<HydroJob>('hydrology', { dem: dem.id }, { thresholdKm2: km2, boundary }, { signal, onProgress }), fail);
+    if (!r) return;
+    setFlow(r);
+    setBasin(null);
+    setLayer('flow');
   };
 
-  const pickOutlet = (col: number, row: number) => {
-    if (!flow || !result || !geo) return;
-    const outlet = snapOutlet(flow, col, row, Math.max(3, Math.round(0.02 * Math.max(flow.width, flow.height))));
-    if (outlet < 0) return;
-    const { mask, cells } = watershed(flow, outlet);
-    let area = 0, zSum = 0, zN = 0, sSum = 0, sN = 0;
-    for (let k = 0; k < mask.length; k++) {
-      if (!mask[k]) continue;
-      area += geo.cellArea(Math.floor(k / result.width));
-      const z = result.elevationGrid[k], s = result.slopeGrid[k];
-      if (!Number.isNaN(z)) {
-        zSum += z;
-        zN++;
-      }
-      if (!Number.isNaN(s)) {
-        sSum += s;
-        sN++;
-      }
-    }
-    setBasin({ outlet, mask, cells, areaM2: area, meanElevation: zSum / zN, meanSlope: sN ? sSum / sN : NaN });
+  const pickOutlet = async (col: number, row: number) => {
+    if (!flow) return;
+    const b = await job.run('basin', signal => request<Basin>(`/api/terrain/${jobIdOf(flow.layer)}/watershed`, { method: 'POST', json: { col, row }, signal }), fail);
+    if (b) setBasin(b);
   };
 
-  const basinPolygon = () => {
-    if (!basin || !raster || !result) return null;
-    const labels = { labels: Int32Array.from(basin.mask), count: 1 };
-    const stats = patchAreas(labels, result.width, row => geo?.cellArea(row) ?? 1);
-    return patchesToGeoJson(labels, stats, raster.meta, result, (_id, a) => ({ name: 'Watershed', area_ha: Math.round(a / 100) / 100 }))?.fc ?? null;
+  const loadContours = async (iv: number): Promise<ContourJob | null> => {
+    if (!dem) return null;
+    if (contours && contours.contours.interval === iv) return contours;
+    if (!Number.isFinite(iv) || iv <= 0) {
+      fail('Set a positive contour interval in metres.');
+      return null;
+    }
+    const r = await job.run('contours', (signal, onProgress) => runJob<ContourJob>('contours', { dem: dem.id }, { interval: iv, boundary }, { signal, onProgress }), fail);
+    if (r) setContours(r);
+    return r;
   };
 
-  const base = raster ? safeFilename(raster.meta.filename) : 'dem';
-
-  const image = useMemo(() => {
-    if (!result) return null;
-    if (layer === 'flow' && flow) {
-      const maxLog = Math.log10(Math.max(...[flow.acc.reduce((m, v) => Math.max(m, v), 0), 1]));
-      const out = new Uint8ClampedArray(result.width * result.height * 4);
-      const orderColors: [number, number, number][] = [[125, 211, 252], [56, 189, 248], [14, 165, 233], [2, 132, 199], [3, 105, 161], [30, 64, 175]];
-      for (let k = 0; k < flow.acc.length; k++) {
-        const hs = result.hillshade[k];
-        if (Number.isNaN(result.elevationGrid[k])) continue;
-        const shade = Number.isNaN(hs) ? 0.5 : hs;
-        let rgb: [number, number, number];
-        if (flow.order[k]) rgb = orderColors[Math.min(orderColors.length - 1, flow.order[k] - 1)];
-        else {
-          const t = Math.log10(Math.max(flow.acc[k], 1)) / (maxLog || 1);
-          rgb = [shade * 90 + t * 20, shade * 100 + t * 60, shade * 110 + t * 110];
-        }
-        if (basin?.mask[k]) rgb = [rgb[0] * 0.5 + 245 * 0.5, rgb[1] * 0.5 + 184 * 0.5, rgb[2] * 0.5 + 61 * 0.5];
-        out.set([rgb[0], rgb[1], rgb[2], 255], k * 4);
-      }
-      if (basin) out.set([255, 255, 255, 255], basin.outlet * 4);
-      return out;
-    }
-    if (layer === 'hillshade') return gridToRgba(result.hillshade, v => [v * 235 + 10, v * 240 + 12, v * 245 + 18]);
-    if (layer === 'slope') return slopeRgba(result);
-    const { min, max } = result.elevation;
-    return gridToRgba(result.elevationGrid, v => viridis((v - min) / (max - min || 1)));
-  }, [result, layer, flow, basin]);
+  // Contours on the map follow the interval.
+  useEffect(() => {
+    if (!showContours) return;
+    const t = setTimeout(() => loadContours(Number(interval)), 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showContours, interval]);
 
   const lastBoundary = useRef(boundary);
   useEffect(() => {
     if (lastBoundary.current === boundary) return;
     lastBoundary.current = boundary;
-    if (raster) analyse(raster);
+    if (dem) analyse(dem);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundary]);
 
+  const base = dem ? safeFilename(dem.name) : 'dem';
+  const busy = Boolean(job.busy);
   const slopeTotal = result ? result.slopeClassCounts.reduce((a, b) => a + b, 0) || 1 : 1;
   const aspTotal = result ? result.aspectCounts.reduce((a, b) => a + b, 0) || 1 : 1;
+  const image = !out ? null : layer === 'flow' && flow ? (basin?.layer ?? flow.layer) : out.layers[layer === 'flow' ? 'hillshade' : layer];
 
   return (
     <div className="tool-body">
@@ -242,27 +189,17 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
         Upload a digital elevation model (single-band GeoTIFF in metres), for example SRTM (USGS/SRTMGL1_003), Copernicus GLO-30 or ASTER GDEM exported from Earth
         Engine. Use a projected CRS (UTM) or WGS84.
       </p>
-      <FileDrop id="terrain-file" label="Elevation model (DEM)" accept=".tif,.tiff" hint="GeoTIFF · elevation in metres" busy={busy} loaded={raster?.meta.filename} onFile={analyse} />
+      <FileDrop id="terrain-file" label="Elevation model (DEM)" accept=".tif,.tiff" hint="GeoTIFF · elevation in metres" busy={job.busy === 'upload'} loaded={dem?.name} onFile={f => pick(f)} />
       <div className="param-row">
         <div className="button-row push-right">
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            onClick={async () => {
-              try {
-                await analyse(await fetchSample('samples/terrain_dem_synthetic.tif'));
-              } catch (err) {
-                notify(err instanceof Error ? err.message : 'Could not load the sample.', 'error');
-              }
-            }}
-          >
+          <button type="button" className="btn" disabled={busy} onClick={() => pick('terrain_dem_synthetic.tif')}>
             Try synthetic DEM
           </button>
         </div>
       </div>
+      <JobStatus job={job} onCancel={job.cancel} />
 
-      {result && image && (
+      {result && out && image && (
         <div className="result-block">
           <div className="stat-grid">
             <Stat label="Elevation range" value={`${elevationM(result.elevation.min, units)} – ${elevationM(result.elevation.max, units)}`} />
@@ -279,7 +216,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
             ))}
           </div>
           <figure className="raster-figure">
-            <RgbaCanvas rgba={image} width={result.width} height={result.height} label={`${layer} of ${result.filename}`} onPick={layer === 'flow' ? pickOutlet : undefined} />
+            <ArtifactImage url={image} width={result.width} height={result.height} label={`${layer} of ${result.filename}`} onPick={layer === 'flow' ? pickOutlet : undefined} />
             {layer === 'flow' && <figcaption className="field-hint">Streams are blue (darker = higher Strahler order). Click a stream to outline the watershed draining to that point.</figcaption>}
             {layer === 'elevation' && (
               <figcaption className="legend-labels">
@@ -297,8 +234,8 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                 <span>Channel threshold (km²)</span>
                 <input id="terrain-threshold" type="number" step="0.1" min="0.01" value={thresholdKm2} onChange={e => setThresholdKm2(e.target.value)} />
               </label>
-              <button type="button" id="terrain-flow" className="btn" onClick={computeFlow} disabled={flowBusy}>
-                {flowBusy ? 'Routing flow…' : flow ? 'Recompute flow' : 'Compute flow & streams'}
+              <button type="button" id="terrain-flow" className="btn" onClick={computeFlow} disabled={busy}>
+                {job.busy === 'flow' ? 'Routing flow…' : flow ? 'Recompute flow' : 'Compute flow & streams'}
               </button>
               <label className="param">
                 <span>Contour interval (m)</span>
@@ -310,9 +247,9 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
             </div>
             {flow && (
               <div className="stat-grid">
-                <Stat label="Highest stream order" value={String(flow.maxOrder)} />
-                <Stat label="Channel length" value={`${fmt(flow.lengthByOrder.reduce((a, b) => a + b, 0) / 1000, 4)} km`} />
-                {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt((basin.areaM2 / 1e4) * ACRES_PER_HA / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
+                <Stat label="Highest stream order" value={String(flow.flow.maxOrder)} />
+                <Stat label="Channel length" value={`${fmt(flow.flow.lengthByOrder.reduce((a, b) => a + b, 0) / 1000, 4)} km`} />
+                {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt(((basin.areaM2 / 1e4) * ACRES_PER_HA) / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
                 {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
               </div>
             )}
@@ -323,51 +260,41 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                   id="watershed-boundary"
                   className="btn btn-primary"
                   onClick={() => {
-                    const fc = basinPolygon();
-                    const b = fc && makeBoundary(`Watershed of ${result.filename}`, fc, basin.areaM2);
-                    if (!b) {
-                      notify('This DEM’s CRS cannot be turned into a boundary polygon.', 'error');
-                      return;
-                    }
-                    onBoundary(b);
+                    if (!basin.geojson) return fail('This DEM’s CRS cannot be turned into a boundary polygon.');
+                    onBoundary({ name: `Watershed of ${result.filename}`, geojson: basin.geojson as Boundary['geojson'], areaM2: basin.areaM2 });
                     notify('The watershed is now the analysis boundary.', 'success');
                   }}
                 >
                   Use watershed as analysis boundary
                 </button>
               )}
-              {basin && (
-                <button type="button" className="btn btn-small" onClick={() => { const fc = basinPolygon(); if (fc) downloadText(JSON.stringify(fc), `${base}_watershed.geojson`, 'application/geo+json'); }}>
+              {basin?.geojson && (
+                <button type="button" className="btn btn-small" onClick={() => downloadText(JSON.stringify(basin.geojson), `${base}_watershed.geojson`, 'application/geo+json')}>
                   Export watershed
                 </button>
               )}
-              {flow && raster && (
-                <button type="button" className="btn btn-small" onClick={() => { const fc = streamLines(flow, raster.meta); if (fc) downloadText(JSON.stringify(fc), `${base}_streams.geojson`, 'application/geo+json'); else notify('Streams need a WGS84, Web Mercator or UTM DEM.', 'error'); }}>
-                  Export streams
-                </button>
-              )}
-              {raster && (
-                <button
-                  type="button"
-                  id="terrain-export-contours"
-                  className="btn btn-small"
-                  onClick={() => {
-                    const out = contoursGeoJson(demGrid(result), raster.meta, Number(interval));
-                    if (!out) notify('Contours need a WGS84, Web Mercator or UTM DEM.', 'error');
-                    else if (!out.fc.features.length) notify('No contours at that interval.');
-                    else downloadText(JSON.stringify(out.fc), `${base}_contours_${interval}m.geojson`, 'application/geo+json');
-                  }}
-                >
-                  Export contours
-                </button>
-              )}
+              <Downloads idPrefix="terrain-streams" items={flow?.downloads} ids={['terrain-export-streams']} />
+              <button
+                type="button"
+                id="terrain-export-contours"
+                className="btn btn-small"
+                disabled={busy}
+                onClick={async () => {
+                  const c = await loadContours(Number(interval));
+                  if (!c) return;
+                  if (!c.geojson.features.length) notify('No contours at that interval.');
+                  else downloadText(JSON.stringify(c.geojson), c.downloads[0]?.filename ?? `${base}_contours_${interval}m.geojson`, 'application/geo+json');
+                }}
+              >
+                Export contours
+              </button>
             </div>
           </section>
 
           <div className="two-col">
             <div className="class-bars">
               <div className="eyebrow">Slope classes (descriptive)</div>
-              {SLOPE_CLASSES.map((c, i) => (
+              {out.slopeClasses.map((c, i) => (
                 <div key={c.label} className="class-row">
                   <span className="class-swatch" style={{ background: c.color }} aria-hidden="true" />
                   <span className="class-name">{c.label}</span>
@@ -380,7 +307,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
             </div>
             <div className="class-bars">
               <div className="eyebrow">Aspect of non-flat slopes</div>
-              {ASPECTS.map((a, i) => (
+              {out.aspects.map((a, i) => (
                 <div key={a} className="class-row aspect-row">
                   <span className="class-name">{a}</span>
                   <span className="class-bar-track">
@@ -393,7 +320,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
           </div>
 
           <ul className="hint-list">
-            {[...result.notes, ...(raster?.meta.warnings ?? [])].map(n => (
+            {[...result.notes, ...out.warnings].map(n => (
               <li key={n}>{n}</li>
             ))}
           </ul>

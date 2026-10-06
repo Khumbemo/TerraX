@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { backToTools, openTool, start } from './helpers';
+import { backToTools, mapState, openTool, start } from './helpers';
 
 test('analysis boundary clips the forest analysis and can be cleared', async ({ page }) => {
   const errors = await start(page);
@@ -49,8 +49,8 @@ test('draw, edit and export a plot on the map', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Land survey');
   await page.click('#draw-start');
-  const map = page.locator('.leaflet-container');
-  await expect(map).toHaveClass(/drawing/);
+  const map = page.locator('.maplibregl-canvas');
+  await expect(map).toHaveCSS('cursor', 'crosshair');
   await map.click({ position: { x: 80, y: 120 } });
   await map.click({ position: { x: 220, y: 110 } });
   await map.click({ position: { x: 300, y: 300 } });
@@ -95,17 +95,17 @@ test('map layers panel: result overlay, opacity and legend', async ({ page }) =>
   await openTool(page, 'Terrain');
   await page.click('button:has-text("Try synthetic DEM")');
   await expect(page.locator('.report-card')).toContainText('Hypsometric integral');
-  const overlay = page.locator('img.leaflet-image-layer');
-  await expect(overlay).toHaveCount(1);
+  const overlay = () => mapState<{ shown: boolean; opacity: number } | null>(page, `m => m.getLayer('tx-image-r') ? { shown: true, opacity: m.getPaintProperty('tx-image-r', 'raster-opacity') } : { shown: false, opacity: 0 }`);
+  await expect.poll(async () => (await overlay())?.shown).toBe(true);
   await page.click('.map-layers-toggle');
   const panel = page.locator('#map-layers-panel');
   await expect(panel).toContainText('Slope classes');
   await expect(panel.locator('.map-legend')).toContainText('Steep (15–30°)');
   await page.locator('#layer-opacity').fill('0.4');
-  await expect(overlay).toHaveCSS('opacity', '0.4');
+  await expect.poll(async () => (await overlay())?.opacity).toBe(0.4);
   await page.uncheck('#layer-image');
-  await expect(overlay).toHaveCount(0);
+  await expect.poll(async () => (await overlay())?.shown).toBe(false);
   await page.check('#layer-image');
-  await expect(overlay).toHaveCount(1);
+  await expect.poll(async () => (await overlay())?.shown).toBe(true);
   expect(errors).toEqual([]);
 });

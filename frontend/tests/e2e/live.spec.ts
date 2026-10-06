@@ -1,35 +1,39 @@
-import { expect, test, type Route } from '@playwright/test';
-import { writeArrayBuffer } from 'geotiff';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 import { openTool, start } from './helpers';
 
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges' };
+// The TerraX server fetches Open-Meteo, NASA POWER and Earth Search itself (tested with
+// pytest on recorded responses). Here the browser-facing /api/live endpoints and the
+// Sentinel-2 job are mocked, and everything after them runs on the real API.
 
-async function preflight(route: Route): Promise<boolean> {
-  if (route.request().method() !== 'OPTIONS') return false;
-  await route.fulfill({ status: 204, headers: CORS });
-  return true;
+async function upload(request: APIRequestContext, name: string, body: Buffer, mimeType: string) {
+  const r = await request.post('/api/files', { multipart: { file: { name, mimeType, buffer: body } } });
+  expect(r.ok()).toBeTruthy();
+  return r.json();
 }
 
-test('weather: fetch ERA5 daily data (mocked Open-Meteo) and analyse it', async ({ page }) => {
+test('weather: fetched ERA5 daily data is analysed', async ({ page, request }) => {
   const errors = await start(page);
-  let requested = '';
-  await page.route('https://archive-api.open-meteo.com/**', async route => {
-    if (await preflight(route)) return;
-    requested = route.request().url();
-    const time: string[] = [], rain: number[] = [], temp: number[] = [];
-    for (let d = 0; d < 800; d++) {
-      const t = new Date(Date.UTC(2022, 0, 1) + d * 86_400_000);
-      time.push(t.toISOString().slice(0, 10));
-      rain.push(d % 3 ? 0 : 6.5);
-      temp.push(15 + 8 * Math.sin((d / 365) * 2 * Math.PI));
-    }
-    await route.fulfill({ headers: CORS, contentType: 'application/json', body: JSON.stringify({ latitude: 25.68, longitude: 94.1, elevation: 1431, daily_units: { time: 'iso8601', precipitation_sum: 'mm', temperature_2m_mean: '°C' }, daily: { time, precipitation_sum: rain, temperature_2m_mean: temp } }) });
+  const rows = ['date,precipitation_sum (mm),temperature_2m_mean (°C)'];
+  for (let d = 0; d < 800; d++) {
+    const t = new Date(Date.UTC(2022, 0, 1) + d * 86_400_000).toISOString().slice(0, 10);
+    rows.push(`${t},${d % 3 ? 0 : 6.5},${(15 + 8 * Math.sin((d / 365) * 2 * Math.PI)).toFixed(2)}`);
+  }
+  const file = await upload(request, 'open-meteo_era5_25.674_94.108_2022-01-01_2024-03-10.csv', Buffer.from(rows.join('\n')), 'text/csv');
+  let sent: Record<string, unknown> = {};
+  await page.route('**/api/live/weather', async route => {
+    sent = JSON.parse(route.request().postData() ?? '{}');
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ file, note: 'Open-Meteo Historical Weather API (ERA5/ERA5-Land reanalysis), grid cell centred near 25.680°, 94.100°.' }) });
   });
   await openTool(page, 'Weather & climate');
   await page.locator('summary', { hasText: 'Fetch data for a location' }).click();
   await page.click('#live-fetch');
   await expect(page.locator('.core-analysis-module')).toContainText('open-meteo_era5_25.674_94.108');
-  expect(new URL(requested).searchParams.get('daily')).toBe('precipitation_sum,temperature_2m_mean');
+  expect(sent.vars).toEqual(['precipitation_sum', 'temperature_2m_mean']);
+  expect(sent.source).toBe('open-meteo');
   await expect(page.locator('.data-notes')).toContainText('Open-Meteo Historical Weather API');
   await expect(page.locator('.report-card')).toContainText('Rainy days');
   await page.click('button[role=tab]:has-text("Anomalies")');
@@ -43,6 +47,7 @@ test('weather: long monthly sample gives SPI and a seasonal trend', async ({ pag
   const errors = await start(page);
   await openTool(page, 'Weather & climate');
   await page.click('button.chip:has-text("Monthly climate 1990–2024")');
+  await expect(page.locator('#metric-select')).toBeVisible();
   await page.selectOption('#metric-select', 'temperature_c');
   await page.click('button[role=tab]:has-text("Anomalies")');
   await expect(page.locator('#seasonal-kendall')).toContainText('increasing trend');
@@ -54,41 +59,35 @@ test('weather: long monthly sample gives SPI and a seasonal trend', async ({ pag
   expect(errors).toEqual([]);
 });
 
-test('satellite: search Sentinel-2 (mocked STAC and COGs) and load a masked NDVI window', async ({ page }) => {
+test('satellite: a Sentinel-2 window loads as a masked NDVI layer', async ({ page, request }) => {
   const errors = await start(page);
-  // Synthetic 10 m bands around Kohima (UTM 46N) and a 20 m SCL band with clouds on the west half.
-  const E0 = 609000, N0 = 2842000, W = 600;
-  const tif = async (w: number, res: number, f: (c: number) => number) => {
-    const data = new Uint16Array(w * w);
-    for (let r = 0; r < w; r++) for (let c = 0; c < w; c++) data[r * w + c] = f(c);
-    return Buffer.from(await writeArrayBuffer(data, { width: w, height: w, ModelPixelScale: [res, res, 0], ModelTiepoint: [0, 0, 0, E0, N0, 0], GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32646, BitsPerSample: [16], SampleFormat: [1], SamplesPerPixel: 1 }));
-  };
-  const files: Record<string, Buffer> = {
-    'B02.tif': await tif(W, 10, () => 1300),
-    'B03.tif': await tif(W, 10, () => 1600),
-    'B04.tif': await tif(W, 10, () => 1400),
-    'B08.tif': await tif(W, 10, () => 4400),
-    'SCL.tif': await tif(W / 2, 20, c => (c < W / 4 ? 9 : 4)),
-  };
-  await page.route('https://earth-search.aws.element84.com/v1/search', async route => {
-    if (await preflight(route)) return;
-    const body = JSON.parse(route.request().postData() ?? '{}');
-    expect(body.collections).toEqual(['sentinel-2-l2a']);
-    const asset = (f: string) => ({ href: `https://cogs.test/${f}`, 'raster:bands': [{ scale: 0.0001, offset: -0.1 }] });
-    await route.fulfill({
-      headers: CORS,
-      contentType: 'application/geo+json',
-      body: JSON.stringify({ type: 'FeatureCollection', features: [{ id: 'S2B_46RFQ_20240301_0_L2A', properties: { datetime: '2024-03-01T04:25:00Z', 'eo:cloud_cover': 4.1, 'proj:epsg': 32646 }, assets: { blue: asset('B02.tif'), green: asset('B03.tif'), red: asset('B04.tif'), nir: asset('B08.tif'), scl: { href: 'https://cogs.test/SCL.tif' } } }] }),
-    });
+  // A 5-band reflectance window as the server writes it (blue, green, red, NIR, SCL with clouds on the west half).
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-s2-'));
+  const path = join(dir, 'S2B_46RFQ_20240301_0_L2A.tif');
+  execFileSync('python3', ['-c', `
+import numpy as np, rasterio
+from rasterio.transform import from_origin
+w = 300
+b = [np.full((w, w), v, np.float32) for v in (0.03, 0.06, 0.04, 0.34)]
+scl = np.where(np.arange(w)[None, :].repeat(w, 0) < w // 2, 9, 4).astype(np.float32)
+with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height=w, count=5, dtype='float32', crs='EPSG:32646', transform=from_origin(609000, 2842000, 10, 10), nodata=float('nan')) as d:
+    for i, a in enumerate(b + [scl], 1):
+        d.write(a, i)
+`]);
+  const file = await upload(request, 'S2B_46RFQ_20240301_0_L2A.tif', readFileSync(path), 'image/tiff');
+  const item = { id: 'S2B_46RFQ_20240301_0_L2A', datetime: '2024-03-01T04:25:00Z', cloud: 4.1, epsg: 32646, assets: {}, processingBaseline: '05.10' };
+  await page.route('**/api/live/sentinel/search', async route => {
+    expect(JSON.parse(route.request().postData() ?? '{}').bbox).toHaveLength(4);
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [item] }) });
   });
-  await page.route('https://cogs.test/**', async route => {
-    if (await preflight(route)) return;
-    const buf = files[new URL(route.request().url()).pathname.slice(1)];
-    const range = route.request().headers()['range'];
-    const m = range?.match(/bytes=(\d+)-(\d*)/);
-    if (!m) return route.fulfill({ headers: { ...CORS, 'Accept-Ranges': 'bytes' }, body: buf });
-    const a = Number(m[1]), b = Math.min(buf.length - 1, m[2] ? Number(m[2]) : buf.length - 1);
-    await route.fulfill({ status: 206, headers: { ...CORS, 'Content-Range': `bytes ${a}-${b}/${buf.length}`, 'Accept-Ranges': 'bytes', 'Content-Type': 'image/tiff' }, body: buf.subarray(a, b + 1) });
+  await page.route('**/api/jobs', async route => {
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    if (route.request().method() !== 'POST' || body.tool !== 'sentinel') return route.fallback();
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ id: '0'.repeat(32), tool: 'sentinel', state: 'done', progress: 1, message: 'Done', result: { file, notes: ['Reflectance = DN × scale + offset from the STAC raster:bands metadata.'] } }),
+    });
   });
   await openTool(page, 'Satellite imagery');
   await page.locator('summary', { hasText: 'Search Sentinel-2 scenes' }).click();
@@ -96,7 +95,7 @@ test('satellite: search Sentinel-2 (mocked STAC and COGs) and load a masked NDVI
   await expect(page.locator('td', { hasText: 'S2B_46RFQ_20240301_0_L2A' })).toBeVisible();
   await page.click('button:has-text("Load")');
   await expect(page.locator('.core-analysis-module')).toContainText('S2B_46RFQ_20240301_0_L2A.tif');
-  // NDVI of (0.34 − 0.04) / (0.34 + 0.04) = 0.789 after the −0.1 offset.
+  // NDVI = (0.34 − 0.04) / (0.34 + 0.04) = 0.7895 on the clear half.
   await expect(page.locator('.report-card')).toContainText('0.7895');
   await expect(page.locator('.report-card')).toContainText('Quality mask from band 5');
   expect(errors).toEqual([]);

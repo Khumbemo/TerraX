@@ -58,10 +58,10 @@
 }
 :root[data-theme='light'] .map-layers-toggle,
 :root[data-theme='light'] .map-layers-panel,
-:root[data-theme='light'] .leaflet-container .leaflet-control-attribution {
+:root[data-theme='light'] .maplibregl-ctrl-attrib {
   background: rgba(255, 255, 255, 0.94);
 }
-:root[data-theme='light'] .leaflet-container {
+:root[data-theme='light'] .map-canvas {
   background: #dfe6ee;
 }
 :root[data-theme='light'] .data-notes,
@@ -682,8 +682,23 @@ select {
   overflow: hidden;
   border: 1px solid var(--line);
   position: relative;
-  /* Keep Leaflet's internal z-indexes (up to 1000) inside the map, below dialogs and toasts. */
+  /* Keep the map's own stacking inside it, below dialogs and toasts. */
   isolation: isolate;
+}
+.map-container > .map-canvas {
+  /* MapLibre's stylesheet makes its container position: relative; keep it filling the panel. */
+  position: absolute;
+  inset: 0;
+  background: #080d14;
+}
+.map-loading,
+.map-unavailable {
+  background: #080d14;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
 }
 .map-layers {
   position: absolute;
@@ -1001,13 +1016,10 @@ select {
 .raster-canvas.pickable {
   cursor: crosshair;
 }
-.pixelated-overlay {
-  image-rendering: pixelated;
-}
-.leaflet-container.drawing {
-  cursor: crosshair;
-}
 .vertex-handle {
+  width: 14px;
+  height: 14px;
+  cursor: grab;
   background: #f5b83d;
   border: 2px solid #0b1520;
   border-radius: 50%;
@@ -1046,16 +1058,67 @@ select {
     height: 280px;
   }
 }
-.leaflet-container {
-  background: #080d14;
+.maplibregl-map {
   font-family: var(--sans);
 }
-.leaflet-container .leaflet-control-attribution {
-  background: rgba(5, 10, 20, 0.75);
+.maplibregl-ctrl-attrib {
+  background: rgba(5, 10, 20, 0.75) !important;
   color: var(--muted);
 }
-.leaflet-container .leaflet-control-attribution a {
+.maplibregl-ctrl-attrib a {
   color: var(--accent);
+}
+.maplibregl-popup-content {
+  background: var(--panel, #0b1520);
+  color: var(--text, #dbe6f0);
+  font-size: 12px;
+  border: 1px solid var(--line);
+}
+:root[data-theme='light'] .maplibregl-popup-content {
+  background: #fff;
+  color: #1f2937;
+}
+.maplibregl-popup-tip {
+  border-top-color: var(--line) !important;
+  border-bottom-color: var(--line) !important;
+}
+.maplibregl-ctrl-scale {
+  background: rgba(5, 10, 20, 0.6);
+  color: var(--muted);
+  border-color: var(--muted);
+}
+.ramp-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.ramp-bar.viridis {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #440154, #482475, #414487, #355f8d, #2a788e, #21918c, #22a884, #44bf70, #7ad151, #bddf26, #fde725);
+}
+/* Server jobs */
+.job-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.job-bar {
+  flex: 0 0 160px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(56, 189, 248, 0.15);
+  overflow: hidden;
+}
+.job-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
 }
 .pixelated {
   image-rendering: pixelated;
@@ -2435,12 +2498,11 @@ details[open] > summary {
 }
 
 /* Built-in world maps */
-.pixelated-tiles canvas {
-  image-rendering: pixelated;
-}
 .place-label,
 .grid-label {
   pointer-events: none;
+  width: 0;
+  height: 0;
 }
 .place-label i {
   position: absolute;

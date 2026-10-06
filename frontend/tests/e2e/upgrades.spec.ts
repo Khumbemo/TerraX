@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { exifTiff, withExif } from '../fixtures/exif-builder';
-import { openTool, start } from './helpers';
+import { mapState, openTool, start } from './helpers';
 
 test('forest: burn severity, minimum mapping unit and polygon export', async ({ page }) => {
   const errors = await start(page);
@@ -32,7 +32,7 @@ test('terrain: streams, watershed boundary and contours', async ({ page }) => {
   expect(order).toBeGreaterThanOrEqual(2);
   await expect(page.locator('.report-card')).toContainText('Strahler');
   // Pick outlets along the bottom edge until one drains a sizeable basin.
-  const canvas = page.locator('canvas.raster-canvas.pickable');
+  const canvas = page.locator('img.raster-canvas.pickable');
   const box = (await canvas.boundingBox())!;
   const area = page.locator('.stat', { hasText: 'Watershed area' }).locator('.stat-value');
   let km2 = 0;
@@ -48,7 +48,7 @@ test('terrain: streams, watershed boundary and contours', async ({ page }) => {
   await expect(page.locator('.report-card')).toContainText('Limited to the analysis boundary');
 
   await page.check('#terrain-contours');
-  await expect(page.locator('.leaflet-overlay-pane path.leaflet-interactive').first()).toBeAttached();
+  await expect.poll(() => mapState<number>(page, `m => m.getSource('tx-features') ? m.getSource('tx-features').serialize().data.features.length : 0`)).toBeGreaterThan(0);
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#terrain-export-contours')]);
   expect(dl.suggestedFilename()).toMatch(/_contours_\d+m\.geojson$/);
   expect(errors).toEqual([]);
@@ -74,7 +74,7 @@ test('photos: EXIF location on the map and comparing two photos', async ({ page 
   await expect(page.locator('#photo-exif')).toContainText('Location from EXIF');
   await expect(page.locator('#photo-exif')).toContainText('2025-03-14');
   await expect(page.locator('.report-card')).toContainText('GPS 25.674200, 94.108600');
-  await expect(page.locator('.leaflet-overlay-pane path.leaflet-interactive')).toHaveCount(1);
+  await expect.poll(() => mapState<number>(page, `m => m.getSource('tx-features') ? m.getSource('tx-features').serialize().data.features.length : 0`)).toBe(1);
   const cover = await page.locator('.stat', { hasText: 'Vegetation cover' }).locator('.stat-value').innerText();
   expect(Number(cover.replace('%', ''))).toBeGreaterThan(40);
 
@@ -88,7 +88,7 @@ test('satellite: pixel inspector, stretch and a multi-date series', async ({ pag
   const errors = await start(page);
   await openTool(page, 'Satellite imagery');
   await page.click('button.chip:has-text("Synthetic 4-band scene")');
-  const preview = page.locator('.raster-grid canvas.raster-canvas');
+  const preview = page.locator('.raster-grid img.raster-canvas');
   await expect(preview).toBeVisible();
   await preview.click({ position: { x: 20, y: 20 } });
   await expect(page.locator('#pixel-inspector')).toContainText('B4');
@@ -121,6 +121,6 @@ test('land cover: classify, rename a class and export', async ({ page }) => {
   await expect(page.locator('.tabular-view tbody tr')).toHaveCount(3);
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export class table")')]);
   expect(dl.suggestedFilename()).toBe('satellite_4band_synthetic_landcover_classes.csv');
-  await expect(page.locator('img.leaflet-image-layer')).toHaveCount(1);
+  await expect.poll(() => mapState<boolean>(page, `m => !!m.getLayer('tx-image-r')`)).toBe(true);
   expect(errors).toEqual([]);
 });

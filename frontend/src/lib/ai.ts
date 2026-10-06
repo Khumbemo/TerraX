@@ -1,21 +1,25 @@
-// Chooses how to reach Gemini:
-//  1. "own-key": the user saved their own API key in Settings (kept in this
-//     browser only) — calls go straight from the browser to Google.
-//  2. "server": the TerraX server has GEMINI_API_KEY set — calls go through
-//     /api, and the key never reaches the browser.
-//  3. "off": neither is available — the app uses computed statistics only.
-import { DEFAULT_MODEL, describeGeminiError, type GenerateRequest, type GenerateResult } from './gemini-shared';
+// AI through the TerraX server (Python agents, google-genai):
+//  1. "own-key": the user saved their own Gemini key in Settings (kept in this
+//     browser); it is sent with each AI request and the server passes it to
+//     Google without storing it.
+//  2. "server": the TerraX server has GEMINI_API_KEY set.
+//  3. "off": neither; the built-in assistant (no AI model) answers.
+import { request } from './api';
 import { getItem, removeItem, setItem } from './storage';
 
 export type AiMode = 'own-key' | 'server' | 'off';
 
-export class AiUnavailableError extends Error {
-  constructor() {
-    super('AI is not set up. Add your Gemini API key in Settings, or set GEMINI_API_KEY on the TerraX server.');
-  }
+export const DEFAULT_MODEL = 'gemini-2.5-flash';
+
+export interface ChatTurn {
+  role: 'user' | 'model';
+  text: string;
 }
 
-const apiUrl = (path: string) => new URL(`api/${path}`, document.baseURI).toString();
+export interface Source {
+  title: string;
+  uri: string;
+}
 
 export function getOwnKey(): string {
   return getItem('api_key') ?? '';
@@ -38,22 +42,9 @@ export function setModel(model: string): void {
 let serverStatus: Promise<boolean> | null = null;
 
 async function serverConfigured(): Promise<boolean> {
-  if (__TERRAX_PREVIEW__) return false;
-  if (!serverStatus) {
-    serverStatus = (async () => {
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(apiUrl('ai/status'), { signal: ctrl.signal });
-        clearTimeout(timer);
-        if (!res.ok) return false;
-        const json = await res.json();
-        return json?.configured === true;
-      } catch {
-        return false;
-      }
-    })();
-  }
+  serverStatus ??= request<{ configured: boolean }>('/api/agents/status')
+    .then(j => j.configured === true)
+    .catch(() => false);
   return serverStatus;
 }
 
@@ -67,31 +58,38 @@ export function refreshAiStatus(): void {
   serverStatus = null;
 }
 
-export async function generate(req: Omit<GenerateRequest, 'model'>): Promise<GenerateResult> {
-  const mode = await getAiMode();
-  const request: GenerateRequest = { ...req, model: getModel() };
-  if (mode === 'own-key') {
-    const core = await import('./gemini-core');
-    try {
-      return await core.generateWithGemini(getOwnKey(), request);
-    } catch (err) {
-      throw new Error(describeGeminiError(err));
-    }
-  }
-  if (mode === 'server') {
-    let res: Response;
-    try {
-      res = await fetch(apiUrl('ai/generate'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-    } catch {
-      throw new Error('Could not reach the TerraX server. Check your connection and try again.');
-    }
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.error || `The AI request failed (HTTP ${res.status}).`);
-    return json as GenerateResult;
-  }
-  throw new AiUnavailableError();
+const keyHeader = (): Record<string, string> => (getOwnKey() ? { 'X-Gemini-Key': getOwnKey() } : {});
+
+export interface ChatRequest {
+  agent: 'guide' | 'results';
+  question: string;
+  history: ChatTurn[];
+  target: { lat: number; lon: number; name: string };
+  operator?: string;
+  results?: { toolName: string; name: string; markdown: string; extraContext?: string; fileId?: string; focus?: string | null };
+  /** The built-in assistant's memory from its previous reply. */
+  state: Record<string, unknown>;
+}
+
+export interface ChatResponse {
+  text: string;
+  sources: Source[];
+  suggestions: string[];
+  state: Record<string, unknown>;
+  engine: 'gemini' | 'built-in';
+  model?: string;
+}
+
+/** One assistant turn: Gemini when available, otherwise (or when it fails) the built-in assistant. */
+export function chat(req: ChatRequest): Promise<ChatResponse> {
+  return request<ChatResponse>('/api/agents/chat', {
+    method: 'POST',
+    headers: keyHeader(),
+    json: { ...req, history: req.history.slice(-8), tzOffsetMinutes: -new Date().getTimezoneOffset(), model: getModel() },
+  });
+}
+
+/** A short AI interpretation of a report. */
+export function interpret(toolName: string, markdown: string, extraContext?: string): Promise<{ text: string; model: string; sources: Source[] }> {
+  return request('/api/agents/interpret', { method: 'POST', headers: keyHeader(), json: { toolName, markdown, extraContext, model: getModel() } });
 }

@@ -6,28 +6,25 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import ChatPanel, { type ChatReply } from './components/ChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import LiveTelemetryDock from './components/LiveTelemetryDock';
-import MapPanel, { type DrawState } from './components/MapPanel';
+import type { DrawState } from './components/map/MapController';
 import PlanetaryTelemetry from './components/PlanetaryTelemetry';
 import ReportPanel from './components/ReportPanel';
 import SessionGate from './components/SessionGate';
 import type { Target } from './components/SettingsModal';
 import ToolHub from './components/ToolHub';
-import { AiUnavailableError, generate, getAiMode, type AiMode } from './lib/ai';
-import { analyzeMetric, numericColumns } from './lib/analysis';
+import { chat, getAiMode, type AiMode, type ChatTurn } from './lib/ai';
 import { downloadText, safeFilename } from './lib/download';
-import type { ChatTurn } from './lib/gemini-shared';
-import { OfflineAssistant, STARTER_SUGGESTIONS, type AssistantContext } from './lib/assistant/engine';
-import { DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT } from './lib/guide';
 import { usePrefs } from './lib/prefs';
 import { buildProject, mergeReports, parseProject } from './lib/project';
 import { loadReports, saveReports } from './lib/reports';
 import { getJSON, removeItem, setJSON } from './lib/storage';
 import { useToast } from './lib/toast';
 import { toolInfo, type ToolId, type ToolOutput } from './lib/tools/registry';
-import type { Dataset, ReportRecord } from './lib/types';
+import type { ReportRecord } from './lib/types';
 import type { Boundary } from './lib/zonal';
 
 // Tools and rarely needed views load on demand to keep the first load small.
+const MapPanel = lazy(() => import('./components/MapPanel'));
 const ForestLossTool = lazy(() => import('./components/tools/ForestLossTool'));
 const ResidentialPlotTool = lazy(() => import('./components/tools/ResidentialPlotTool'));
 const CarbonTool = lazy(() => import('./components/tools/CarbonTool'));
@@ -44,7 +41,7 @@ import SpaceBackground from './components/SpaceBackground';
 const AI_MODE_TEXT: Record<AiMode, string> = {
   'own-key': 'AI on: using your API key from this browser',
   server: 'AI on: using the TerraX server',
-  off: 'AI off: statistics only',
+  off: 'AI off: built-in assistant only',
 };
 
 const Loading = () => <div className="loading-block">Loading…</div>;
@@ -53,31 +50,7 @@ const DEFAULT_TARGET: Target = { lat: 25.674, lon: 94.108, name: 'Kohima' };
 
 type View = 'explore' | 'reports';
 
-function summaryJson(ds: Dataset) {
-  if (ds.kind === 'raster') {
-    const { preview: _preview, ...rest } = ds;
-    return rest;
-  }
-  return {
-    filename: ds.filename,
-    format: ds.format,
-    records: ds.rows.length,
-    timeColumn: ds.timeColumn,
-    intervalDays: ds.intervalDays,
-    columns: ds.columns,
-    warnings: ds.warnings,
-    variables: numericColumns(ds).map(c => {
-      const a = analyzeMetric(ds, c);
-      return {
-        column: c,
-        summary: a.summary,
-        trend: a.trend,
-        period: ds.times ? { start: a.start, end: a.end } : null,
-        classes: { basis: a.classification.basis, note: a.classification.note, counts: a.classification.buckets.map((b, i) => ({ class: b.label, count: a.classCounts[i] })) },
-      };
-    }),
-  };
-}
+const STARTER_SUGGESTIONS = ['What can you do?', 'How do I estimate forest loss?', 'How do I measure a plot?', 'What is NDVI?'];
 
 export default function App() {
   const notify = useToast();
@@ -202,60 +175,37 @@ export default function App() {
     setJSON('target', t);
   };
 
-  // Offline assistants keep short-term memory (last topic) per chat.
-  const guideBot = useRef(new OfflineAssistant('guide'));
-  const resultsBot = useRef(new OfflineAssistant('results'));
-  useEffect(() => resultsBot.current.reset(), [output?.tool, output?.name]);
+  // The built-in assistant keeps a little memory (last topic) per chat; the server sends it back with each reply.
+  const guideState = useRef<Record<string, unknown>>({});
+  const resultsState = useRef<Record<string, unknown>>({});
+  useEffect(() => {
+    resultsState.current = {};
+  }, [output?.tool, output?.name]);
 
-  const assistantContext = useCallback(
-    (): AssistantContext => ({
-      operator: session?.operator,
-      target,
-      results: output ? { toolName: toolInfo(output.tool).name, name: output.name, markdown: output.markdown, dataset: output.dataset, focus: output.focus } : undefined,
-    }),
-    [session, target, output],
-  );
-
-  /** Offline answer, noting when AI was on but failed. */
-  const offline = (bot: OfflineAssistant, question: string, aiError?: unknown): ChatReply => {
-    const r = bot.reply(question, assistantContext());
-    const note = aiError ? `_The AI request failed (${aiError instanceof Error ? aiError.message : 'unknown error'}), so this is the offline answer._\n\n` : '';
-    return { text: note + r.text, suggestions: r.suggestions };
-  };
-
-  const askData = useCallback(
-    async (question: string, history: ChatTurn[]): Promise<ChatReply> => {
-      try {
-        const context = output ? `Tool: ${toolInfo(output.tool).name}\n\n${output.extraContext ?? output.markdown}` : 'No results yet.';
-        const result = await generate({
-          systemInstruction: `${DATA_SYSTEM_PROMPT}\n\n# Results\n${context}`,
-          turns: [...history.slice(-8), { role: 'user', text: question }],
-          useSearch: true,
-          temperature: 0.4,
-        });
-        return { text: result.text, sources: result.sources };
-      } catch (err) {
-        return offline(resultsBot.current, question, err instanceof AiUnavailableError ? undefined : err);
-      }
+  const ask = useCallback(
+    async (agent: 'guide' | 'results', question: string, history: ChatTurn[]): Promise<ChatReply> => {
+      const state = agent === 'guide' ? guideState : resultsState;
+      const r = await chat({
+        agent,
+        question,
+        history,
+        target,
+        operator: session?.operator,
+        results: agent === 'results' && output ? { toolName: toolInfo(output.tool).name, name: output.name, markdown: output.markdown, extraContext: output.extraContext, fileId: output.fileId, focus: output.focus } : undefined,
+        state: state.current,
+      });
+      state.current = r.state;
+      return { text: r.text, sources: r.sources, suggestions: r.suggestions };
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [output, assistantContext],
+    [target, session, output],
   );
-
-  const askGuide = useCallback(async (question: string, history: ChatTurn[]): Promise<ChatReply> => {
-    try {
-      const result = await generate({ systemInstruction: GUIDE_SYSTEM_PROMPT, turns: [...history.slice(-8), { role: 'user', text: question }], useSearch: true });
-      return { text: result.text, sources: result.sources };
-    } catch (err) {
-      return offline(guideBot.current, question, err instanceof AiUnavailableError ? undefined : err);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistantContext]);
+  const askData = useCallback((q: string, h: ChatTurn[]) => ask('results', q, h), [ask]);
+  const askGuide = useCallback((q: string, h: ChatTurn[]) => ask('guide', q, h), [ask]);
 
   const exportSummary = async () => {
-    if (!output?.dataset) return;
+    if (!output?.summary) return;
     try {
-      await downloadText(JSON.stringify(summaryJson(output.dataset), null, 2), `TerraX_${safeFilename(output.dataset.filename)}_summary.json`, 'application/json');
+      await downloadText(JSON.stringify(output.summary, null, 2), `TerraX_${safeFilename(output.name)}_summary.json`, 'application/json');
     } catch (err) {
       notify(err instanceof Error ? err.message : 'The download failed.', 'error');
     }
@@ -307,11 +257,6 @@ export default function App() {
         </div>
       </header>
 
-      {__TERRAX_PREVIEW__ && (
-        <div className="preview-banner" role="note">
-          Preview build: this sandbox blocks map tiles, live space weather and AI, and downloads ask for confirmation. Everything else works. Run TerraX locally for the full app.
-        </div>
-      )}
 
       {settings.open && (
         <Suspense fallback={null}>
@@ -359,6 +304,7 @@ export default function App() {
           ) : (
             <>
               <ErrorBoundary area="Map" inline>
+                <Suspense fallback={<div className="map-container map-loading" aria-busy="true" />}>
                 <MapPanel
                   target={target}
                   bounds={output?.map?.bounds ?? null}
@@ -367,6 +313,7 @@ export default function App() {
                   boundary={boundary}
                   draw={draw}
                 />
+                </Suspense>
               </ErrorBoundary>
 
               {!tool || !info ? (
@@ -382,7 +329,7 @@ export default function App() {
                         <div className="eyebrow">{t(`tool.${info.id}.group`, info.group)}</div>
                         <h2 data-name={info.name}>{t(`tool.${info.id}.name`, info.name)}</h2>
                       </div>
-                      {output?.dataset && (
+                      {output?.summary != null && (
                         <button type="button" className="btn btn-small push-right" onClick={exportSummary}>
                           Export summary (JSON)
                         </button>
@@ -418,7 +365,7 @@ export default function App() {
                         key={`chat-${output.tool}-${output.name}`}
                         id="dataset-chat"
                         title="Results assistant"
-                        greeting={`Ask about these ${info.name.toLowerCase()} results for ${output.name}.${aiMode === 'off' ? ' AI is off, so answers come from the computed results.' : ''}`}
+                        greeting={`Ask about these ${info.name.toLowerCase()} results for ${output.name}.${aiMode === 'off' ? ' AI is off, so the built-in assistant answers from the computed results.' : ''}`}
                         placeholder="Ask about these results"
                         onAsk={askData}
                         starters={['Summarise the results', 'How was this calculated?', 'How reliable is this?']}
@@ -436,7 +383,7 @@ export default function App() {
             id="guide-chat"
             variant="guide"
             title="OS Guide"
-            greeting={`Hi${session.operator ? ` ${session.operator.split(/\s+/)[0]}` : ''}! I’m the TerraX assistant. Ask me about the tools, remote-sensing terms, area units or sun times${aiMode === 'off' ? '. I work offline; add a Gemini key in Settings for open-ended questions' : ''}.`}
+            greeting={`Hi${session.operator ? ` ${session.operator.split(/\s+/)[0]}` : ''}! I’m the TerraX assistant. Ask me about the tools, remote-sensing terms, area units or sun times${aiMode === 'off' ? '; for open-ended questions add a Gemini key in Settings' : ''}.`}
             placeholder="Ask about TerraX"
             onAsk={askGuide}
             starters={STARTER_SUGGESTIONS}

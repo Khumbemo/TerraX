@@ -1,5 +1,6 @@
 // Figures for PDF reports: the tool's result map and the charts on screen,
 // rendered to PNG in the browser.
+import { apiUrl } from './api';
 import type { ToolOutput } from './tools/registry';
 
 export interface ReportFigure {
@@ -16,6 +17,7 @@ const CHART_BG = '#0b1520';
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('Could not render a figure.'));
     img.src = src;
@@ -62,13 +64,17 @@ function chartTitle(svg: Element): string {
 /** Collects the result map and up to four on-screen charts from the tool workspace. */
 export async function collectFigures(output: ToolOutput, root: ParentNode = document): Promise<ReportFigure[]> {
   const figs: ReportFigure[] = [];
-  const img = output.map?.image;
-  if (img) {
+  const pictures = [
+    ...(output.map?.image ? [{ title: `Map: ${output.map.image.label}${output.map.image.legend.length ? ` (${output.map.image.legend.map(l => l.label).join(', ')})` : ''}`, url: output.map.image.url }] : []),
+    ...(output.figures ?? []).filter(f => f.url !== output.map?.image?.url),
+  ];
+  for (const p of pictures.slice(0, 4)) {
     try {
-      const el = await loadImage(img.url);
-      figs.push({ title: `Map: ${img.label}${img.legend.length ? ` (${img.legend.map(l => l.label).join(', ')})` : ''}`, dataUrl: await toPng(img.url, el.naturalWidth, el.naturalHeight, null, 4), width: el.naturalWidth, height: el.naturalHeight });
+      const src = apiUrl(p.url);
+      const el = await loadImage(src);
+      figs.push({ title: p.title, dataUrl: await toPng(src, el.naturalWidth, el.naturalHeight, null, 4), width: el.naturalWidth, height: el.naturalHeight });
     } catch {
-      /* skip a figure that cannot be rendered */
+      /* skip a figure that cannot be rendered (e.g. an expired result) */
     }
   }
   const svgs = Array.from(root.querySelectorAll<SVGSVGElement>('.tool-workspace svg.recharts-surface')).slice(0, MAX_CHARTS);

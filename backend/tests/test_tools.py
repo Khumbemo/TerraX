@@ -103,3 +103,14 @@ def test_residential_geo(client):
     assert res["comparison"]["from"] == "Plot 2019" and len(res["timeline"]) == 2
     assert any(p["zone"] == "crossing" for p in res["comparison"]["patches"])
     assert res["downloads"] and client.get(res["downloads"][0]["url"]).json()["features"]
+
+
+def test_terrain_and_raster_with_boundary(client):
+    """Cells outside the boundary are no data; every layer must still render."""
+    bnd = run(client, "survey", {"file": sample(client, "survey_plot_synthetic.geojson")})["boundary"]
+    t = run(client, "terrain", {"dem": sample(client, "terrain_dem_synthetic.tif")}, {"boundary": bnd})
+    assert "Limited to the analysis boundary" in t["markdown"]
+    for url in t["layers"].values():
+        assert client.get(url).status_code == 200
+    h = run(client, "hydrology", {"dem": sample(client, "terrain_dem_synthetic.tif")}, {"boundary": bnd})
+    assert h["flow"]["maxOrder"] >= 1 and "## Hydrology" in h["markdown"]

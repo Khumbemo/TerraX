@@ -24,10 +24,11 @@ export async function backToTools(page: Page) {
 export async function chat(page: Page, chatId: string, message: string): Promise<string> {
   const inputId = `${chatId}-input`;
   const panel = page.locator('section.chat-panel', { has: page.locator(`#${inputId}`) });
-  const before = await panel.locator('.bot-style').count();
+  const answers = panel.locator('.bot-style:not(.typing)');
+  const before = await answers.count();
   await page.fill(`#${inputId}`, message);
   await page.press(`#${inputId}`, 'Enter');
-  const reply = panel.locator('.bot-style').nth(before);
+  const reply = answers.nth(before);
   await expect(reply).toBeVisible();
   return reply.innerText();
 }
@@ -90,4 +91,9 @@ export function shapefileZip(): Buffer {
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, cd, end]);
+}
+
+/** The page's MapLibre map (exposed as window.__terraxMap) for checks on layers and sources. */
+export async function mapState<T>(page: Page, fn: string): Promise<T> {
+  return page.evaluate(`(() => { const map = window.__terraxMap; if (!map) return null; return (${fn})(map); })()`) as Promise<T>;
 }

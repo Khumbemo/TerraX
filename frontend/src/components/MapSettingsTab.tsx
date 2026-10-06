@@ -24,7 +24,6 @@ export default function MapSettingsTab() {
         <h3>Map</h3>
         <p className="field-hint">Choose one base map and stack any number of overlays on top, each with its own opacity. The same controls are in the map’s Layers panel.</p>
         <MapChooser idPrefix="settings-map" />
-        {__TERRAX_PREVIEW__ && <p className="notice">This preview runs in a sandbox that blocks map servers, so online maps will not load here. The built-in maps and science layers (the first two groups) work everywhere, including here and offline. Run TerraX locally to use the online maps.</p>}
       </section>
 
       <section>

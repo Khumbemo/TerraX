@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { rasterPmtiles } from '../fixtures/pmtiles-builder';
-import { start } from './helpers';
+import { mapState, start } from './helpers';
 
 // 1×1 PNG: tile servers are simulated, since tests must not depend on the internet.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -48,7 +48,7 @@ test('choose base maps and stack overlays from Settings and the Layers panel', a
   await expect.poll(() => requested.some(u => /gibs\.earthdata\.nasa\.gov\/wmts\/epsg3857\/best\/VIIRS_Black_Marble\/default\/2016-01-01\/GoogleMapsCompatible_Level8\/\d+\/\d+\/\d+\.png$/.test(u))).toBe(true);
   await expect.poll(() => requested.some(u => /dark_only_labels/.test(u))).toBe(true);
   // Overlay opacity is applied to its layer without rebuilding.
-  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.leaflet-tile-pane .leaflet-layer')].map(e => e.style.opacity))).toContain('0.3');
+  await expect.poll(() => mapState<number>(page, `m => m.getLayer('tx-ov:gibs-blackmarble-r') && m.getPaintProperty('tx-ov:gibs-blackmarble-r', 'raster-opacity')`)).toBe(0.3);
   // Same choices from the map's Layers panel.
   await page.click('.map-layers-toggle');
   await expect(page.locator('#layers-map-base')).toHaveValue('osm');
@@ -92,12 +92,9 @@ test('vector maps (OpenFreeMap), custom WMS and a local Protomaps file', async (
   const requested = await mockTiles(page);
   const errors = await start(page);
   await page.click('.map-layers-toggle');
-  // MapLibre's web worker must be served by the app; a missing worker used to fail only after the map reported success.
-  const workerLoaded = page.waitForResponse(r => /maplibre-gl-worker-[\w-]+\.js$/.test(r.url()) && r.status() === 200 && r.request().resourceType() !== 'document');
   await page.selectOption('#layers-map-base', 'ofm-liberty');
-  await workerLoaded;
   await expect.poll(() => requested.includes('https://tiles.openfreemap.org/styles/liberty')).toBe(true);
-  await expect(page.locator('.leaflet-gl-layer, canvas.maplibregl-canvas').first()).toBeAttached({ timeout: 15_000 });
+  await expect.poll(() => mapState<boolean>(page, `m => m.isStyleLoaded() && !!m.getLayer('plot')`), { timeout: 15_000 }).toBe(true);
   await expect(page.locator('.map-status')).toHaveCount(0);
 
   await page.click('#nav-settings');
@@ -110,8 +107,8 @@ test('vector maps (OpenFreeMap), custom WMS and a local Protomaps file', async (
   await page.selectOption('#settings-map-base', 'protomaps');
   await page.keyboard.press('Escape');
   await expect.poll(() => requested.some(u => u.startsWith('https://wms.example.org/wms?') && /layers=india_lulc/i.test(u) && /request=GetMap/i.test(u))).toBe(true);
-  // The PMTiles raster tile is shown as a blob image in the tile pane.
-  await expect(page.locator('.leaflet-tile-pane img[src^="blob:"]').first()).toBeAttached({ timeout: 15_000 });
+  // The PMTiles raster extract is drawn as the base layer, read through the pmtiles:// protocol.
+  await expect.poll(() => mapState<string>(page, `m => m.getSource('tx-base')?.url ?? ''`), { timeout: 15_000 }).toBe('pmtiles://world.pmtiles');
   await expect(page.locator('.map-status')).toHaveCount(0);
 
   // A file that is not PMTiles gives a clear message.

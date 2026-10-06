@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { DEFAULT_MODEL } from '../lib/gemini-shared';
+import { DEFAULT_MODEL } from '../lib/ai';
 import { getAiMode, getModel, getOwnKey, refreshAiStatus, setModel, setOwnKey, type AiMode } from '../lib/ai';
 import { useToast } from '../lib/toast';
 import { idbSet } from '../lib/idb';
@@ -209,9 +209,6 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                   <p className="status-line">
                     Status: <strong>{mode ? AI_MODE_TEXT[mode] : 'Checking…'}</strong>
                   </p>
-                  {__TERRAX_PREVIEW__ && (
-                    <p className="notice">This preview runs in a sandbox that blocks calls to Google, so AI stays off here even with a key. Run TerraX locally to use AI.</p>
-                  )}
                   <form onSubmit={saveKey} className="field-row">
                     <label htmlFor="api-key" className="visually-hidden">
                       Gemini API key

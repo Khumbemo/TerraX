@@ -1,11 +1,31 @@
 import { useState } from 'react';
-import { OPEN_METEO_VARS, POWER_VARS, openMeteoToCsv, openMeteoUrl, powerToCsv, powerUrl } from '../lib/live';
+import { request, type StoredFile } from '../lib/api';
 import { useToast } from '../lib/toast';
 
 interface Props {
   target: { lat: number; lon: number; name: string };
-  onTable: (csv: string, filename: string, note: string) => void;
+  /** The fetched series, stored on the server as a CSV upload. */
+  onTable: (file: StoredFile, note: string) => void;
 }
+
+// The variables the server accepts (services/live.py).
+const OPEN_METEO_VARS = [
+  { id: 'precipitation_sum', label: 'Precipitation (mm)' },
+  { id: 'temperature_2m_mean', label: 'Mean temperature (°C)' },
+  { id: 'temperature_2m_max', label: 'Maximum temperature (°C)' },
+  { id: 'temperature_2m_min', label: 'Minimum temperature (°C)' },
+  { id: 'relative_humidity_2m_mean', label: 'Mean relative humidity (%)' },
+  { id: 'et0_fao_evapotranspiration', label: 'Reference ET₀, FAO-56 (mm)' },
+  { id: 'shortwave_radiation_sum', label: 'Solar radiation (MJ/m²)' },
+];
+const POWER_VARS = [
+  { id: 'PRECTOTCORR', label: 'Precipitation, bias-corrected (mm/day)' },
+  { id: 'T2M', label: 'Temperature at 2 m (°C)' },
+  { id: 'T2M_MAX', label: 'Maximum temperature (°C)' },
+  { id: 'T2M_MIN', label: 'Minimum temperature (°C)' },
+  { id: 'RH2M', label: 'Relative humidity at 2 m (%)' },
+  { id: 'ALLSKY_SFC_SW_DWN', label: 'All-sky solar radiation (MJ/m²/day)' },
+];
 
 type Source = 'open-meteo' | 'power';
 
@@ -24,27 +44,13 @@ export default function LiveDataPanel({ target, onTable }: Props) {
   const list = source === 'open-meteo' ? OPEN_METEO_VARS : POWER_VARS;
 
   const fetchData = async () => {
-    if (__TERRAX_PREVIEW__) {
-      notify('Live data needs the full TerraX app; this sandboxed preview cannot reach outside servers.', 'error');
-      return;
-    }
     setBusy(true);
-    let host = '';
     try {
-      const la = Number(lat), lo = Number(lon);
-      const url = source === 'open-meteo' ? openMeteoUrl(la, lo, start, end, vars[source]) : powerUrl(la, lo, start, end, vars[source]);
-      host = new URL(url).hostname;
-      let res: Response;
-      try {
-        res = await fetch(url);
-      } catch {
-        throw new Error(`Could not reach ${host}. Check the internet connection; some networks block this service.`);
-      }
-      const json = await res.json().catch(() => null);
-      if (!json) throw new Error(`${host} returned HTTP ${res.status} without data.`);
-      const { csv, note } = source === 'open-meteo' ? openMeteoToCsv(json) : powerToCsv(json);
-      if (!res.ok && !csv) throw new Error(`${host} returned HTTP ${res.status}.`);
-      onTable(csv, `${source === 'open-meteo' ? 'open-meteo_era5' : 'nasa-power'}_${la.toFixed(3)}_${lo.toFixed(3)}_${start}_${end}.csv`, note);
+      const r = await request<{ file: StoredFile; note: string }>('/api/live/weather', {
+        method: 'POST',
+        json: { source, lat: Number(lat), lon: Number(lon), start, end, vars: vars[source] },
+      });
+      onTable(r.file, r.note);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'The request failed.', 'error');
     } finally {
@@ -54,7 +60,7 @@ export default function LiveDataPanel({ target, onTable }: Props) {
 
   return (
     <details className="sub-panel live-panel">
-      <summary className="eyebrow">Fetch data for a location (internet)</summary>
+      <summary className="eyebrow">Fetch data for a location (the server downloads it)</summary>
       <div className="param-row">
         <label className="inline-select">
           <span>Source</span>

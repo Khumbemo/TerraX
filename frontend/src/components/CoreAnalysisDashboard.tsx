@@ -1,25 +1,59 @@
 import { useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { SPI_SCALES, analyzeMetric, numericColumns } from '../lib/analysis';
-import { spiClass } from '../lib/climate-stats';
-import { MONTHS, decimalYear, formatDate } from '../lib/dates';
-import { fmt, fmtP, quantileSorted, sampleIndices } from '../lib/stats';
-import type { TableDataset } from '../lib/types';
+import type { Summary, TableMeta, Trend } from '../lib/api';
+import { fmt, fmtP } from '../lib/stats';
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const SPI_SCALES = [1, 3, 6, 12];
+
+/** SPI classes of McKee et al. (1993), with the same boundaries as the server (processing/climate.py). */
+export function spiClass(v: number): string {
+  if (v >= 2) return 'Extremely wet';
+  if (v >= 1.5) return 'Very wet';
+  if (v >= 1) return 'Moderately wet';
+  if (v >= -1) return 'Near normal';
+  if (v >= -1.5) return 'Moderately dry';
+  if (v >= -2) return 'Severely dry';
+  return 'Extremely dry';
+}
+
+/** One column's analysis as computed by the server (processing/analysis.py). */
+export interface MetricAnalysis {
+  column: string;
+  points: { label: string; time: string | null; value: number; t: number | null; cls: number }[];
+  sampled: boolean;
+  pointCount: number;
+  trendIntercept: number | null;
+  summary: Summary | null;
+  trend: Trend | null;
+  monthly: { month: number; label: string; mean: number; n: number }[] | null;
+  classification: { metric: string; name: string; unit: string; basis: string; note: string | null; buckets: { label: string; color: string }[] };
+  classCounts: number[];
+  trendCaveat: string | null;
+  start: string | null;
+  end: string | null;
+  climate: {
+    seasonalKendall: { s: number; varS: number; z: number; p: number; slope: number; seasons: number; n: number; direction: string } | null;
+    anomalies: { year: number; month: number; anomaly: number }[];
+    spi: { scale: number; rows: { year: number; month: number; spi: number | null }[]; reliable: boolean; notes: string[] }[] | null;
+    spiNote: string | null;
+  } | null;
+}
 
 interface Props {
-  dataset: TableDataset;
+  dataset: TableMeta;
+  analyses: Record<string, MetricAnalysis>;
   metric: string;
   onMetricChange: (column: string) => void;
 }
 
 type Tab = 'series' | 'season' | 'anomalies' | 'spi' | 'classes' | 'table';
 const PAGE_SIZE = 50;
-const MAX_CHART_POINTS = 1500;
 const AXIS = { stroke: '#4a6580', fontSize: 11, fontFamily: 'Space Mono, monospace' };
 
 function ChartTooltip({ active, payload, label, time }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: number | string; time: boolean }) {
   if (!active || !payload?.length) return null;
-  const heading = time && typeof label === 'number' ? formatDate(new Date(label)) : String(label);
+  const heading = time && typeof label === 'number' ? new Date(label).toISOString().slice(0, 10) : String(label);
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{heading}</div>
@@ -32,31 +66,23 @@ function ChartTooltip({ active, payload, label, time }: { active?: boolean; payl
   );
 }
 
-export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange }: Props) {
+export default function CoreAnalysisDashboard({ dataset, analyses, metric, onMetricChange }: Props) {
   const [tab, setTab] = useState<Tab>('series');
   const [page, setPage] = useState(0);
   const [showTrend, setShowTrend] = useState(true);
   const [spiScale, setSpiScale] = useState(3);
-  const columns = numericColumns(dataset);
-  const analysis = useMemo(() => analyzeMetric(dataset, metric), [dataset, metric]);
-  const hasTime = Boolean(dataset.times);
+  const columns = Object.keys(analyses);
+  const analysis = analyses[metric] ?? analyses[columns[0]];
+  const hasTime = Boolean(dataset.timeColumn);
 
   const chartData = useMemo(() => {
-    const pts = analysis.points;
-    const trend = analysis.trend;
-    let intercept = 0;
-    if (trend && hasTime) {
-      const residuals = pts.map(p => p.value - trend.senSlope * decimalYear(p.time!)).sort((a, b) => a - b);
-      intercept = quantileSorted(residuals, 0.5);
-    }
-    return sampleIndices(pts.length, MAX_CHART_POINTS).map(i => {
-      const p = pts[i];
-      return {
-        x: hasTime ? p.time!.getTime() : i + 1,
-        value: p.value,
-        trend: trend && hasTime ? intercept + trend.senSlope * decimalYear(p.time!) : undefined,
-      };
-    });
+    const t = analysis.trend;
+    const b = analysis.trendIntercept;
+    return analysis.points.map((p, i) => ({
+      x: hasTime && p.time ? Date.parse(`${p.time}T00:00:00Z`) : i + 1,
+      value: p.value,
+      trend: t && b !== null && p.t !== null ? b + t.senSlope * p.t : undefined,
+    }));
   }, [analysis, hasTime]);
 
   const s = analysis.summary;
@@ -106,7 +132,7 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
           <div className="stat-value">{s?.n ?? 0}</div>
           {hasTime && (
             <div className="stat-sub">
-              <span className="nowrap">{formatDate(analysis.start)}</span> → <span className="nowrap">{formatDate(analysis.end)}</span>
+              <span className="nowrap">{analysis.start}</span> → <span className="nowrap">{analysis.end}</span>
             </div>
           )}
         </div>
@@ -165,7 +191,7 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
                   type="number"
                   scale={hasTime ? 'time' : 'linear'}
                   domain={['dataMin', 'dataMax']}
-                  tickFormatter={v => (hasTime ? formatDate(new Date(v)).slice(0, 7) : String(v))}
+                  tickFormatter={v => (hasTime ? new Date(v).toISOString().slice(0, 7) : String(v))}
                   {...AXIS}
                 />
                 <YAxis {...AXIS} width={56} domain={['auto', 'auto']} tickFormatter={v => fmt(v, 3)} />
@@ -181,7 +207,7 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
                 </label>
               )}
               {analysis.trendCaveat && t && <span className="caveat-text">{analysis.trendCaveat}</span>}
-              {analysis.points.length > MAX_CHART_POINTS && <span>Chart shows {MAX_CHART_POINTS} evenly spaced of {analysis.points.length} values; statistics use all values.</span>}
+              {analysis.sampled && <span>Chart shows {analysis.points.length.toLocaleString()} evenly spaced of {analysis.pointCount.toLocaleString()} values; statistics use all values.</span>}
             </div>
           </>
         )}
@@ -324,11 +350,10 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map(p => {
-                  const idx = cls.classify(p.value);
-                  const bucket = idx >= 0 ? cls.buckets[idx] : null;
+                {pageRows.map((p, i) => {
+                  const bucket = p.cls >= 0 ? cls.buckets[p.cls] : null;
                   return (
-                    <tr key={p.row}>
+                    <tr key={page * PAGE_SIZE + i}>
                       <td>{p.label}</td>
                       <td className="num">{fmt(p.value, 5)}</td>
                       <td>
@@ -344,6 +369,7 @@ export default function CoreAnalysisDashboard({ dataset, metric, onMetricChange 
                 })}
               </tbody>
             </table>
+            {analysis.sampled && <p className="field-hint">Showing {analysis.points.length.toLocaleString()} evenly spaced of {analysis.pointCount.toLocaleString()} values.</p>}
             {pageCount > 1 && (
               <div className="pager">
                 <button type="button" className="btn btn-small" disabled={page === 0} onClick={() => setPage(p => p - 1)}>

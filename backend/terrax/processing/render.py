@@ -21,7 +21,8 @@ def hex_rgb(h: str) -> tuple[int, int, int]:
 
 
 def viridis(t: np.ndarray) -> np.ndarray:
-    x = np.clip(t, 0, 1) * (len(_STOPS) - 1)
+    """Viridis colours for values in 0…1; NaN (no data) maps to the low end and is made transparent by the caller."""
+    x = np.clip(np.nan_to_num(np.asarray(t, dtype=float), nan=0.0), 0, 1) * (len(_STOPS) - 1)
     i = np.minimum(len(_STOPS) - 2, np.floor(x).astype(int))
     f = (x - i)[..., None]
     return np.round(_STOPS[i] + (_STOPS[i + 1] - _STOPS[i]) * f).astype(np.uint8)

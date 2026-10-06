@@ -29,4 +29,6 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
             raise ToolError(f"Wood density for {sp} must be between 0.1 and 1.5 g/cm³.")
     r = compute_carbon(inv, p)
     return clean({"tool": "carbon", "name": f.name, "markdown": carbon_markdown(r), "carbon": r, "params": p,
-                  "speciesList": sorted({t["species"] for t in inv["trees"]}), "zones": [{"id": z["id"], "label": z["label"], "rule": z["rule"]} for z in ROOT_SHOOT]})
+                  "speciesList": sorted({t["species"] for t in inv["trees"] if t.get("dbh") is not None}),
+                  "needsArea": any(not t["plotAreaM2"] > 0 for t in inv["trees"]),
+                  "forestTypes": [{"id": k, "label": v["label"]} for k, v in CHAVE2005.items()], "zones": [{"id": z["id"], "label": z["label"], "rule": z["rule"]} for z in ROOT_SHOOT]})

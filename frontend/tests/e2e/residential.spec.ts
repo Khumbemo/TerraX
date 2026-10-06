@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openTool, start } from './helpers';
+import { mapState, openTool, start } from './helpers';
 
 test('residential plot: sample images reveal a neighbour extension across the boundary', async ({ page }) => {
   const errors = await start(page);
@@ -26,7 +26,7 @@ test('residential plot: sample images reveal a neighbour extension across the bo
   const fc = JSON.parse(Buffer.concat(await (await dl.createReadStream()).toArray()).toString('utf8'));
   expect(fc.features.length).toBeGreaterThan(0);
   expect(fc.features[0].geometry.type).toBe('MultiPolygon');
-  await expect(page.locator('img.leaflet-image-layer')).toHaveCount(1);
+  await expect.poll(() => mapState<boolean>(page, `m => !!m.getLayer('tx-image-r')`)).toBe(true);
   expect(errors).toEqual([]);
 });
 

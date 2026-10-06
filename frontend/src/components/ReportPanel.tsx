@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AiMode } from '../lib/ai';
-import { generate } from '../lib/ai';
+import { interpret as aiInterpret } from '../lib/ai';
 import { downloadReportPdf, downloadText, safeFilename } from '../lib/download';
 import { collectFigures, type ReportFigure } from '../lib/figures';
-import { REPORT_PROMPT } from '../lib/guide';
 import { toolInfo, type ToolOutput } from '../lib/tools/registry';
 import { useToast } from '../lib/toast';
 import type { ReportRecord } from '../lib/types';
@@ -62,10 +61,7 @@ export default function ReportPanel({ output, aiMode, operator, onSave, onOpenSe
     setLoading(true);
     setError(null);
     try {
-      const result = await generate({
-        turns: [{ role: 'user', text: `${REPORT_PROMPT}\n\nTool: ${toolInfo(output.tool).name}\n\n${output.extraContext ?? output.markdown}` }],
-        temperature: 0.3,
-      });
+      const result = await aiInterpret(toolInfo(output.tool).name, output.markdown, output.extraContext);
       if (!result.text.trim()) throw new Error('Gemini returned an empty answer. Try again.');
       setAi({ text: result.text, model: result.model });
       setSaved(false);

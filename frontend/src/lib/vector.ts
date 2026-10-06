@@ -2,6 +2,7 @@
 // analysis boundary from surveyed polygons, and turn drawn vertices into a
 // polygon feature.
 import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon, Position } from 'geojson';
+import { fmt } from './stats';
 import type { Boundary } from './zonal';
 
 function esc(s: string): string {
@@ -108,14 +109,6 @@ export function polygonFeatures(fc: FeatureCollection): FeatureCollection<Polygo
   return { type: 'FeatureCollection', features: out };
 }
 
-/** Builds an analysis boundary; `areaM2` comes from the survey measurement. */
-export function makeBoundary(name: string, fc: FeatureCollection, areaM2: number): Boundary | null {
-  const polys = polygonFeatures(fc);
-  if (!polys.features.length) return null;
-  return { name, geojson: polys, areaM2 };
-}
-
-/** Closed polygon from drawn vertices given as [lat, lon]. */
 export function drawnPolygon(points: [number, number][], name: string): FeatureCollection<Polygon> {
   if (points.length < 3) throw new Error('A polygon needs at least three points.');
   const ring = points.map(([lat, lon]) => [lon, lat]);
@@ -133,3 +126,17 @@ export function editableVertices(fc: FeatureCollection): [number, number][] | nu
   if (pts.length > 1 && f[0] === l[0] && f[1] === l[1]) pts.pop();
   return pts;
 }
+
+const ACRE_M2 = 4046.8564224;
+
+export function formatAreaM2(m2: number): string {
+  if (m2 < 10_000) return `${fmt(m2, 5)} m² (${fmt(m2 / 10_000, 4)} ha, ${fmt(m2 / ACRE_M2, 4)} acres)`;
+  return `${fmt(m2 / 10_000, 5)} ha (${fmt(m2 / ACRE_M2, 5)} acres${m2 >= 1e6 ? `, ${fmt(m2 / 1e6, 4)} km²` : ''})`;
+}
+
+export function formatLength(m: number): string {
+  return m >= 1000 ? `${fmt(m / 1000, 5)} km` : `${fmt(m, 5)} m`;
+}
+
+/** Magnetic bearing from a true bearing and declination (degrees, east positive). */
+export const magneticBearing = (trueBearing: number, declination: number) => (((trueBearing - declination) % 360) + 360) % 360;

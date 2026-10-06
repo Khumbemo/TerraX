@@ -1,50 +1,69 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { VIRIDIS_CSS, paintGrid } from '../lib/colormap';
-import { BAND_ROLES, INDICES, guessBandMap, indexDef } from '../lib/indices';
-import { unprojector } from '../lib/patches';
-import { QA_KINDS, isMasked, type QaKind } from '../lib/qa';
-import { readComposite } from '../lib/raster';
-import type { Grid, OpenRaster } from '../lib/rasterio';
+import { apiUrl, request, type Summary } from '../lib/api';
+import { VIRIDIS_CSS } from '../lib/colormap';
+import type { LatLngBounds } from '../lib/geo';
+import { BAND_ROLES, INDICES, indexDef } from '../lib/indices';
+import { QA_KINDS, type QaKind } from '../lib/qa';
 import { formatBytes } from '../lib/report';
 import { fmt } from '../lib/stats';
 import { useToast } from '../lib/toast';
-import type { BandMap, BandRole, QaMaskRef, RasterDataset, RasterMode, SpectralIndex } from '../lib/types';
-import RgbaCanvas from './RgbaCanvas';
+import type { BandMap, BandRole, HistogramBin, QaMaskRef, RasterMode, SpectralIndex } from '../lib/types';
+
+/** A raster layer as described by the server (processing/rasterset.py). */
+export interface RasterDataset {
+  kind: 'raster';
+  filename: string;
+  sizeBytes: number;
+  width: number;
+  height: number;
+  bands: number;
+  view: RasterMode;
+  noData: number | null;
+  stats: Summary | null;
+  validPixels: number;
+  totalPixels: number;
+  statsResampled: boolean;
+  histogram: HistogramBin[];
+  bbox: [number, number, number, number] | null;
+  epsg: number | null;
+  latLngBounds: LatLngBounds | null;
+  pixelSize: [number, number] | null;
+  hints: string[];
+  warnings: string[];
+  bandNames: string[];
+  preview?: { url: string; width: number; height: number; min: number; max: number };
+}
 
 interface Props {
   dataset: RasterDataset;
-  raster: OpenRaster | null;
+  /** Id of the uploaded GeoTIFF, for composites and the pixel inspector. */
+  fileId: string;
+  guessedBands: BandMap;
   busy: boolean;
   onChangeView: (view: RasterMode) => void;
 }
 
 const AXIS = { stroke: '#4a6580', fontSize: 10, fontFamily: 'Space Mono, monospace' };
 
-export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }: Props) {
+export default function RasterPanel({ dataset: ds, fileId, guessedBands, busy, onChangeView }: Props) {
   const notify = useToast();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [bands, setBands] = useState<BandMap>(() => (ds.view.mode === 'index' ? ds.view.bands : guessBandMap(ds.bands)));
+  const [bands, setBands] = useState<BandMap>(() => (ds.view.mode === 'index' ? ds.view.bands : guessedBands));
   const [index, setIndex] = useState<SpectralIndex>(ds.view.mode === 'index' ? ds.view.index : 'ndvi');
   const [layerKind, setLayerKind] = useState<'band' | 'index'>(ds.view.mode);
-  const [composite, setComposite] = useState<{ rgba: Uint8ClampedArray; width: number; height: number; label: string } | null>(null);
-  const [compositeBusy, setCompositeBusy] = useState(false);
+  const [composite, setComposite] = useState<{ url: string; label: string } | null>(null);
   const [compositeKind, setCompositeKind] = useState<'true' | 'false' | null>(null);
   const [stretch, setStretch] = useState({ lo: '2', hi: '98' });
-  const qa = ds.view.qa;
+  const qa = ds.view.qa ?? undefined;
   const [qaKind, setQaKind] = useState<QaKind>(qa?.kind ?? (ds.bands >= 12 ? 'scl' : 'landsat'));
-  const [pick, setPick] = useState<{ col: number; row: number; values: number[]; lat: number | null; lon: number | null; masked: boolean | null } | null>(null);
-  const allBands = useRef<{ raster: OpenRaster; grids: Grid[] } | null>(null);
-
-  useEffect(() => {
-    if (canvasRef.current && ds.stats) paintGrid(canvasRef.current, ds.preview.data, ds.preview.width, ds.preview.height, ds.stats.min, ds.stats.max);
-  }, [ds]);
+  const [pick, setPick] = useState<{ col: number; row: number; values: (number | null)[]; lat: number | null; lon: number | null; masked: boolean | null } | null>(null);
 
   const bandOptions = Array.from({ length: ds.bands }, (_, i) => i);
   const histData = ds.histogram.map(b => ({ x: (b.x0 + b.x1) / 2, count: b.count, range: `${fmt(b.x0)} to ${fmt(b.x1)}` }));
   const s = ds.stats;
   const def = indexDef(index);
   const available = INDICES.filter(i => i.needs.length <= ds.bands);
+  const qaQuery = (q: QaMaskRef | undefined) => (q ? `&qaBand=${q.band}&qaKind=${q.kind}` : '');
 
   const stretchValue = (): [number, number] | null => {
     const lo = Number(stretch.lo), hi = Number(stretch.hi);
@@ -52,7 +71,7 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
       notify('Set the stretch as two percentiles between 0 and 100, low below high (for example 2 and 98).', 'error');
       return null;
     }
-    return [lo / 100, hi / 100];
+    return [lo, hi];
   };
 
   const setQa = (next: QaMaskRef | undefined) => {
@@ -60,50 +79,32 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
     if (compositeKind) showComposite(compositeKind, next);
   };
 
-  const inspect = async (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!raster) return;
+  const inspect = async (e: React.MouseEvent<HTMLImageElement>) => {
+    const pv = ds.preview;
+    if (!pv) return;
     const b = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - b.left) / b.width, py = (e.clientY - b.top) / b.height;
     if (px < 0 || py < 0 || px >= 1 || py >= 1) return;
     try {
-      if (allBands.current?.raster !== raster) {
-        allBands.current = { raster, grids: await raster.readBands(Array.from({ length: ds.bands }, (_, i) => i)) };
-      }
-      const grids = allBands.current.grids;
-      const gw = grids[0].width, gh = grids[0].height;
-      const col = Math.min(gw - 1, Math.floor(px * gw)), row = Math.min(gh - 1, Math.floor(py * gh));
-      const k = row * gw + col;
-      let lat: number | null = null, lon: number | null = null;
-      const inv = unprojector(raster.meta);
-      if (inv && raster.meta.bbox) {
-        const [minX, minY, maxX, maxY] = raster.meta.bbox;
-        [lon, lat] = inv(minX + ((col + 0.5) * (maxX - minX)) / gw, maxY - ((row + 0.5) * (maxY - minY)) / gh);
-      }
-      setPick({ col, row, values: grids.map(g => g.data[k]), lat, lon, masked: qa ? isMasked(qa.kind, grids[qa.band].data[k]) : null });
+      const r = await request<{ col: number; row: number; values: (number | null)[]; lat: number | null; lon: number | null; masked: boolean | null }>(
+        `/api/rasters/${fileId}/pixel?col=${px * pv.width}&row=${py * pv.height}&width=${pv.width}&height=${pv.height}${qaQuery(qa)}`,
+      );
+      setPick(r);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not read that pixel.', 'error');
     }
   };
 
-  const showComposite = async (kind: 'true' | 'false', qaOverride: QaMaskRef | undefined = qa) => {
-    if (!raster) return;
+  const showComposite = (kind: 'true' | 'false', qaOverride: QaMaskRef | undefined = qa) => {
     const st = stretchValue();
     if (!st) return;
     const rgb: (number | undefined)[] = kind === 'true' ? [bands.red, bands.green, bands.blue] : [bands.nir, bands.red, bands.green];
-    if (rgb.some(v => v === undefined)) {
-      notify(kind === 'true' ? 'Assign red, green and blue bands first.' : 'Assign NIR, red and green bands first.', 'error');
-      return;
-    }
-    setCompositeBusy(true);
-    try {
-      const c = await readComposite(raster, rgb as [number, number, number], st, qaOverride);
-      setCompositeKind(kind);
-      setComposite({ ...c, label: `${kind === 'true' ? 'True colour (R G B)' : 'False colour (NIR R G): vegetation appears red'}; ${stretch.lo}–${stretch.hi} % stretch per channel${qaOverride ? '; masked pixels transparent' : ''}` });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not build the composite.', 'error');
-    } finally {
-      setCompositeBusy(false);
-    }
+    if (rgb.some(v => v === undefined)) return notify(kind === 'true' ? 'Assign red, green and blue bands first.' : 'Assign NIR, red and green bands first.', 'error');
+    setCompositeKind(kind);
+    setComposite({
+      url: apiUrl(`/api/rasters/${fileId}/composite.png?bands=${rgb.join(',')}&lo=${st[0]}&hi=${st[1]}${qaQuery(qaOverride)}`),
+      label: `${kind === 'true' ? 'True colour (R G B)' : 'False colour (NIR R G): vegetation appears red'}; ${stretch.lo}–${stretch.hi} % stretch per channel${qaOverride ? '; masked pixels transparent' : ''}`,
+    });
   };
 
   const roleSelect = (role: BandRole, label: string) => (
@@ -189,10 +190,10 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
           </p>
           {ds.bands >= 3 && (
             <div className="button-row">
-              <button type="button" className="btn btn-small" disabled={compositeBusy || !raster} onClick={() => showComposite('true')}>
+              <button type="button" className="btn btn-small" onClick={() => showComposite('true')}>
                 True colour
               </button>
-              <button type="button" className="btn btn-small" disabled={compositeBusy || !raster} onClick={() => showComposite('false')}>
+              <button type="button" className="btn btn-small" onClick={() => showComposite('false')}>
                 False colour (NIR)
               </button>
               {composite && (
@@ -214,7 +215,7 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
                 <input id="stretch-hi" type="number" min="51" max="100" step="0.5" value={stretch.hi} onChange={e => setStretch(v => ({ ...v, hi: e.target.value }))} />
               </label>
               {composite && compositeKind && (
-                <button type="button" className="btn btn-small" disabled={compositeBusy} onClick={() => showComposite(compositeKind)}>
+                <button type="button" className="btn btn-small" onClick={() => showComposite(compositeKind)}>
                   Apply stretch
                 </button>
               )}
@@ -263,15 +264,24 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
 
       {composite && (
         <figure className="raster-figure">
-          <RgbaCanvas rgba={composite.rgba} width={composite.width} height={composite.height} label={composite.label} />
+          <img
+            src={composite.url}
+            alt={composite.label}
+            className="raster-canvas"
+            onError={() => {
+              notify('The server could not build that composite. Check the band roles.', 'error');
+              setComposite(null);
+              setCompositeKind(null);
+            }}
+          />
           <figcaption className="field-hint">{composite.label}.</figcaption>
         </figure>
       )}
 
       <div className="raster-grid">
         <figure className="raster-figure">
-          {s ? (
-            <canvas ref={canvasRef} className={`raster-canvas ${raster ? 'pickable' : ''}`} aria-label={`Preview of ${ds.filename}; click a pixel to inspect its values`} onClick={inspect} />
+          {s && ds.preview ? (
+            <img src={apiUrl(ds.preview.url)} width={ds.preview.width} height={ds.preview.height} className="raster-canvas pickable" alt={`Preview of ${ds.filename}; click a pixel to inspect its values`} onClick={inspect} />
           ) : (
             <div className="empty-note">No valid pixels to display.</div>
           )}
@@ -295,7 +305,7 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
                 column {pick.col + 1}, row {pick.row + 1}
                 {pick.lat !== null && pick.lon !== null ? ` · ${pick.lat.toFixed(5)}, ${pick.lon.toFixed(5)}` : ''}
                 <br />
-                {pick.values.map((v, i) => `B${i + 1} ${Number.isNaN(v) ? 'no data' : fmt(v)}`).join(' · ')}
+                {pick.values.map((v, i) => `B${i + 1} ${v === null ? 'no data' : fmt(v)}`).join(' · ')}
                 {pick.masked !== null ? ` · ${pick.masked ? 'masked by quality band' : 'clear'}` : ''}
               </dd>
             </>
@@ -354,7 +364,7 @@ export default function RasterPanel({ dataset: ds, raster, busy, onChangeView }:
         </div>
       )}
 
-      {raster && !pick && <p className="field-hint">Click the preview to read every band at a pixel.</p>}
+      {!pick && ds.preview && <p className="field-hint">Click the preview to read every band at a pixel.</p>}
       {ds.hints.length > 0 && (
         <ul className="hint-list">
           {ds.hints.map(h => (

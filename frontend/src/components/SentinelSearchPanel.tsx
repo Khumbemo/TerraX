@@ -1,13 +1,24 @@
 import { useState } from 'react';
-import { EARTH_SEARCH, parseStacItems, readS2Window, stacSearchBody, type StacItem } from '../lib/live';
-import type { OpenRaster } from '../lib/rasterio';
+import { request, runJob, type RasterMeta, type StoredFile } from '../lib/api';
 import { useToast } from '../lib/toast';
+import { useJob } from '../lib/useJob';
 import type { Boundary } from '../lib/zonal';
+import JobStatus from './JobStatus';
+
+interface StacItem {
+  id: string;
+  datetime: string;
+  cloud: number | null;
+  epsg: number | null;
+  assets: Record<string, { href: string; scale?: number | null; offset?: number | null }>;
+  processingBaseline: string | null;
+}
 
 interface Props {
   target: { lat: number; lon: number; name: string };
   boundary: Boundary | null;
-  onRaster: (raster: OpenRaster, notes: string[]) => void;
+  /** The scene window, stored on the server as a 5-band GeoTIFF (blue, green, red, NIR, SCL). */
+  onRaster: (file: StoredFile<RasterMeta>, notes: string[]) => void;
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -34,7 +45,8 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
   const [cloud, setCloud] = useState('20');
   const [km, setKm] = useState('3');
   const [items, setItems] = useState<StacItem[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const job = useJob();
+  const busy = job.busy;
 
   const bbox = (): [number, number, number, number] => {
     if (boundary) return boundaryBbox(boundary);
@@ -42,55 +54,27 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
     const dLat = half / 111.32, dLon = half / (111.32 * Math.cos((target.lat * Math.PI) / 180));
     return [target.lon - dLon, target.lat - dLat, target.lon + dLon, target.lat + dLat];
   };
-
-  const offline = () => {
-    if (__TERRAX_PREVIEW__) {
-      notify('Scene search needs the full TerraX app; this sandboxed preview cannot reach outside servers.', 'error');
-      return true;
-    }
-    return false;
-  };
+  const fail = (m: string) => notify(m, 'error');
 
   const search = async () => {
-    if (offline()) return;
-    setBusy('search');
-    try {
-      const body = stacSearchBody(bbox(), start, end, Math.max(0, Math.min(100, Number(cloud) || 20)));
-      let res: Response;
-      try {
-        res = await fetch(`${EARTH_SEARCH}/search`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      } catch {
-        throw new Error('Could not reach earth-search.aws.element84.com. Check the internet connection; some networks block it.');
-      }
-      if (!res.ok) throw new Error(`The scene catalogue returned HTTP ${res.status}.`);
-      const found = parseStacItems(await res.json());
-      setItems(found);
-      if (!found.length) notify('No scenes match. Widen the dates or raise the cloud limit.');
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'The search failed.', 'error');
-    } finally {
-      setBusy(null);
-    }
+    const r = await job.run(
+      'search',
+      signal => request<{ items: StacItem[] }>('/api/live/sentinel/search', { method: 'POST', json: { bbox: bbox(), start, end, maxCloud: Math.max(0, Math.min(100, Number(cloud) || 20)) }, signal }),
+      fail,
+    );
+    if (!r) return;
+    setItems(r.items);
+    if (!r.items.length) notify('No scenes match. Widen the dates or raise the cloud limit.');
   };
 
   const load = async (item: StacItem) => {
-    if (offline()) return;
-    setBusy(item.id);
-    try {
-      const { fromUrl } = await import('geotiff');
-      const { raster, notes } = await readS2Window(item, bbox(), href => fromUrl(href));
-      onRaster(raster, notes);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      notify(/fetch|network|Failed/i.test(msg) ? 'The image files could not be read from this browser (network or cross-origin restriction).' : msg, 'error');
-    } finally {
-      setBusy(null);
-    }
+    const r = await job.run(item.id, (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>('sentinel', {}, { item, bbox: bbox() }, { signal, onProgress }), fail);
+    if (r) onRaster(r.file, r.notes);
   };
 
   return (
     <details className="sub-panel live-panel">
-      <summary className="eyebrow">Search Sentinel-2 scenes (internet)</summary>
+      <summary className="eyebrow">Search Sentinel-2 scenes (the server downloads them)</summary>
       <div className="param-row">
         <span className="field-hint">
           Area: {boundary ? `analysis boundary “${boundary.name}”` : `${km} km square around ${target.name}`}.
@@ -117,6 +101,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
           {busy === 'search' ? 'Searching…' : 'Search'}
         </button>
       </div>
+      <JobStatus job={job} onCancel={job.cancel} />
       {items && items.length > 0 && (
         <div className="tabular-view">
           <table>
@@ -146,7 +131,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
         </div>
       )}
       <p className="field-hint">
-        Scenes come from the Earth Search catalogue of Sentinel-2 Level-2A surface reflectance on AWS (free, no account). Only the window over your area is downloaded:
+        Scenes come from the Earth Search catalogue of Sentinel-2 Level-2A surface reflectance on AWS (free, no account). The TerraX server reads only the window over your area:
         B2, B3, B4, B8 at 10 m and the SCL cloud classes, which are applied as a mask.
       </p>
     </details>

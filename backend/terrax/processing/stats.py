@@ -82,7 +82,8 @@ class Trend:
     direction: str
 
     def dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        return {"n": d["n"], "olsSlope": d["ols_slope"], "senSlope": d["sen_slope"], "s": d["s"], "z": d["z"], "p": d["p"], "direction": d["direction"]}
 
 
 def trend_test(x: Sequence[float], y: Sequence[float], alpha: float = 0.05) -> Trend | None:

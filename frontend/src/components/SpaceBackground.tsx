@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { idbGet } from '../lib/idb';
 import { usePrefs } from '../lib/prefs';
+import { request } from '../lib/api';
 import { decodeCities, landMask, renderEarth, renderGalaxy, type Cities, type LandShapes } from '../lib/space-render';
 
 interface Props {
@@ -79,7 +80,13 @@ export default function SpaceBackground({ target }: Props) {
     if (background === 'galaxy') renderGalaxy(ctx, w, h);
     else
       Promise.all([loadMask(), loadCities().catch(() => null)])
-        .then(([mask, cities]) => alive && renderEarth(ctx, w, h, mask, target, new Date(), background === 'earth-night' ? 'night' : 'live', cities))
+        .then(async ([mask, cities]) => {
+          // The day/night line comes from the server's solar geometry (services/solar.py).
+          const sun = await request<{ subsolar: { lat: number; lon: number } }>(`/api/live/solar?lat=${target.lat}&lon=${target.lon}`)
+            .then(r => r.subsolar)
+            .catch(() => null);
+          if (alive) renderEarth(ctx, w, h, mask, target, sun ?? { lat: 0, lon: 0 }, background === 'earth-night' || !sun ? 'night' : 'live', cities);
+        })
         .catch(err => console.warn('TerraX: Earth background unavailable', err));
     return () => {
       alive = false;

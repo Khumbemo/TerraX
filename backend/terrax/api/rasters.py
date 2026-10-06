@@ -98,8 +98,12 @@ def watershed(job_id: str, req: OutletRequest) -> dict:
     out = patches_to_geojson(mask.astype(np.int32), 1, np.array([0.0, area]), r, lambda _i, a: {"name": "Watershed", "area_ha": round(a / 100) / 100})
     if out and r.gw == w and r.gh == h:
         fc = out["fc"]
+    from ..tools.terrain import watershed_line
+
+    mean_z = float(np.nanmean(z)) if np.isfinite(z).any() else None
+    mean_s = float(np.nanmean(s)) if np.isfinite(s).any() else None
     return {
-        "outlet": [int(outlet[1]), int(outlet[0])], "cells": cells, "areaM2": area,
-        "meanElevation": float(np.nanmean(z)) if np.isfinite(z).any() else None, "meanSlope": float(np.nanmean(s)) if np.isfinite(s).any() else None,
+        "outlet": [int(outlet[1]), int(outlet[0])], "cells": cells, "areaM2": area, "meanElevation": mean_z, "meanSlope": mean_s,
+        "markdown": watershed_line(area, mean_z, mean_s),
         "layer": f"/api/jobs/{job_id}/artifacts/{name}", "geojson": fc,
     }

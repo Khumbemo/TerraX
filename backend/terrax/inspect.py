@@ -34,8 +34,11 @@ def describe(path: Path) -> tuple[str, dict[str, Any]]:
                 exif = bool(im.getexif())
                 return "image", {"width": im.width, "height": im.height, "mode": im.mode, "format": im.format, "hasExif": exif}
         if ext == ".zip":
-            with zipfile.ZipFile(path) as z:
-                names = z.namelist()
+            try:
+                with zipfile.ZipFile(path) as z:
+                    names = z.namelist()
+            except zipfile.BadZipFile:
+                return "other", {"error": f"{path.name} is not a valid zip archive. Zip the .shp, .shx, .dbf and .prj files together and try again."}
             kind = "vector" if any(n.lower().endswith(".shp") for n in names) else "archive"
             return kind, {"entries": names[:50]}
         if ext in VECTOR_EXT:

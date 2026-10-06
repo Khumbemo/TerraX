@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
-import type { ChatTurn, Source } from '../lib/gemini-shared';
+import type { ChatTurn, Source } from '../lib/ai';
 
 export interface ChatReply {
   text: string;

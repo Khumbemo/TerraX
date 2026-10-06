@@ -144,6 +144,6 @@ def stack_markdown(r: dict) -> str:
         "## Dataset", "", f"- {len(rows)} images, {rows[0]['date']} to {rows[-1]['date']}; value: {r['label']}", "", "## Results", "",
         "| Date | File | Mean | Median | Valid pixels |", "|---|---|---|---|---|",
         *[f"| {x['date']} | {x['filename']} | {fmt(x['mean'])} | {fmt(x['median'])} | {x['validFraction'] * 100:.0f} %{' (excluded)' if x['sparse'] else ''} |" for x in rows], "",
-        f"Trend (Mann–Kendall, n = {t['n']}): {t['direction']}, Theil–Sen slope {fmt(t['sen_slope'])} per year, {p(t['p'])}." if t else "Trend: not tested (fewer than four usable dates).",
+        f"Trend (Mann–Kendall, n = {t['n']}): {t['direction']}, Theil–Sen slope {fmt(t['senSlope'])} per year, {p(t['p'])}." if t else "Trend: not tested (fewer than four usable dates).",
         "", "## Method and limits", "", *[f"- {n}" for n in r["notes"]],
     ])
