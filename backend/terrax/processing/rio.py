@@ -238,3 +238,23 @@ def apply_qa(raster: Raster, grids: list[Grid], qa: dict) -> tuple[float, str]:
         g.data[m] = np.nan
     frac = float(m.mean()) if m.size else 0.0
     return frac, f"Quality mask from band {qa['band'] + 1} ({QA_KINDS[qa['kind']]['rule']}) removed {frac * 100:.1f} % of pixels."
+
+
+def grid_to_lonlat(raster: Raster, width: int, height: int):
+    """(col, row) on an analysis grid of width × height → [lon, lat] (7 decimals), or None without a CRS."""
+    meta = raster.meta
+    if not meta.bbox or (not meta.geographic and raster.crs is None):
+        return None
+    minx, miny, maxx, maxy = meta.bbox
+    cw, ch = (maxx - minx) / width, (maxy - miny) / height
+    if meta.geographic:
+        return lambda col, row: [round(minx + col * cw, 7), round(maxy - row * ch, 7)]
+    from pyproj import Transformer
+
+    tr = Transformer.from_crs(raster.crs, "EPSG:4326", always_xy=True)
+
+    def f(col, row):
+        lon, lat = tr.transform(minx + col * cw, maxy - row * ch)
+        return [round(lon, 7), round(lat, 7)]
+
+    return f
