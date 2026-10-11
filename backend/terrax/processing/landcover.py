@@ -134,8 +134,13 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
             nd_c = np.bincount(raw[ok], minlength=k).astype(float)
         return np.bincount(raw, minlength=k).astype(float), m2, sums, nd_s, nd_c
 
-    m3 = plan.map(predict)
-    areas_px, m2, sums, nd_s, nd_c = (np.add.reduce([x[i] for x in m3]) for i in range(5))
+    areas_px, m2, sums, nd_s, nd_c = np.zeros(k), np.zeros(k), np.zeros((k, d)), np.zeros(k), np.zeros(k)
+    for px_s, m2_s, sums_s, nds_s, ndc_s in plan.map(predict):
+        areas_px += px_s
+        m2 += m2_s
+        sums += sums_s
+        nd_s += nds_s
+        nd_c += ndc_s
     ndvi: list[float | None] = [float(nd_s[j] / nd_c[j]) if (ri >= 0 and ni >= 0 and nd_c[j]) else None for j in range(k)]
     # Order clusters by NDVI (or overall brightness) so class numbers are stable and readable.
     known = [v for v in ndvi if v is not None]
