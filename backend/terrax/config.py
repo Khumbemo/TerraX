@@ -23,6 +23,10 @@ class Settings:
     redis_url: str = field(default_factory=lambda: os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
     #: Run jobs inside the API process instead of on Celery workers (tests, single-process dev).
     eager: bool = field(default_factory=lambda: _bool("TERRAX_EAGER", False))
+    #: Run jobs on this many background threads of the API process instead of Celery workers (one-container hosting, no Redis). 0 uses Celery.
+    job_threads: int = field(default_factory=lambda: int(os.environ.get("TERRAX_JOB_THREADS", "0")))
+    #: Folder with the built web app (frontend/dist) for the API to serve itself, so one container runs everything.
+    static_dir: Path | None = field(default_factory=lambda: Path(p) if (p := os.environ.get("TERRAX_STATIC")) else None)
     gemini_api_key: str = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY", ""))
     gemini_model: str = field(default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
     #: Comma-separated origins allowed to call the API from a browser.
