@@ -159,6 +159,10 @@ def test_spi_of_gamma_rainfall_is_standard_normal():
     spi3 = compute_spi(series[:120], 3, False)
     assert spi3["rows"][0]["spi"] is None and spi3["rows"][1]["spi"] is None and spi3["rows"][2]["spi"] is not None and not spi3["reliable"]
     assert spi_class(-2.3) == "Extremely dry" and spi_class(0.2) == "Near normal" and spi_class(1.7) == "Very wet"
+    # Class limits of McKee et al. (1993): -1.0 to -1.49 moderately dry, -1.5 to -1.99 severely dry, -2 and below extremely dry.
+    boundaries = {2.0: "Extremely wet", 1.5: "Very wet", 1.0: "Moderately wet", 0.99: "Near normal", -0.99: "Near normal",
+                  -1.0: "Moderately dry", -1.49: "Moderately dry", -1.5: "Severely dry", -1.99: "Severely dry", -2.0: "Extremely dry"}
+    assert {v: spi_class(v) for v in boundaries} == boundaries
     dry = compute_spi(monthly_series(40, lambda y, m: 0 if m == 0 and y % 4 == 0 else 50 + (y * 7 + m * 3) % 11), 1, False)
     jan0 = next(x for x in dry["rows"] if x["month"] == 0 and x["year"] == 2000)
     assert jan0["spi"] < -0.5

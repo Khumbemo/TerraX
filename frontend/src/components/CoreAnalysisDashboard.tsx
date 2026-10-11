@@ -8,13 +8,14 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const SPI_SCALES = [1, 3, 6, 12];
 
 /** SPI classes of McKee et al. (1993), with the same boundaries as the server (processing/climate.py). */
+/** SPI class (McKee, Doesken & Kleist 1993): wet classes include their lower bound, dry classes their upper bound, as in the Python server. */
 function spiClass(v: number): string {
   if (v >= 2) return 'Extremely wet';
   if (v >= 1.5) return 'Very wet';
   if (v >= 1) return 'Moderately wet';
-  if (v >= -1) return 'Near normal';
-  if (v >= -1.5) return 'Moderately dry';
-  if (v >= -2) return 'Severely dry';
+  if (v > -1) return 'Near normal';
+  if (v > -1.5) return 'Moderately dry';
+  if (v > -2) return 'Severely dry';
   return 'Extremely dry';
 }
 
