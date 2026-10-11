@@ -8,8 +8,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .. import storage
-from ..processing.render import composite_rgba, png_bytes, preview
-from ..processing.rio import Raster, apply_qa, qa_masked
+from ..processing.render import PREVIEW_MAX_SIDE, composite_rgba, png_bytes
+from ..processing.rio import Raster, qa_masked
 
 router = APIRouter()
 
@@ -33,31 +33,35 @@ def composite(file_id: str, bands: str = Query(..., description="three 0-based b
         raise HTTPException(400, f"Choose three bands between 1 and {r.meta.bands}.")
     if not 0 <= lo < hi <= 100:
         raise HTTPException(400, "Set the stretch as two percentiles between 0 and 100, low below high (for example 2 and 98).")
-    grids = r.read_bands(idx)
+    # A preview needs only a decimated read, not the whole bands.
+    grids = r.overview(idx, max_side=PREVIEW_MAX_SIDE)
     if qaBand is not None and qaKind in ("scl", "landsat") and 0 <= qaBand < r.meta.bands:
-        apply_qa(r, grids, {"band": qaBand, "kind": qaKind})
-    rgba, _ = composite_rgba([preview(g.data) for g in grids], (lo / 100, hi / 100))
+        bad = qa_masked(qaKind, r.overview([qaBand], max_side=PREVIEW_MAX_SIDE)[0])
+        for g in grids:
+            g[bad] = np.nan
+    rgba, _ = composite_rgba(grids, (lo / 100, hi / 100))
     return Response(png_bytes(rgba), media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/api/rasters/{file_id}/pixel")
 def pixel(file_id: str, col: float, row: float, width: int, height: int, qaBand: int | None = None, qaKind: str | None = None) -> dict:
-    """Values of every band at a point given in preview-grid coordinates (width × height)."""
+    """Values of every band at a point given in preview-grid coordinates (width × height), read from the full-resolution file."""
     r = _raster(file_id)
-    gc = int(min(r.gw - 1, max(0, col / width * r.gw)))
-    gr = int(min(r.gh - 1, max(0, row / height * r.gh)))
-    grids = r.read_bands(list(range(r.meta.bands)))
-    values = [None if not np.isfinite(g.data[gr, gc]) else float(g.data[gr, gc]) for g in grids]
+    W, H = r.meta.width, r.meta.height
+    gc = int(min(W - 1, max(0, col / width * W)))
+    gr = int(min(H - 1, max(0, row / height * H)))
+    values = r.pixel(gc, gr)
     lat = lon = None
     if r.meta.bbox:
         from ..processing.rio import grid_to_lonlat
 
-        ll = grid_to_lonlat(r, r.gw, r.gh)
+        ll = grid_to_lonlat(r, W, H)
         if ll:
             lon, lat = ll(gc + 0.5, gr + 0.5)
     masked = None
     if qaBand is not None and qaKind in ("scl", "landsat") and 0 <= qaBand < r.meta.bands:
-        masked = bool(qa_masked(qaKind, np.array([grids[qaBand].data[gr, gc]]))[0])
+        q = values[qaBand]
+        masked = bool(qa_masked(qaKind, np.array([np.nan if q is None else q]))[0])
     return {"col": gc, "row": gr, "values": values, "bandNames": r.meta.band_names, "lat": lat, "lon": lon, "masked": masked}
 
 

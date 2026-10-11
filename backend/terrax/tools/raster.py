@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from ..config import settings
 from ..processing.indices import INDICES
 from ..processing.rasterset import analyze_stack, dataset, raster_report, stack_markdown
-from ..processing.render import preview, ramp_rgba
+from ..processing.render import ramp_rgba
 from ..processing.report import with_quality
 from ..processing.rio import Raster
 from . import tool
@@ -14,16 +15,15 @@ from .context import ToolContext, ToolError
 
 @tool("raster")
 def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
-    r = raster(ctx, inputs, "file")
+    r = raster(ctx, inputs, "file", full=True)
     view = params.get("view") or {"mode": "band", "band": 0}
     if view.get("mode") == "index":
         view = {**view, "bands": bands(view, "bands")}
-    ds, grid = dataset(r, view, boundary(params))
+    ds, pv = dataset(r, view, boundary(params))
     ctx.progress(0.6, "Rendering preview")
     s = ds["stats"]
     image = None
     if s:
-        pv = preview(grid.data)
         url = ctx.png("preview.png", ramp_rgba(pv, s["min"], s["max"]))
         ds["preview"] = {"url": url, "width": int(pv.shape[1]), "height": int(pv.shape[0]), "min": s["min"], "max": s["max"]}
         if r.meta.latlng_bounds:
@@ -43,7 +43,7 @@ def run_stack(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         f = ctx.file(fid)
         if f.kind != "raster":
             raise ToolError(f"{f.name} is not a GeoTIFF raster.")
-        rasters.append(Raster(f.path, f.name))
+        rasters.append(Raster(f.path, f.name, max_pixels=settings().max_pixels))
         ctx.progress(0.1 + 0.6 * i / len(ids), f"Reading {f.name}")
     qa = params.get("qa")
     r = analyze_stack(rasters, params.get("index"), bands(params, "bands"), qa, boundary(params))

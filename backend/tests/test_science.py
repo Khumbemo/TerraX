@@ -230,7 +230,7 @@ def test_eight_connected_labels_and_mmu():
     assert n == 2
     assert sorted(patch_areas(labels, n, np.ones(4))[1:]) == [2, 3]
     m = apply_mmu(cls, cls == 2, 1, 3, np.ones(4))
-    assert m["removedPatches"] == 1 and m["removedMask"].sum() == 2 and m["keptCount"] == 1 and (cls == 2).sum() == 3
+    assert m["removedPatches"] == 1 and m["removedPixels"] == 2 and m["keptCount"] == 1 and (cls == 2).sum() == 3
 
 
 # ── EXIF ─────────────────────────────────────────────────────────────────────

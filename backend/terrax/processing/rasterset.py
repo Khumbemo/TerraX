@@ -3,16 +3,20 @@ preview and report; plus multi-date series with a trend test."""
 
 from __future__ import annotations
 
+import math
+import threading
 from typing import Any
 
 import numpy as np
 
 from .dates import date_from_filename, decimal_year
-from .indices import compute_index_grid, index_def
+from .indices import IndexPlan, index_def, plan_index
+from .render import PREVIEW_MAX_SIDE
 from .report import format_bytes
-from .rio import Grid, Raster, apply_qa, same_grid
-from .stats import fmt, fmt_p, histogram, quantile_sorted, summarize, trend_test
-from .zonal import clip_to_boundary
+from .rio import QA_KINDS, Raster, qa_masked, same_grid
+from .stats import Summary, fmt, fmt_p, trend_test
+from .tiles import Strip, StripPlan
+from .zonal import clip_note
 
 
 def _valid_qa(view: dict, bands: int) -> dict | None:
@@ -20,32 +24,138 @@ def _valid_qa(view: dict, bands: int) -> dict | None:
     return qa if qa and 0 <= int(qa.get("band", -1)) < bands and qa.get("kind") in ("scl", "landsat") else None
 
 
-def read_layer(r: Raster, view: dict, boundary=None) -> tuple[Grid, dict, list[str]]:
-    """The grid for a view {mode: band|index, band, index, bands, qa}; returns (grid, normalised view, hints)."""
-    qa = _valid_qa(view, r.meta.bands)
-    if view.get("mode") == "index":
-        grid, notes = compute_index_grid(r, view["index"], view.get("bands") or {})
-        if qa:
-            notes.append(apply_qa(r, [grid], qa)[1])
-        clip = clip_to_boundary(r, grid, boundary)
-        return grid, {"mode": "index", "index": view["index"], "bands": view.get("bands") or {}, "qa": qa}, ([clip] if clip else []) + notes
-    band = int(view.get("band", 0))
-    if band < 0 or band >= r.meta.bands:
-        band = 0
-    (grid,) = r.read_bands([band])
-    hints = []
-    if qa:
-        hints.append(apply_qa(r, [grid], qa)[1])
-    clip = clip_to_boundary(r, grid, boundary)
-    if clip:
-        hints.insert(0, clip)
-    return grid, {"mode": "band", "band": band, "qa": qa}, hints
+class _Layer:
+    """One band or spectral index of a raster, readable for any rows (QA mask applied)."""
+
+    def __init__(self, r: Raster, view: dict):
+        self.r = r
+        self.qa = _valid_qa(view, r.meta.bands)
+        self.notes: list[str] = []
+        if view.get("mode") == "index":
+            self.index: IndexPlan | None = plan_index(r, view["index"], view.get("bands") or {})
+            self.notes = list(self.index.notes)
+            self.view = {"mode": "index", "index": view["index"], "bands": view.get("bands") or {}, "qa": self.qa}
+        else:
+            self.index = None
+            band = int(view.get("band", 0))
+            self.band = band if 0 <= band < r.meta.bands else 0
+            self.view = {"mode": "band", "band": self.band, "qa": self.qa}
+
+    def rows(self, r0: int, r1: int) -> tuple[np.ndarray, int]:
+        """Values of rows r0..r1 and how many cells the quality mask removed."""
+        a = self.index.rows(self.r, r0, r1) if self.index else self.r.read_rows([self.band], r0, r1)[0]
+        masked = 0
+        if self.qa:
+            m = qa_masked(self.qa["kind"], self.r.read_rows([self.qa["band"]], r0, r1)[0])
+            a[m] = np.nan
+            masked = int(m.sum())
+        return a, masked
 
 
-def dataset(r: Raster, view: dict, boundary=None) -> tuple[dict, Grid]:
-    grid, view, hints = read_layer(r, view, boundary)
-    valid = grid.data[np.isfinite(grid.data)]
-    s = summarize(valid)
+class _Values:
+    """The finite values of a layer, gathered strip by strip into one float32 buffer (4 bytes a cell)."""
+
+    def __init__(self, cells: int):
+        self.buf = np.empty(cells, dtype=np.float32)
+        self.n = 0
+        self.lock = threading.Lock()
+
+    def add(self, v: np.ndarray) -> None:
+        with self.lock:
+            self.buf[self.n : self.n + v.size] = v
+            self.n += v.size
+
+    @property
+    def values(self) -> np.ndarray:
+        return self.buf[: self.n]
+
+
+def _summary(vals: np.ndarray) -> Summary | None:
+    """summarize() for a large float32 array without float64 copies of the whole of it.
+
+    Quartiles are exact (type 7 on the selected order statistics); the mean and
+    SD use float64 sums over blocks, equal to summarize() up to rounding.
+    """
+    n = int(vals.size)
+    if not n:
+        return None
+    step = 4_000_000
+    total = sum(float(vals[i : i + step].astype(np.float64).sum()) for i in range(0, n, step))
+    mean = total / n
+    ss = sum(float(((vals[i : i + step].astype(np.float64) - mean) ** 2).sum()) for i in range(0, n, step))
+    ks = sorted({k for p in (0.25, 0.5, 0.75) for k in (math.floor((n - 1) * p), math.ceil((n - 1) * p))} | {0, n - 1})
+    part = np.partition(vals, ks)
+
+    def q(p: float) -> float:
+        h = (n - 1) * p
+        lo, hi = math.floor(h), math.ceil(h)
+        a, b = float(part[lo]), float(part[hi])
+        return a + (h - lo) * (b - a)
+
+    return Summary(n=n, mean=mean, sd=math.sqrt(ss / (n - 1)) if n > 1 else 0.0, min=float(part[0]), max=float(part[-1]), median=q(0.5), q1=q(0.25), q3=q(0.75))
+
+
+def _histogram(vals: np.ndarray, vmin: float, vmax: float, bins: int = 30) -> list[dict]:
+    """histogram() counted in blocks."""
+    if vals.size == 0 or not (math.isfinite(vmin) and math.isfinite(vmax)):
+        return []
+    if vmin == vmax:
+        return [{"x0": vmin, "x1": vmax, "count": int(vals.size)}]
+    width = (vmax - vmin) / bins
+    counts = np.zeros(bins, dtype=np.int64)
+    for i in range(0, vals.size, 4_000_000):
+        a = vals[i : i + 4_000_000].astype(np.float64)
+        counts += np.bincount(np.minimum(bins - 1, np.floor((a - vmin) / width).astype(int)), minlength=bins)
+    return [{"x0": vmin + i * width, "x1": vmin + (i + 1) * width, "count": int(counts[i])} for i in range(bins)]
+
+
+def _gather(r: Raster, layer: _Layer, boundary=None, with_preview: bool = False) -> tuple[np.ndarray, np.ndarray | None, int, int]:
+    """Finite values of a layer (float32), its preview grid, cells masked by QA and cells inside the boundary."""
+    plan = StripPlan(r, boundary)
+    w, h = plan.width, plan.height
+    pv = pys = pxs = None
+    if with_preview:
+        sv = min(1.0, PREVIEW_MAX_SIDE / max(h, w))
+        ph, pw = max(1, round(h * sv)), max(1, round(w * sv))
+        pys = np.minimum(h - 1, (np.arange(ph) / sv).astype(int))
+        pxs = np.minimum(w - 1, (np.arange(pw) / sv).astype(int))
+        pv = np.full((ph, pw), np.nan, dtype=np.float32)
+    collected = _Values(w * h)
+
+    def work(st: Strip) -> tuple[int, int]:
+        a, masked = layer.rows(st.r0, st.r1)
+        inside = 0
+        if st.inside is not None:
+            a[~st.inside] = np.nan
+            inside = int(st.inside.sum())
+        if pv is not None and pys is not None and pxs is not None:
+            sel = np.flatnonzero((pys >= st.r0) & (pys < st.r1))
+            if sel.size:
+                pv[sel] = a[pys[sel] - st.r0][:, pxs]
+        collected.add(a[np.isfinite(a)])
+        return masked, inside
+
+    parts = plan.map(work)
+    inside = sum(p[1] for p in parts)
+    plan.check_overlap(inside)
+    return collected.values, pv, sum(p[0] for p in parts), inside
+
+
+def dataset(r: Raster, view: dict, boundary=None) -> tuple[dict, np.ndarray]:
+    """Statistics, histogram and hints of one layer, read in strips at full resolution; also returns its preview grid."""
+    layer = _Layer(r, view)
+    w, h = r.gw, r.gh
+    vals, pv, masked, inside = _gather(r, layer, boundary, with_preview=True)
+    assert pv is not None
+    hints: list[str] = []
+    if boundary:
+        hints.append(clip_note(boundary, inside))
+    if layer.qa:
+        frac = masked / (w * h) if w * h else 0.0
+        layer.notes.append(f"Quality mask from band {layer.qa['band'] + 1} ({QA_KINDS[layer.qa['kind']]['rule']}) removed {frac * 100:.1f} % of pixels.")
+    hints += layer.notes
+    s = _summary(vals)
+    view = layer.view
     warnings = list(r.meta.warnings)
     if not s:
         warnings.append("Every pixel is empty or marked as no-data.")
@@ -57,11 +167,11 @@ def dataset(r: Raster, view: dict, boundary=None) -> tuple[dict, Grid]:
     m = r.meta
     ds = {
         "kind": "raster", "filename": m.filename, "sizeBytes": m.size_bytes, "width": m.width, "height": m.height, "bands": m.bands, "view": view,
-        "noData": m.nodata, "stats": s.dict() if s else None, "validPixels": int(valid.size), "totalPixels": int(grid.data.size),
-        "statsResampled": grid.resample_factor > 1, "histogram": histogram(valid, s.min, s.max, 30) if s else [], "bbox": m.bbox, "epsg": m.epsg,
+        "noData": m.nodata, "stats": s.dict() if s else None, "validPixels": int(vals.size), "totalPixels": int(w * h),
+        "statsResampled": r.resample_factor > 1, "histogram": _histogram(vals, s.min, s.max, 30) if s else [], "bbox": m.bbox, "epsg": m.epsg,
         "latLngBounds": m.latlng_bounds, "pixelSize": m.pixel_size, "hints": hints, "warnings": warnings, "bandNames": m.band_names,
     }
-    return ds, grid
+    return ds, pv
 
 
 def _num_text(v: float) -> str:
@@ -118,15 +228,16 @@ def analyze_stack(rasters: list[Raster], index: str | None, bands: dict, qa: dic
     label = index_def(index).short if index else "Band 1"
     rows: list[dict[str, Any]] = []
     for r, when in dated:
-        grid = compute_index_grid(r, index, bands)[0] if index and r.meta.bands > 1 else r.read_bands([0])[0]
-        if qa and qa.get("band") is not None and qa["band"] < r.meta.bands and r.meta.bands > 1:
-            apply_qa(r, [grid], qa)
-        if boundary:
-            clip_to_boundary(r, grid, boundary)
-        vals = np.sort(grid.data[np.isfinite(grid.data)].astype(np.float64))
-        frac = vals.size / grid.data.size if grid.data.size else 0.0
-        rows.append({"filename": r.meta.filename, "date": when, "mean": float(vals.mean()) if vals.size else None,
-                     "median": quantile_sorted(vals, 0.5) if vals.size else None, "validFraction": frac, "sparse": frac < MIN_VALID})
+        multi = r.meta.bands > 1
+        view = {"mode": "index", "index": index, "bands": bands} if index and multi else {"mode": "band", "band": 0}
+        if qa and multi:
+            view["qa"] = qa
+        vals, _, _, _ = _gather(r, _Layer(r, view), boundary)
+        st = _summary(vals)
+        cells = r.gw * r.gh
+        frac = vals.size / cells if cells else 0.0
+        rows.append({"filename": r.meta.filename, "date": when, "mean": st.mean if st else None,
+                     "median": st.median if st else None, "validFraction": frac, "sparse": frac < MIN_VALID})
     used = [x for x in rows if not x["sparse"] and x["mean"] is not None]
     trend = trend_test([decimal_year(x["date"]) for x in used], [x["mean"] for x in used])
     if index and any(r.meta.bands == 1 for r in rasters):
