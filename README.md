@@ -24,7 +24,7 @@ The browser uploads a file once and gets an id. To analyse it, the browser start
 | **Residential plot** | Dated GeoTIFFs plus a boundary, or same-view photos | Radiometric normalisation, robust change detection, changes crossing the boundary (area and depth) |
 | **Weather & climate** | CSV, TSV or XLSX series; Open-Meteo ERA5 or NASA POWER fetched by the server | Mann–Kendall and Theil–Sen, seasonal cycle, Seasonal Kendall, anomalies, SPI-1/3/6/12, IMD rainfall classes |
 | **Satellite imagery** | Multiband GeoTIFF; Sentinel-2 L2A windows from Earth Search; several dated images | Composites, NDVI, EVI, SAVI, NDWI, NDMI, NBR, NDBI, SCL/QA_PIXEL cloud masks, pixel inspector, multi-date trend |
-| **Land cover** | Multiband GeoTIFF | k-means (scikit-learn, k-means++) clusters ordered by NDVI, with areas and editable names |
+| **Land cover** | Multiband GeoTIFF (+ training shapes) | k-means (scikit-learn, k-means++) clusters ordered by NDVI, or a random forest trained on labelled polygons or points and cross-validated by shape; a stratified validation sample and accuracy and area estimates with 95 % CIs (Olofsson et al. 2014) |
 | **Terrain** | DEM GeoTIFF | Slope and aspect (Horn 1981), hillshade, hypsometric integral, Priority-Flood + D8 flow, Strahler streams, watersheds, contours; optional D∞ flow (Tarboton 1997) with the topographic wetness index |
 | **Space & aerial photos** | JPG, PNG, WebP | Vegetation cover (ExG + Otsu), VARI, EXIF position on the map, comparison of two photos |
 
@@ -118,6 +118,7 @@ Measured on 4 cores, against the previous whole-grid code at full resolution:
 | Forest loss (NDVI change) | 100 MP × 2 dates | 41.8 s, 5.7 GB | 7.3 s, 0.8 GB |
 | Satellite statistics (exact quartiles) | 100 MP | 26.8 s, 3.2 GB | 5.3 s, 0.9 GB |
 | Land cover (k-means, k = 5) | 36 MP × 4 bands | 46.4 s, 5.5 GB | 14.2 s, 1.8 GB |
+| Land cover (random forest, 100 trees, 3 classes) | 36 MP × 4 bands | — | 166 s, 1.9 GB |
 | Terrain (slope, aspect, hillshade, layers) | 25 MP DEM | 243 s, 3.7 GB | 22 s, 2.4 GB |
 | Hydrology (fill, D8, Strahler, streams) | 25 MP DEM | 174 s, 3.7 GB | 42 s, 2.4 GB |
 
@@ -151,7 +152,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 153 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 157 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 

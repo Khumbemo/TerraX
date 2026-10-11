@@ -178,6 +178,25 @@ def main() -> None:
     residential()
     photo()
     inventory()
+    landcover_training()
+
+
+def landcover_training() -> None:
+    """Training shapes for satellite_4band_synthetic.tif: two boxes per cover type, placed with the scene's own geometry
+    (river |x − 60 − 0.2y| < 4, town within 22 px of (200, 40), forest elsewhere; 30 m pixels)."""
+    from pyproj import Transformer
+
+    to_ll = Transformer.from_crs(32646, 4326, always_xy=True)
+
+    def box(c0: float, r0: float, c1: float, r1: float, cls: str) -> dict:
+        ring = [to_ll.transform(E0 + c * RES, N0 - r * RES) for c, r in ((c0, r0), (c1, r0), (c1, r1), (c0, r1), (c0, r0))]
+        return {"type": "Feature", "properties": {"class": cls}, "geometry": {"type": "Polygon", "coordinates": [[[round(x, 7), round(y, 7)] for x, y in ring]]}}
+
+    feats = [box(63, 20, 66, 30, "Water"), box(87, 140, 90, 150, "Water"),
+             box(190, 30, 200, 40, "Built-up"), box(205, 40, 215, 50, "Built-up"),
+             box(120, 120, 135, 135, "Forest"), box(20, 150, 35, 165, "Forest")]
+    (OUT / "landcover_training_synthetic.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}, indent=1), encoding="utf-8")
+    print("wrote landcover_training_synthetic.geojson")
 
 
 def _pip(poly, x, y) -> np.ndarray:

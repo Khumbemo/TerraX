@@ -122,6 +122,36 @@ test('satellite: pixel inspector, stretch and a multi-date series', async ({ pag
   expect(errors).toEqual([]);
 });
 
+test('land cover: random forest from training shapes, validation sample and accuracy', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Land cover');
+  await page.selectOption('#landcover-method', 'rf');
+  await page.click('button:has-text("Try synthetic scene")');
+  await expect(page.locator('.stat', { hasText: 'Cross-validated by shape' })).toBeVisible();
+  await expect(page.locator('#landcover-label-1')).toHaveValue('Built-up');
+  await page.fill('#landcover-sample-total', '90');
+  await page.fill('#landcover-sample-min', '20');
+  await page.click('#landcover-sample');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Validation sample (CSV)")')]);
+  const csv = await (await import('node:fs/promises')).readFile((await dl.path())!, 'utf8');
+  // Label every point from the scene's true geometry (scripts/make_samples.py): river, town, forest.
+  const [head, ...lines] = csv.trim().split(/\r?\n/); // RFC 4180 CSV ends lines with CRLF
+  const cols = head.split(',');
+  const at = (name: string) => cols.indexOf(name);
+  const labelled = [head, ...lines.map(l => {
+    const v = l.split(',');
+    const x = Number(v[at('col')]) + 0.5, y = Number(v[at('row')]) + 0.5;
+    v[at('reference')] = Math.abs(x - 60 - y * 0.2) < 4 ? 'Water' : (x - 200) ** 2 + (y - 40) ** 2 < 22 ** 2 ? 'Built-up' : 'Forest';
+    return v.join(',');
+  })].join('\n');
+  expect(lines).toHaveLength(90);
+  await page.setInputFiles('#landcover-reference', { name: 'labelled.csv', mimeType: 'text/csv', buffer: Buffer.from(labelled) });
+  await expect(page.locator('#landcover-accuracy tbody tr')).toHaveCount(3);
+  await expect(page.locator('.stat', { hasText: 'Overall accuracy' })).toContainText('%');
+  await expect(page.locator('.report-card')).toContainText('Accuracy and area (stratified sample)');
+  expect(errors).toEqual([]);
+});
+
 test('land cover: classify, rename a class and export', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Land cover');

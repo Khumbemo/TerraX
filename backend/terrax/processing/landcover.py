@@ -50,17 +50,11 @@ def _combine_moments(parts: list[tuple[int, np.ndarray, np.ndarray, int, int]], 
     return mean, sd
 
 
-def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, boundary=None, qa: dict | None = None, seed: int = 7, max_training: int = 20_000) -> dict:
-    """k-means over every valid pixel, in strips: statistics, a training sample, then prediction strip by strip."""
-    if not bands:
-        raise ValueError("Choose at least one band.")
-    if not isinstance(k, int) or k < 2 or k > len(PALETTE):
-        raise ValueError(f"Choose between 2 and {len(PALETTE)} classes.")
-    plan = StripPlan(raster, boundary)
-    w, h, d = plan.width, plan.height, len(bands)
+def _strip_reader(raster: Raster, bands: list[int], qa: dict | None):
+    """Reads a strip as (pixels × bands of valid cells, valid mask, cells removed by QA, cells inside the boundary)."""
+    d = len(bands)
 
     def read(st: Strip) -> tuple[np.ndarray, np.ndarray, int, int]:
-        """(pixels × bands for valid cells, valid mask, cells removed by QA, cells inside the boundary)."""
         arrays = raster.read_rows(bands, st.r0, st.r1)
         masked = inside = 0
         if qa:
@@ -75,6 +69,52 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
         stack = np.stack([a.astype(np.float64) for a in arrays], axis=-1).reshape(-1, d)
         valid = np.all(np.isfinite(stack), axis=1)
         return stack[valid], valid, masked, inside
+
+    return read
+
+
+def _tally(raw: np.ndarray, valid: np.ndarray, X: np.ndarray, st: Strip, k: int, ri: int, ni: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-class pixel count, ground area, band sums and NDVI sum and count for one strip (raw: 0-based class per valid cell)."""
+    w = valid.size // (st.r1 - st.r0)
+    d = X.shape[1]
+    m2 = np.bincount(raw, weights=st.area[np.flatnonzero(valid) // w], minlength=k) if st.area is not None else np.zeros(k)
+    sums = np.stack([np.bincount(raw, weights=X[:, a], minlength=k) for a in range(d)], axis=1)
+    nd_s, nd_c = np.zeros(k), np.zeros(k)
+    if ri >= 0 and ni >= 0:
+        r, nr = X[:, ri], X[:, ni]
+        ok = (r + nr) != 0
+        nd = np.where(ok, (nr - r) / np.where(ok, nr + r, 1), 0)
+        nd_s = np.bincount(raw[ok], weights=nd[ok], minlength=k).astype(float)
+        nd_c = np.bincount(raw[ok], minlength=k).astype(float)
+    return np.bincount(raw, minlength=k).astype(float), m2, sums, nd_s, nd_c
+
+
+def _sum_tallies(parts, k: int, d: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    px, m2, sums, nd_s, nd_c = np.zeros(k), np.zeros(k), np.zeros((k, d)), np.zeros(k), np.zeros(k)
+    for a, b, c, e, f in parts:  # a loop rather than np.add.reduce: exact float order and simple types
+        px += a
+        m2 += b
+        sums += c
+        nd_s += e
+        nd_c += f
+    return px, m2, sums, nd_s, nd_c
+
+
+def _roles(bands: list[int], roles: dict) -> tuple[int, int]:
+    ri = bands.index(roles["red"]) if roles.get("red") is not None and roles["red"] in bands else -1
+    ni = bands.index(roles["nir"]) if roles.get("nir") is not None and roles["nir"] in bands else -1
+    return ri, ni
+
+
+def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, boundary=None, qa: dict | None = None, seed: int = 7, max_training: int = 20_000) -> dict:
+    """k-means over every valid pixel, in strips: statistics, a training sample, then prediction strip by strip."""
+    if not bands:
+        raise ValueError("Choose at least one band.")
+    if not isinstance(k, int) or k < 2 or k > len(PALETTE):
+        raise ValueError(f"Choose between 2 and {len(PALETTE)} classes.")
+    plan = StripPlan(raster, boundary)
+    w, h, d = plan.width, plan.height, len(bands)
+    read = _strip_reader(raster, bands, qa)
 
     # Pass 1: valid cells per strip and per-band mean and spread for the z-scores.
     def moments(st: Strip) -> tuple[int, np.ndarray, np.ndarray, int, int]:
@@ -113,8 +153,7 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
     km = KMeans(n_clusters=k, init="k-means++", n_init=1, max_iter=100, random_state=seed, algorithm="lloyd").fit(train)
 
     # Pass 3: classify every strip; class codes are cluster + 1 until they are ranked below.
-    ri = bands.index(roles["red"]) if roles.get("red") is not None and roles["red"] in bands else -1
-    ni = bands.index(roles["nir"]) if roles.get("nir") is not None and roles["nir"] in bands else -1
+    ri, ni = _roles(bands, roles)
     classes = np.zeros((h, w), dtype=np.uint8)
 
     def predict(st: Strip) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -123,24 +162,9 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
         c = np.zeros(valid.size, dtype=np.uint8)
         c[valid] = raw + 1
         classes[st.rows] = c.reshape(st.r1 - st.r0, w)
-        m2 = np.bincount(raw, weights=st.area[np.flatnonzero(valid) // w], minlength=k) if st.area is not None else np.zeros(k)
-        sums = np.stack([np.bincount(raw, weights=X[:, a], minlength=k) for a in range(d)], axis=1)
-        nd_s, nd_c = np.zeros(k), np.zeros(k)
-        if ri >= 0 and ni >= 0:
-            r, nr = X[:, ri], X[:, ni]
-            ok = (r + nr) != 0
-            nd = np.where(ok, (nr - r) / np.where(ok, nr + r, 1), 0)
-            nd_s = np.bincount(raw[ok], weights=nd[ok], minlength=k).astype(float)
-            nd_c = np.bincount(raw[ok], minlength=k).astype(float)
-        return np.bincount(raw, minlength=k).astype(float), m2, sums, nd_s, nd_c
+        return _tally(raw, valid, X, st, k, ri, ni)
 
-    areas_px, m2, sums, nd_s, nd_c = np.zeros(k), np.zeros(k), np.zeros((k, d)), np.zeros(k), np.zeros(k)
-    for px_s, m2_s, sums_s, nds_s, ndc_s in plan.map(predict):
-        areas_px += px_s
-        m2 += m2_s
-        sums += sums_s
-        nd_s += nds_s
-        nd_c += ndc_s
+    areas_px, m2, sums, nd_s, nd_c = _sum_tallies(plan.map(predict), k, d)
     ndvi: list[float | None] = [float(nd_s[j] / nd_c[j]) if (ri >= 0 and ni >= 0 and nd_c[j]) else None for j in range(k)]
     # Order clusters by NDVI (or overall brightness) so class numbers are stable and readable.
     known = [v for v in ndvi if v is not None]
@@ -172,7 +196,147 @@ def classify_land_cover(raster: Raster, bands: list[int], k: int, roles: dict, b
     if raster.resample_factor > 1:
         notes.append(f"Classified on a resampled grid (each cell = {fmt(raster.resample_factor, 3)} original pixels).")
     return {"filename": raster.meta.filename, "bands": bands, "k": k, "width": w, "height": h, "classes": classes, "stats": stats,
-            "iterations": int(km.n_iter_), "trainingPixels": int(train.shape[0]), "notes": notes}
+            "iterations": int(km.n_iter_), "trainingPixels": int(train.shape[0]), "method": "kmeans", "notes": notes, "_rowArea": geo.cell_area if geo else None}
+
+
+LABEL_FIELDS = ("class", "label", "landcover", "land_cover", "lc", "type", "name")
+
+
+def training_labels(fc: dict, field: str | None) -> tuple[str, list[tuple[dict, str]]]:
+    """The label field (given, or the first common one present) and each usable feature with its label."""
+    feats = [f for f in fc.get("features", []) if (f or {}).get("geometry") and f["geometry"].get("type") in ("Polygon", "MultiPolygon", "Point", "MultiPoint")]
+    if not feats:
+        raise ValueError("The training file has no polygons or points.")
+    fields = sorted({k for f in feats for k in (f.get("properties") or {})})
+    if not field:
+        field = next((c for c in LABEL_FIELDS for k in fields if k.lower() == c), None)
+        field = next(k for k in fields if k.lower() == field) if field else None
+    if not field or field not in fields:
+        raise ValueError(f"Choose the property that holds each shape’s class. Properties in the file: {', '.join(fields) or 'none'}.")
+    out = [(f, str(f["properties"][field]).strip()) for f in feats if (f.get("properties") or {}).get(field) not in (None, "")]
+    if not out:
+        raise ValueError(f"No training shape has a value in “{field}”.")
+    return field, out
+
+
+def classify_supervised(raster: Raster, bands: list[int], training: dict, roles: dict, label_field: str | None = None, boundary=None, qa: dict | None = None,
+                        seed: int = 7, max_per_class: int = 5000, trees: int = 100, threads: int = 1) -> dict:
+    """Random forest (Breiman 2001) trained on labelled polygons or points, cross-validated by shape, applied strip by strip."""
+    from affine import Affine
+    from rasterio.features import rasterize
+    from rasterio.warp import transform_geom
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import StratifiedGroupKFold
+
+    if not bands:
+        raise ValueError("Choose at least one band.")
+    field, shapes = training_labels(training, label_field)
+    labels = sorted({lab for _, lab in shapes}, key=str.lower)
+    if len(labels) < 2:
+        raise ValueError("Training needs at least two classes.")
+    if len(labels) > len(PALETTE):
+        raise ValueError(f"Use at most {len(PALETTE)} classes ({len(labels)} found in “{field}”).")
+    code = {lab: i + 1 for i, lab in enumerate(labels)}
+    if not raster.meta.bbox or (not raster.meta.geographic and raster.crs is None):
+        raise ValueError("Training shapes need a georeferenced raster with a coordinate reference system.")
+    geoms = []
+    for i, (f, lab) in enumerate(shapes):
+        g = f["geometry"] if raster.meta.geographic else transform_geom("EPSG:4326", raster.crs, f["geometry"])
+        geoms.append((g, code[lab], i + 1))
+    plan = StripPlan(raster, boundary)
+    w, h, d = plan.width, plan.height, len(bands)
+    read = _strip_reader(raster, bands, qa)
+
+    # Pass 1: pixels under the training shapes (cell centres; where shapes overlap, the later one wins).
+    def gather(st: Strip) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+        tr = raster.transform @ Affine.translation(0, st.r0)
+        shape = (st.r1 - st.r0, w)
+        y = rasterize(((g, c) for g, c, _ in geoms), out_shape=shape, transform=tr, fill=0, dtype="uint8").ravel()
+        gid = rasterize(((g, i) for g, _, i in geoms), out_shape=shape, transform=tr, fill=0, dtype="int32").ravel()
+        X, valid, masked, inside = read(st)
+        yv, gv = y[valid], gid[valid]
+        keep = yv > 0
+        return X[keep], yv[keep], gv[keep], masked, inside
+
+    parts = plan.map(gather)
+    plan.check_overlap(sum(p[4] for p in parts))
+    X = np.vstack([p[0] for p in parts]) if parts else np.empty((0, d))
+    y = np.concatenate([p[1] for p in parts]) if parts else np.empty(0, np.uint8)
+    groups = np.concatenate([p[2] for p in parts]) if parts else np.empty(0, np.int32)
+    found = {int(c): int((y == c).sum()) for c in np.unique(y)}
+    missing = [lab for lab in labels if found.get(code[lab], 0) == 0]
+    if missing:
+        raise ValueError(f"No valid pixels fall inside the training shapes for: {', '.join(missing)}. Check that the shapes lie on the image.")
+    pixels_total = int(y.size)
+    # Balance the classes: at most max_per_class pixels each, drawn at random.
+    rng = np.random.default_rng(seed + 202)
+    take = np.concatenate([idx if idx.size <= max_per_class else rng.choice(idx, size=max_per_class, replace=False) for idx in (np.flatnonzero(y == c) for c in range(1, len(labels) + 1))])
+    take.sort()
+    X, y, groups = X[take], y[take], groups[take]
+
+    # Cross-validation by shape: pixels of one polygon are spatially autocorrelated, so they never split across folds.
+    shapes_per_class = {lab: int(np.unique(groups[y == code[lab]]).size) for lab in labels}
+    folds = min(5, *shapes_per_class.values())
+    validation: dict | None = None
+    if folds >= 2:
+        pred = np.zeros_like(y)
+        cv = StratifiedGroupKFold(n_splits=folds, shuffle=True, random_state=seed)
+        for tr_i, te_i in cv.split(X, y, groups):
+            m = RandomForestClassifier(n_estimators=trees, random_state=seed, n_jobs=threads).fit(X[tr_i], y[tr_i])
+            pred[te_i] = m.predict(X[te_i])
+        k = len(labels)
+        cm = np.zeros((k, k), dtype=np.int64)
+        np.add.at(cm, (pred.astype(np.int64) - 1, y.astype(np.int64) - 1), 1)  # rows: predicted, columns: reference
+        diag = np.diag(cm).astype(float)
+        validation = {"folds": folds, "confusion": cm.tolist(), "overall": float(diag.sum() / cm.sum()),
+                      "user": [None if cm[i].sum() == 0 else float(diag[i] / cm[i].sum()) for i in range(k)],
+                      "producer": [None if cm[:, j].sum() == 0 else float(diag[j] / cm[:, j].sum()) for j in range(k)]}
+    rf = RandomForestClassifier(n_estimators=trees, random_state=seed, n_jobs=threads).fit(X, y)
+    rf.n_jobs = 1  # strips already run in parallel threads (tree traversal releases the GIL)
+
+    # Pass 2: classify every strip.
+    ri, ni = _roles(bands, roles)
+    k = len(labels)
+    classes = np.zeros((h, w), dtype=np.uint8)
+
+    def predict(st: Strip):
+        Xs, valid, _, _ = read(st)
+        raw = np.empty(Xs.shape[0], dtype=np.int64)
+        for i in range(0, Xs.shape[0], 250_000):  # bounds the per-tree probability arrays
+            raw[i : i + 250_000] = rf.predict(Xs[i : i + 250_000]).astype(np.int64) - 1
+        c = np.zeros(valid.size, dtype=np.uint8)
+        c[valid] = raw + 1
+        classes[st.rows] = c.reshape(st.r1 - st.r0, w)
+        return _tally(raw, valid, Xs, st, k, ri, ni)
+
+    px, m2, sums, nd_s, nd_c = _sum_tallies(plan.map(predict), k, d)
+    n = float(px.sum()) or 1.0
+    geo = plan.geo
+    stats = [{"id": j + 1, "label": labels[j], "pixels": int(px[j]), "ha": float(m2[j] / 10_000) if geo else None, "share": float(px[j] / n),
+              "bandMeans": [float(v) for v in sums[j] / (px[j] or 1)], "ndvi": float(nd_s[j] / nd_c[j]) if (ri >= 0 and ni >= 0 and nd_c[j]) else None,
+              "trainingPixels": int((y == j + 1).sum()), "trainingShapes": shapes_per_class[labels[j]]} for j in range(k)]
+    notes: list[str] = []
+    if boundary:
+        notes.append(clip_note(boundary, sum(p[4] for p in parts)))
+    if qa:
+        frac = sum(p[3] for p in parts) / (w * h) if w * h else 0.0
+        notes.append(f"Quality mask from band {qa['band'] + 1} ({QA_KINDS[qa['kind']]['rule']}) removed {frac * 100:.1f} % of pixels.")
+    notes += [
+        f"Random forest (Breiman 2001; scikit-learn, {trees} trees, √bands features per split) on {d} band{'' if d == 1 else 's'} ({', '.join(f'band {b + 1}' for b in bands)}), "
+        f"trained on {y.size:,} pixels from {len(shapes)} shapes labelled by “{field}” ({pixels_total:,} under the shapes; at most {max_per_class:,} per class, drawn at random).",
+    ]
+    if validation:
+        notes.append(f"Cross-validation by shape ({folds} folds; a shape’s pixels are never split between training and test): {validation['overall'] * 100:.1f} % of held-out "
+                     "training pixels classified correctly. Training shapes are chosen, not a random sample, so this is not the map’s accuracy: estimate that with a stratified sample.")
+    else:
+        few = [lab for lab, n_s in shapes_per_class.items() if n_s < 2]
+        notes.append(f"No cross-validation: {', '.join(few)} {'has' if len(few) == 1 else 'have'} only one training shape. Draw at least two per class, apart from each other.")
+    if geo:
+        notes.append(geo.note)
+    if raster.resample_factor > 1:
+        notes.append(f"Classified on a resampled grid (each cell = {fmt(raster.resample_factor, 3)} original pixels).")
+    return {"filename": raster.meta.filename, "bands": bands, "k": k, "width": w, "height": h, "classes": classes, "stats": stats, "labels": labels,
+            "labelField": field, "trainingPixels": int(y.size), "validation": validation, "method": "rf", "notes": notes, "_rowArea": geo.cell_area if geo else None}
 
 
 def land_cover_markdown(r: dict, labels: list[str]) -> str:
@@ -182,8 +346,20 @@ def land_cover_markdown(r: dict, labels: list[str]) -> str:
         area = f"{c['pixels']:,} px" if c["ha"] is None else f"{fmt(c['ha'], 4)} ha"
         nd = "—" if c["ndvi"] is None else fmt(c["ndvi"], 3)
         rows.append(f"| {c['id']} | {label} | {area} | {c['share'] * 100:.1f} % | {nd} | {' · '.join(fmt(v, 4) for v in c['bandMeans'])} |")
-    return "\n".join([
-        "## Dataset", "", f"- File: {r['filename']}; bands {', '.join(str(b + 1) for b in r['bands'])}; {r['k']} clusters", "",
-        "## Results", "", "| Class | Label | Area | Share | Mean NDVI | Band means |", "|---|---|---|---|---|---|", *rows, "",
-        "## Method and limits", "", *[f"- {n}" for n in r["notes"]],
-    ])
+    rf = r.get("method") == "rf"
+    what = f"random forest, {r['k']} classes from training shapes" if rf else f"{r['k']} clusters"
+    out = [
+        "## Dataset", "", f"- File: {r['filename']}; bands {', '.join(str(b + 1) for b in r['bands'])}; {what}", "",
+        "## Results", "", "| Class | Label | Mapped area | Share | Mean NDVI | Band means |", "|---|---|---|---|---|---|", *rows, "",
+    ]
+    v = r.get("validation")
+    if rf and v:
+        names = [labels[i] if i < len(labels) and labels[i] else r["labels"][i] for i in range(r["k"])]
+        out += ["### Cross-validation by training shape (pixels; rows: predicted, columns: reference)", "",
+                "| | " + " | ".join(names) + " | User’s |", "|---" * (len(names) + 2) + "|"]
+        for i, row in enumerate(v["confusion"]):
+            ua = v["user"][i]
+            out.append(f"| **{names[i]}** | " + " | ".join(f"{x:,}" for x in row) + f" | {'—' if ua is None else f'{ua * 100:.1f} %'} |")
+        out += ["| **Producer’s** | " + " | ".join("—" if p is None else f"{p * 100:.1f} %" for p in v["producer"]) + f" | **{v['overall'] * 100:.1f} %** |", ""]
+    out += ["## Method and limits", "", *[f"- {n}" for n in r["notes"]]]
+    return "\n".join(out)

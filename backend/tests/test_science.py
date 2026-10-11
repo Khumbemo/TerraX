@@ -458,3 +458,95 @@ def test_dinf_specific_catchment_area_on_a_cone_and_planes():
         # Mass balance: everything leaves through outlet cells (no lower facet), and nothing is lost on the way.
         outlets = d["tanb"] == 0
         assert d["acc"][outlets].sum() == pytest.approx(n * n, rel=1e-9), deg
+
+
+def _three_class_scene(tmp_path, n=240, seed=3):
+    """A 4-band UTM scene: water (west), forest (centre), bare soil (east), with noise; and its true class map."""
+    import rasterio
+    from rasterio.transform import from_origin
+
+    rng = np.random.default_rng(seed)
+    truth = np.ones((n, n), np.uint8)
+    truth[:, n // 3 :] = 2
+    truth[:, 2 * n // 3 :] = 3
+    means = {1: [0.06, 0.05, 0.03, 0.02], 2: [0.03, 0.06, 0.04, 0.40], 3: [0.12, 0.14, 0.18, 0.22]}  # blue, green, red, NIR
+    img = np.stack([np.choose(truth - 1, [means[c][b] for c in (1, 2, 3)]) + rng.normal(0, 0.012, truth.shape) for b in range(4)]).astype(np.float32)
+    path = tmp_path / "scene.tif"
+    tr = from_origin(500000, 3000000, 10, 10)
+    with rasterio.open(path, "w", driver="GTiff", width=n, height=n, count=4, dtype="float32", crs="EPSG:32646", transform=tr) as d:
+        d.write(img)
+    return path, truth, tr
+
+
+def _box(tr, c0, r0, c1, r1, label):
+    from pyproj import Transformer
+
+    t = Transformer.from_crs(32646, 4326, always_xy=True)
+    ring = [t.transform(*(tr @ (c, r))) for c, r in ((c0, r0), (c1, r0), (c1, r1), (c0, r1), (c0, r0))]
+    return {"type": "Feature", "properties": {"Class": label}, "geometry": {"type": "Polygon", "coordinates": [[list(p) for p in ring]]}}
+
+
+def test_random_forest_learns_a_known_scene_and_validates_by_shape(tmp_path):
+    from terrax.processing.landcover import classify_supervised
+    from terrax.processing.rio import Raster
+
+    path, truth, tr = _three_class_scene(tmp_path)
+    shapes = [_box(tr, 10, 10, 30, 30, "Water"), _box(tr, 20, 150, 40, 170, "Water"),
+              _box(tr, 100, 20, 120, 40, "Forest"), _box(tr, 110, 180, 130, 200, "Forest"),
+              _box(tr, 190, 60, 210, 80, "Bare"), _box(tr, 200, 200, 220, 220, "Bare")]
+    res = classify_supervised(Raster(path), [0, 1, 2, 3], {"type": "FeatureCollection", "features": shapes}, {"red": 2, "nir": 3})
+    assert res["labels"] == ["Bare", "Forest", "Water"] and res["labelField"] == "Class"
+    want = np.choose(truth - 1, [3, 2, 1])  # Water→3, Forest→2, Bare→1 in the alphabetical codes
+    assert (res["classes"] == want).mean() > 0.995
+    v = res["validation"]
+    assert v["folds"] == 2 and v["overall"] > 0.99 and np.array(v["confusion"]).sum() == res["trainingPixels"]
+    forest = next(c for c in res["stats"] if c["label"] == "Forest")
+    assert forest["ndvi"] > 0.7 and forest["ha"] == pytest.approx((want == 2).sum() * 0.01, rel=0.01)
+    assert "not the map’s accuracy" in " ".join(res["notes"])
+    # One shape per class: no cross-validation, and the notes say why.
+    one = classify_supervised(Raster(path), [0, 1, 2, 3], {"type": "FeatureCollection", "features": shapes[::2]}, {})
+    assert one["validation"] is None and "only one training shape" in " ".join(one["notes"])
+    with pytest.raises(ValueError, match="property that holds"):
+        classify_supervised(Raster(path), [0, 1, 2, 3], {"type": "FeatureCollection", "features": shapes}, {}, label_field="kind")
+
+
+def test_stratified_sample_and_area_estimates_recover_the_truth(tmp_path):
+    """A map with a known error: estimates from a stratified sample bracket the true areas (Olofsson et al. 2014)."""
+    from terrax.processing.accuracy import allocate, assess, stratified_sample
+
+    rng = np.random.default_rng(5)
+    n = 600
+    truth = np.where(rng.random((n, n)) < 0.08, 1, 2).astype(np.uint8)  # 8 % class 1
+    mapped = truth.copy()
+    flip = rng.random((n, n)) < 0.1  # 10 % of cells mislabelled
+    mapped[flip] = 3 - mapped[flip]
+    areas = np.array([(mapped == 1).sum(), (mapped == 2).sum()], float)
+    sizes = allocate(areas, 400, 100)
+    assert sizes.sum() == 400 and sizes.min() >= 100
+    pts = stratified_sample(mapped, [1, 2], sizes, seed=9)
+    assert len(pts) == 400 and len({(r, c) for r, c, _ in pts}) == 400
+    assert all(mapped[r, c] == k for r, c, k in pts)
+    cm = np.zeros((2, 2), int)
+    for r, c, k in pts:
+        cm[k - 1, truth[r, c] - 1] += 1
+    res = assess(cm, areas, ["A", "B"])
+    true_a = float((truth == 1).sum())
+    a = res["classes"][0]
+    assert abs(a["area"] - true_a) <= 2.5 * a["areaCi"] / 1.96  # within 2.5 SE of the truth
+    assert abs(a["area"] - true_a) < abs(areas[0] - true_a)  # better than counting mapped pixels
+    assert 0.85 < res["overallAccuracy"] < 0.95
+
+
+def test_accuracy_matches_olofsson_2014_worked_example():
+    """Olofsson et al. (2014), section 5 (Tables 8–9): 30 m pixels, areas in ha."""
+    from terrax.processing.accuracy import assess
+
+    counts = np.array([[66, 0, 5, 4], [0, 55, 8, 12], [1, 0, 153, 11], [2, 1, 9, 313]])
+    pixels = np.array([200_000, 150_000, 3_200_000, 6_450_000])
+    r = assess(counts, pixels * 0.09, ["Deforestation", "Forest gain", "Stable forest", "Stable non-forest"])
+    # Area estimates ± 95 % CI as published: 21,158 ± 6,158; 11,686 ± 3,756; 285,770 ± 15,510; 581,386 ± 16,282 ha.
+    for c, (area, ci) in zip(r["classes"], [(21_158, 6_158), (11_686, 3_756), (285_770, 15_510), (581_386, 16_282)], strict=True):
+        assert c["area"] == pytest.approx(area, abs=1) and c["areaCi"] == pytest.approx(ci, abs=2)
+    assert r["overallAccuracy"] == pytest.approx(0.95, abs=0.005) and r["overallCi"] == pytest.approx(0.02, abs=0.005)
+    assert r["classes"][0]["userAccuracy"] == pytest.approx(0.88, abs=0.005) and r["classes"][0]["userCi"] == pytest.approx(0.07, abs=0.005)
+    assert r["classes"][0]["producerAccuracy"] == pytest.approx(0.75, abs=0.005)

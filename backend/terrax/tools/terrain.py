@@ -11,7 +11,7 @@ from ..processing.render import hex_rgb, ramp_rgba, viridis
 from ..processing.rio import Ground, grid_to_lonlat, grid_to_lonlat_arrays
 from ..processing.terrain import ASPECTS, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
 from . import tool
-from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster
+from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster, save_npz
 from .context import ToolContext, ToolError
 
 WETNESS_COLORS = ["#f6efd2", "#a6cee3", "#3a87c0", "#0b3b78"]  # dry → wet
@@ -50,18 +50,6 @@ def flow_png(ctx_dir, name: str, z: np.ndarray, shade: np.ndarray, acc: np.ndarr
     thin = lambda a: a[::k, ::k] if (a is not None and k > 1) else a
     o = (outlet[0] // k, outlet[1] // k) if outlet is not None else None
     save_png(flow_rgba(thin(z), shade, thin(acc), thin(order), thin(basin), o), ctx_dir / name)
-
-
-def save_npz(path, arrays: dict[str, np.ndarray]) -> None:
-    """np.savez with deflate only for integer grids: float grids barely compress, and deflating them costs most of the save time."""
-    import zipfile
-
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-        for key, a in arrays.items():
-            info = zipfile.ZipInfo(key + ".npy")
-            info.compress_type = zipfile.ZIP_DEFLATED if a.dtype.kind in "iub" else zipfile.ZIP_STORED
-            with z.open(info, "w", force_zip64=True) as fh:
-                np.lib.format.write_array(fh, np.ascontiguousarray(a), allow_pickle=False)
 
 
 def flow_rgba(z: np.ndarray, hs: np.ndarray, acc: np.ndarray, order: np.ndarray, basin: np.ndarray | None = None, outlet: tuple[int, int] | None = None) -> np.ndarray:

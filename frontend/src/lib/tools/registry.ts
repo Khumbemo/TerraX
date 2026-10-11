@@ -76,7 +76,7 @@ export const TOOLS: ToolInfo[] = [
     name: 'Land cover',
     group: 'Remote sensing',
     summary: 'Group pixels into spectral classes, name them and measure their areas.',
-    measures: ['k-means clusters on chosen bands', 'Area and share per class', 'Editable class names and CSV export'],
+    measures: ['k-means clusters or a random forest from training shapes', 'Area and share per class', 'Validation sample, accuracy and area estimates with 95 % CIs'],
     formats: 'Multiband GeoTIFF',
     mark: 'Lc',
   },
