@@ -120,20 +120,29 @@ def prepare_geo_stack(images: list[dict], boundary: dict, buffer_m: float = 20, 
             raise ValueError(f"{r.meta.filename} is not in a supported CRS (WGS84, Web Mercator or UTM).")
         idx = _rgb_bands(r.meta.bands)
         uniq = sorted(set(idx))
-        grids = dict(zip(uniq, r.read_bands(uniq), strict=True))
-        g0 = grids[uniq[0]]
         dst = "EPSG:4326" if r.meta.geographic else r.crs
         x, y = Transformer.from_crs(epsg, dst, always_xy=True).transform(E, N)
+        # Nearest file pixel of each cell centre, at the file's own resolution.
         bx0, by0, bx1, by1 = r.meta.bbox
-        cw, ch = (bx1 - bx0) / g0.width, (by1 - by0) / g0.height
-        col = np.floor((x - bx0) / cw).astype(np.int64)
-        row = np.floor((by1 - y) / ch).astype(np.int64)
-        ok = (col >= 0) & (row >= 0) & (col < g0.width) & (row < g0.height)
+        fw, fh = r.meta.width, r.meta.height
+        with np.errstate(invalid="ignore"):
+            col = np.floor((x - bx0) / ((bx1 - bx0) / fw))
+            row = np.floor((by1 - y) / ((by1 - by0) / fh))
+            ok = (col >= 0) & (row >= 0) & (col < fw) & (row < fh)
         inside = int(ok.sum())
-        cc, rr = np.clip(col, 0, g0.width - 1), np.clip(row, 0, g0.height - 1)
-        rgb = [np.where(ok, grids[b].data[rr, cc], np.nan).astype(np.float32) for b in idx]
         if inside < width * height * 0.5:
             raise ValueError(f"{r.meta.filename} covers less than half of the property area. Check that it shows this property.")
+        col = np.where(ok, col, 0).astype(np.int64)
+        row = np.where(ok, row, 0).astype(np.int64)
+        c0, c1 = int(col[ok].min()), int(col[ok].max()) + 1
+        r0, r1 = int(row[ok].min()), int(row[ok].max()) + 1
+        # Only the window around the property is read, so large orthophotos keep their full resolution.
+        data, step = r.read_window(uniq, c0, r0, c1, r1)
+        if step > 1:
+            notes.append(f"{r.meta.filename}: the area around the property was read at every {step}th pixel to stay within TERRAX_MAX_PIXELS; the analysis grid is coarser than that anyway.")
+        cc, rr = (np.clip(col, c0, c1 - 1) - c0) // step, (np.clip(row, r0, r1 - 1) - r0) // step
+        bands = dict(zip(uniq, data, strict=True))
+        rgb = [np.where(ok, bands[b][rr, cc], np.nan).astype(np.float32) for b in idx]
         if inside < width * height:
             notes.append(f"{r.meta.filename} does not cover the whole analysis area; uncovered cells are ignored.")
         layers.append({"label": img["label"], "date": img.get("date"), "rgb": rgb})

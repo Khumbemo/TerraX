@@ -125,7 +125,9 @@ Results were identical in each case. A 100 MP DEM takes about 200 s and 6.3 GB f
 
 Terrain and hydrology have their own budget, `TERRAX_DEM_PIXELS` (default 25 MP, for example 5,000 × 5,000), because depression filling and flow routing need the whole DEM at once, about 100 bytes per pixel at peak. Slope, aspect and hillshade run in strips with a one-row halo. On the map, hydrology draws the highest stream orders that fit 250,000 vertices; the flow layer shows every channel cell, and the streams export holds every line.
 
-The residential plot comparison, contours and previews keep `TERRAX_GRID_PIXELS` (default 4 MP). Map overlays are drawn at display size, while the statistics, areas and polygons come from the full grid.
+The residential plot tool reads only the window around the property from each GeoTIFF, at the file's own resolution, so a large drone orthophoto is not coarsened first (for two 100 MP orthophotos: 2.6 s and 0.4 GB, instead of 6.5 s and 0.7 GB at a quarter of the resolution). Its analysis grid is at most 1,600 cells across, with 0.1 m cells at the finest.
+
+Contours and previews keep `TERRAX_GRID_PIXELS` (default 4 MP). Map overlays are drawn at display size, while the statistics, areas and polygons come from the full grid.
 
 For heavy workloads:
 
@@ -149,7 +151,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 147 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 149 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 
