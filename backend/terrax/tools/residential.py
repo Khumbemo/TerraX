@@ -59,7 +59,7 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
                 im = im.resize((round(im.width * s), round(im.height * s)), Image.Resampling.BILINEAR)
             photos.append({"rgba": np.asarray(im), "label": it.get("label") or f.name, "date": it.get("date")})
         gw = params.get("groundWidthM")
-        stack = prepare_photo_stack(photos, params.get("outline") or [], float(gw) if gw not in (None, "") else None)
+        stack = prepare_photo_stack(photos, params.get("outline") or [], None if gw is None or gw == "" else float(gw))
     last = len(stack["layers"]) - 1
     base = min(int(params.get("base", 0)), last - 1)
     ctx.progress(0.45, "Comparing images")

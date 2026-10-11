@@ -19,9 +19,10 @@ from typing import TypedDict
 import numpy as np
 from numba import njit
 
-from .rio import Ground, Raster, ground_geometry
-from .stats import fmt, summarize
-from .zonal import clip_to_boundary
+from .rio import Ground, Raster
+from .stats import ValueBuffer, fmt, summarize_large
+from .tiles import Strip, StripPlan
+from .zonal import clip_note
 
 
 class SlopeClass(TypedDict):
@@ -43,53 +44,88 @@ DR = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int64)
 DC = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int64)
 
 
+def _slope_rows(top: np.ndarray, mid: np.ndarray, bot: np.ndarray, dx: np.ndarray, dy: np.ndarray) -> dict:
+    """Horn (1981) slope, aspect and hillshade for the inner columns of rows `mid` (with their neighbours above and below)."""
+    a, b, c = top[:, :-2], top[:, 1:-1], top[:, 2:]
+    d, e, f = mid[:, :-2], mid[:, 1:-1], mid[:, 2:]
+    g, hh, i = bot[:, :-2], bot[:, 1:-1], bot[:, 2:]
+    ok = np.isfinite(a) & np.isfinite(b) & np.isfinite(c) & np.isfinite(d) & np.isfinite(e) & np.isfinite(f) & np.isfinite(g) & np.isfinite(hh) & np.isfinite(i)
+    with np.errstate(invalid="ignore"):
+        dzdx = (c + 2 * f + i - (a + 2 * d + g)) / (8 * dx)  # rows run north (a b c) to south (g h i)
+        dzdy = (g + 2 * hh + i - (a + 2 * b + c)) / (8 * dy)
+    s = np.arctan(np.hypot(dzdx, dzdy))
+    sdeg = np.degrees(s)
+    class_counts = []
+    lower = -math.inf
+    for cl in SLOPE_CLASSES:
+        class_counts.append(int((ok & (sdeg >= lower) & (sdeg < cl["upTo"])).sum()))
+        lower = cl["upTo"]
+    asp = np.arctan2(dzdy, -dzdx)
+    flat_m = ok & (sdeg < 2)
+    deg = np.degrees(asp)
+    comp = np.where(deg < 0, 90 - deg, np.where(deg > 90, 360 - deg + 90, 90 - deg))
+    steep = ok & ~flat_m
+    # Compass sector (N, NE, … NW) of each counted cell; cells outside the DEM or the boundary have no aspect.
+    sector = np.round(comp[steep] / 45).astype(np.int64) % 8
+    asp = np.where((dzdx == 0) & (dzdy == 0), 0, asp)
+    zen = math.radians(45)
+    az = math.radians((360 - 315 + 90) % 360)
+    sh = np.maximum(0, math.cos(zen) * np.cos(s) + math.sin(zen) * np.sin(s) * np.cos(az - asp))
+    return {"slope": np.where(ok, sdeg, np.nan), "shade": np.where(ok, sh, np.nan), "classes": class_counts,
+            "flat": int(flat_m.sum()), "aspects": np.bincount(sector, minlength=8)}
+
+
 def analyze_terrain(raster: Raster, boundary=None) -> dict:
-    (dem,) = raster.read_bands([0])
-    clip = clip_to_boundary(raster, dem, boundary)
-    geo = ground_geometry(raster.meta, dem.width, dem.height)
+    """Elevation, slope, aspect and hillshade of a DEM, computed in strips with one halo row above and below.
+
+    Results equal one whole-grid pass; the grids kept for rendering and
+    hydrology are float32 (the DEM itself is read as float32).
+    """
+    plan = StripPlan(raster, boundary)
+    geo = plan.geo
     if not geo:
         raise ValueError("The DEM has no ground units TerraX can use (supported: WGS84, Web Mercator, WGS84 UTM), so slope cannot be computed.")
-    z = dem.data.astype(np.float64)
-    h, w = z.shape
-    slope = np.full((h, w), np.nan)
-    shade = np.full((h, w), np.nan)
-    aspect_counts = [0] * 8
-    class_counts = [0] * len(SLOPE_CLASSES)
-    flat = 0
-    if h >= 3 and w >= 3:
-        a, b, c = z[:-2, :-2], z[:-2, 1:-1], z[:-2, 2:]
-        d, f = z[1:-1, :-2], z[1:-1, 2:]
-        g, hh, i = z[2:, :-2], z[2:, 1:-1], z[2:, 2:]
-        ok = np.isfinite(a) & np.isfinite(b) & np.isfinite(c) & np.isfinite(d) & np.isfinite(z[1:-1, 1:-1]) & np.isfinite(f) & np.isfinite(g) & np.isfinite(hh) & np.isfinite(i)
-        dx = geo.dx[1:-1, None]
-        dy = geo.dy[1:-1, None]
-        with np.errstate(invalid="ignore"):
-            dzdx = (c + 2 * f + i - (a + 2 * d + g)) / (8 * dx)  # rows run north (a b c) to south (g h i)
-            dzdy = (g + 2 * hh + i - (a + 2 * b + c)) / (8 * dy)
-        s = np.arctan(np.hypot(dzdx, dzdy))
-        sdeg = np.degrees(s)
-        inner = np.where(ok, sdeg, np.nan)
-        slope[1:-1, 1:-1] = inner
-        lower = -math.inf
-        for k, cl in enumerate(SLOPE_CLASSES):
-            class_counts[k] = int((ok & (sdeg >= lower) & (sdeg < cl["upTo"])).sum())
-            lower = cl["upTo"]
-        asp = np.arctan2(dzdy, -dzdx)
-        flat_m = ok & (sdeg < 2)
-        flat = int(flat_m.sum())
-        deg = np.degrees(asp)
-        comp = np.where(deg < 0, 90 - deg, np.where(deg > 90, 360 - deg + 90, 90 - deg))
-        steep = ok & ~flat_m
-        # Compass sector (N, NE, … NW) of each counted cell; cells outside the DEM or the boundary have no aspect.
-        sector = np.round(comp[steep] / 45).astype(np.int64) % 8
-        aspect_counts = [int(x) for x in np.bincount(sector, minlength=8)]
-        asp = np.where((dzdx == 0) & (dzdy == 0), 0, asp)
-        zen = math.radians(45)
-        az = math.radians((360 - 315 + 90) % 360)
-        sh = np.maximum(0, math.cos(zen) * np.cos(s) + math.sin(zen) * np.sin(s) * np.cos(az - asp))
-        shade[1:-1, 1:-1] = np.where(ok, sh, np.nan)
-    elev = summarize(z[np.isfinite(z)])
-    sstats = summarize(slope[np.isfinite(slope)])
+    h, w = plan.height, plan.width
+    dem = np.full((h, w), np.nan, dtype=np.float32)
+    slope = np.full((h, w), np.nan, dtype=np.float32)
+    shade = np.full((h, w), np.nan, dtype=np.float32)
+    elev_vals = ValueBuffer(h * w)
+    slope_vals = ValueBuffer(max(0, h - 2) * max(0, w - 2), dtype=np.float64)
+
+    def work(st: Strip) -> tuple[list[int], int, np.ndarray, int]:
+        e0, e1 = max(0, st.r0 - 1), min(h, st.r1 + 1)
+        z = raster.read_rows([0], e0, e1)[0]
+        m = plan.mask(e0, e1)
+        inside = 0
+        if m is not None:
+            z[~m] = np.nan
+            inside = int(m[st.r0 - e0 : st.r1 - e0].sum())
+        rows = z[st.r0 - e0 : st.r1 - e0]
+        dem[st.rows] = rows
+        elev_vals.add(rows[np.isfinite(rows)])
+        o0, o1 = max(st.r0, 1), min(st.r1, h - 1)  # rows with a neighbour above and below
+        if w < 3 or o0 >= o1:
+            return [0] * len(SLOPE_CLASSES), 0, np.zeros(8, dtype=np.int64), inside
+        zz = z.astype(np.float64)
+        r = _slope_rows(zz[o0 - 1 - e0 : o1 - 1 - e0], zz[o0 - e0 : o1 - e0], zz[o0 + 1 - e0 : o1 + 1 - e0], geo.dx[o0:o1, None], geo.dy[o0:o1, None])
+        slope[o0:o1, 1:-1] = r["slope"]
+        shade[o0:o1, 1:-1] = r["shade"]
+        sv = r["slope"]
+        slope_vals.add(sv[np.isfinite(sv)])
+        return r["classes"], r["flat"], r["aspects"], inside
+
+    parts = plan.map(work)
+    inside = sum(p[3] for p in parts)
+    plan.check_overlap(inside)
+    class_counts = [sum(p[0][k] for p in parts) for k in range(len(SLOPE_CLASSES))]
+    flat = sum(p[1] for p in parts)
+    aspects = np.zeros(8, dtype=np.int64)
+    for p in parts:
+        aspects += p[2]
+    aspect_counts = [int(x) for x in aspects]
+    clip = clip_note(boundary, inside, centres=True) if boundary else None
+    elev = summarize_large(elev_vals.values)
+    sstats = summarize_large(slope_vals.values)
     if not elev or not sstats:
         raise ValueError("The DEM has too few valid pixels to compute slope (a 3×3 neighbourhood is needed).")
     relief = elev.max - elev.min
@@ -101,13 +137,13 @@ def analyze_terrain(raster: Raster, boundary=None) -> dict:
     ]
     if clip:
         notes.insert(0, clip)
-    if dem.resample_factor > 1:
-        notes.append("The DEM was resampled for analysis; slopes on a coarser grid are gentler than at full resolution.")
+    if raster.resample_factor > 1:
+        notes.append(f"The DEM was resampled for analysis (each cell = {fmt(raster.resample_factor, 3)} original pixels; TERRAX_DEM_PIXELS sets the limit); slopes on a coarser grid are gentler than at full resolution.")
     if elev.max > 9000 or elev.min < -500:
         notes.append("Some elevations are outside −500 to 9,000 m; check the file for unmasked no-data values.")
     return {"filename": raster.meta.filename, "elevation": elev.dict(), "relief": relief, "hypsometricIntegral": (elev.mean - elev.min) / relief if relief > 0 else None,
             "slope": sstats.dict(), "slopeClassCounts": class_counts, "aspectCounts": aspect_counts, "flatCount": flat, "width": w, "height": h,
-            "notes": notes, "_hillshade": shade, "_slope": slope, "_dem": z, "_geo": geo}
+            "notes": notes, "_hillshade": shade, "_slope": slope, "_dem": dem, "_geo": geo}
 
 
 def terrain_markdown(t: dict, meta) -> str:
@@ -187,11 +223,10 @@ def _step(d, dx, dy):
 
 
 @njit(cache=True)
-def _route(filled, dxr, dyr, area_r, threshold):
+def _route(filled, dxr, dyr, area_r, threshold, queue):
     h, w = filled.shape
-    n = h * w
     direction = np.full((h, w), -1, dtype=np.int8)
-    indeg = np.zeros((h, w), dtype=np.int32)
+    indeg = np.zeros((h, w), dtype=np.uint8)  # at most 8 neighbours drain into a cell
     for r in range(h):
         for c in range(w):
             if np.isnan(filled[r, c]):
@@ -213,7 +248,6 @@ def _route(filled, dxr, dyr, area_r, threshold):
     order = np.zeros((h, w), dtype=np.uint8)
     max_in = np.zeros((h, w), dtype=np.uint8)
     max_in_n = np.zeros((h, w), dtype=np.uint8)
-    queue = np.empty(n, dtype=np.int64)
     qn = 0
     for r in range(h):
         for c in range(w):
@@ -260,7 +294,11 @@ def _route(filled, dxr, dyr, area_r, threshold):
 
 def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float) -> dict:
     filled, raised, max_raise = fill_depressions(dem)
-    direction, acc, order, max_order, length = _route(filled, geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), float(threshold_m2))
+    n = filled.size
+    # Cells in topological order; int32 indices halve this array whenever the grid allows it.
+    queue = np.empty(n, dtype=np.int32 if n < 2**31 else np.int64)
+    direction, acc, order, max_order, length = _route(filled, geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), float(threshold_m2), queue)
+    del queue
     lengths = [float(x) for x in length[: max_order + 1]]
     # A junction on the last cell before the grid edge has no channel length of its own;
     # report the highest order that forms an actual channel.
@@ -307,40 +345,81 @@ def watershed(direction: np.ndarray, outlet: tuple[int, int]) -> tuple[np.ndarra
     return m.astype(bool), int(n)
 
 
-def stream_lines(flow: dict, to_lonlat) -> dict:
-    """Stream network as lines between sources, junctions and outlets."""
-    direction, order = flow["dir"], flow["order"]
+@njit(cache=True)
+def _down(direction, r, c, h, w):
+    """Flat index of the cell (r, c) drains to, or -1 at a sink or the grid edge."""
+    d = direction[r, c]
+    if d < 0:
+        return -1
+    rr, cc = r + DR[d], c + DC[d]
+    if rr < 0 or cc < 0 or rr >= h or cc >= w:
+        return -1
+    return rr * w + cc
+
+
+@njit(cache=True)
+def _trace_streams(direction, order):
+    """Stream lines from every source or junction cell, in row-major order: flat cell indices, line offsets, Strahler orders."""
     h, w = order.shape
+    stream_in = np.zeros((h, w), dtype=np.uint8)
+    starts = 0
+    for r in range(h):
+        for c in range(w):
+            if order[r, c]:
+                m = _down(direction, r, c, h, w)
+                if m >= 0 and order[m // w, m % w]:
+                    stream_in[m // w, m % w] += 1
+    for r in range(h):
+        for c in range(w):
+            if order[r, c] and stream_in[r, c] != 1:
+                starts += 1
+    total = 0
+    cells = np.empty(0, dtype=np.int64)
+    offsets = np.zeros(starts + 1, dtype=np.int64)
+    strahler = np.zeros(starts, dtype=np.int64)
+    for p in range(2):  # pass 0 counts points, pass 1 fills them
+        if p == 1:
+            cells = np.empty(total, dtype=np.int64)
+        offsets = np.zeros(starts + 1, dtype=np.int64)
+        strahler = np.zeros(starts, dtype=np.int64)
+        k = 0
+        total = 0
+        for r in range(h):
+            for c in range(w):
+                if not order[r, c] or stream_in[r, c] == 1:
+                    continue
+                cur = r * w + c
+                if p == 1:
+                    cells[total] = cur
+                total += 1
+                while True:
+                    m = _down(direction, cur // w, cur % w, h, w)
+                    if m < 0 or not order[m // w, m % w]:
+                        break
+                    if p == 1:
+                        cells[total] = m
+                    total += 1
+                    if stream_in[m // w, m % w] != 1:
+                        break
+                    cur = m
+                strahler[k] = order[r, c]
+                k += 1
+                offsets[k] = total
+    return cells, offsets, strahler
 
-    def down(r, c):
-        d = direction[r, c]
-        if d < 0:
-            return None
-        rr, cc = r + DR[d], c + DC[d]
-        return None if rr < 0 or cc < 0 or rr >= h or cc >= w else (rr, cc)
 
-    stream_in = np.zeros((h, w), dtype=np.int32)
-    rows, cols = np.nonzero(order)
-    for r, c in zip(rows, cols, strict=True):
-        m = down(r, c)
-        if m and order[m]:
-            stream_in[m] += 1
+def stream_lines(flow: dict, to_lonlat_arrays) -> dict:
+    """Stream network as lines between sources, junctions and outlets (to_lonlat_arrays: vectorised grid → lon/lat)."""
+    w = flow["order"].shape[1]
+    cells, offsets, strahler = _trace_streams(flow["dir"], flow["order"])
+    lon, lat = to_lonlat_arrays(cells % w + 0.5, cells // w + 0.5)
+    bad = np.concatenate([[0], np.cumsum(~(np.isfinite(lon) & np.isfinite(lat)))])  # lines with a point the CRS cannot place are left out
+    pts = [[round(x, 7), round(y, 7)] for x, y in zip(lon.tolist(), lat.tolist(), strict=True)]
     feats = []
-    for r, c in zip(rows, cols, strict=True):
-        if stream_in[r, c] == 1:
-            continue
-        coords = [to_lonlat(c + 0.5, r + 0.5)]
-        cur = (r, c)
-        while True:
-            m = down(*cur)
-            if not m or not order[m]:
-                break
-            coords.append(to_lonlat(m[1] + 0.5, m[0] + 0.5))
-            if stream_in[m] != 1:
-                break
-            cur = m
-        if len(coords) >= 2:
-            feats.append({"type": "Feature", "properties": {"strahler": int(order[r, c])}, "geometry": {"type": "LineString", "coordinates": coords}})
+    for i, o in enumerate(strahler.tolist()):
+        a, b = int(offsets[i]), int(offsets[i + 1])
+        if b - a >= 2 and bad[b] == bad[a]:
+            feats.append({"type": "Feature", "properties": {"strahler": o}, "geometry": {"type": "LineString", "coordinates": pts[a:b]}})
     return {"type": "FeatureCollection", "features": feats}
 
 

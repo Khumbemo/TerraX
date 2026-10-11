@@ -57,6 +57,10 @@ class StripPlan:
         self._geoms = boundary_in_crs(raster, boundary) if boundary else None
         self.threads = threads or settings().tile_threads
 
+    def mask(self, r0: int, r1: int) -> np.ndarray | None:
+        """Boundary mask of any rows r0..r1 (for example a strip with a halo row above and below)."""
+        return rows_mask(self.raster, self._geoms, r0, r1) if self._geoms else None
+
     def strip(self, r0: int, r1: int) -> Strip:
         inside = rows_mask(self.raster, self._geoms, r0, r1) if self._geoms else None
         return Strip(r0, r1, inside, self.geo.cell_area[r0:r1] if self.geo else None)

@@ -8,17 +8,18 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .. import storage
+from ..config import settings
 from ..processing.render import PREVIEW_MAX_SIDE, composite_rgba, png_bytes
 from ..processing.rio import Raster, qa_masked
 
 router = APIRouter()
 
 
-def _raster(file_id: str) -> Raster:
+def _raster(file_id: str, max_pixels: int | None = None) -> Raster:
     f = storage.get_file(file_id)
     if f.kind != "raster":
         raise HTTPException(400, f"{f.name} is not a raster.")
-    return Raster(f.path, f.name)
+    return Raster(f.path, f.name, max_pixels=max_pixels)
 
 
 @router.get("/api/rasters/{file_id}/composite.png")
@@ -76,7 +77,8 @@ def watershed(job_id: str, req: OutletRequest) -> dict:
     from ..processing.patches import patches_to_geojson
     from ..processing.terrain import snap_outlet
     from ..processing.terrain import watershed as basin_mask
-    from ..tools.terrain import flow_rgba
+    from ..tools.common import display_grid
+    from ..tools.terrain import flow_png
 
     st = storage.job_status(job_id)
     res = storage.job_result(job_id)
@@ -90,15 +92,13 @@ def watershed(job_id: str, req: OutletRequest) -> dict:
     outlet = snap_outlet(acc, int(req.col), int(req.row), radius)
     mask, cells = basin_mask(direction, outlet)
     cell = d["cell"]
-    area = float((mask * cell[:, None]).sum())
+    area = float(mask.sum(axis=1) @ cell)
     z, s = d["dem"][mask], d["slope"][mask]
     n = len([p for p in (storage.job_dir(job_id) / "artifacts").glob("basin_*.png")])
     name = f"basin_{n + 1}.png"
-    png = flow_rgba(d["dem"], d["hillshade"], acc, d["order"], mask, outlet)
-    from ..processing.render import save_png
-
-    save_png(png, storage.job_dir(job_id) / "artifacts" / name)
-    r = _raster(res["demFile"])
+    shade = d["shade"] if "shade" in d else display_grid(d["hillshade"])  # jobs saved before the display-size shade
+    flow_png(storage.job_dir(job_id) / "artifacts", name, d["dem"], shade, acc, d["order"], mask, outlet)
+    r = _raster(res["demFile"], max_pixels=settings().dem_pixels)
     fc = None
     out = patches_to_geojson(mask.astype(np.int32), 1, np.array([0.0, area]), r, lambda _i, a: {"name": "Watershed", "area_ha": round(a / 100) / 100})
     if out and r.gw == w and r.gh == h:

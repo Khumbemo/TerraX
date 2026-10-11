@@ -50,11 +50,11 @@ def boundary(params: dict) -> dict | None:
 
 
 @overload
-def raster(ctx: ToolContext, inputs: dict, slot: str, required: Literal[True] = ..., *, full: bool = ...) -> Raster: ...
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: Literal[True] = ..., *, full: bool = ..., pixels: int | None = ...) -> Raster: ...
 @overload
-def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool, *, full: bool = ...) -> Raster | None: ...
-def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True, *, full: bool = False) -> Raster | None:
-    """An input GeoTIFF; `full` opens it at full resolution (up to TERRAX_MAX_PIXELS) for tools that work in strips."""
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool, *, full: bool = ..., pixels: int | None = ...) -> Raster | None: ...
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True, *, full: bool = False, pixels: int | None = None) -> Raster | None:
+    """An input GeoTIFF; `full` opens it at full resolution (up to TERRAX_MAX_PIXELS) for tools that work in strips, `pixels` with another budget."""
     fid = inputs.get(slot)
     if not fid:
         if required:
@@ -63,7 +63,7 @@ def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True, *, 
     f = ctx.file(str(fid))
     if f.kind != "raster":
         raise ToolError(f"{f.name} is not a GeoTIFF raster TerraX can read.")
-    return Raster(f.path, f.name, max_pixels=settings().max_pixels if full else None)
+    return Raster(f.path, f.name, max_pixels=pixels or (settings().max_pixels if full else None))
 
 
 #: Longest side of map overlay pictures; full-resolution class maps are thinned to this for display only.

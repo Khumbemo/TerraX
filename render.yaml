@@ -19,6 +19,9 @@ services:
         value: "20000000"
       - key: TERRAX_TILE_THREADS
         value: "1"
+      # Hydrology needs about 100 bytes per DEM pixel, so 4 MP fits 512 MB.
+      - key: TERRAX_DEM_PIXELS
+        value: "4000000"
       - key: TERRAX_MAX_UPLOAD_MB
         value: "100"
       - key: TERRAX_RETENTION_HOURS

@@ -113,3 +113,17 @@ def test_terrain_and_raster_with_boundary(client):
         assert client.get(url).status_code == 200
     h = run(client, "hydrology", {"dem": sample(client, "terrain_dem_synthetic.tif")}, {"boundary": bnd})
     assert h["flow"]["maxOrder"] >= 1 and "## Hydrology" in h["markdown"]
+
+
+def test_map_streams_keeps_whole_highest_orders_within_the_budget():
+    from terrax.tools.terrain import MAP_STREAM_POINTS, map_streams
+
+    def line(order, n):
+        return {"type": "Feature", "properties": {"strahler": order}, "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0]] * n}}
+
+    small = {"type": "FeatureCollection", "features": [line(1, 10), line(2, 5)]}
+    assert map_streams(small) == (small, None)
+    fc, note = map_streams({"type": "FeatureCollection", "features": [line(1, MAP_STREAM_POINTS), line(2, 40), line(3, 5)]})
+    assert [f["properties"]["strahler"] for f in fc["features"]] == [2, 3] and note and "order 2 and above (2 of 3 lines)" in note
+    fc, note = map_streams({"type": "FeatureCollection", "features": [line(4, MAP_STREAM_POINTS + 1)]})
+    assert fc["features"] == [] and note and "too large to draw" in note

@@ -6,11 +6,12 @@ import math
 
 import numpy as np
 
+from ..config import settings
 from ..processing.render import hex_rgb, viridis
-from ..processing.rio import Ground, grid_to_lonlat
+from ..processing.rio import Ground, grid_to_lonlat, grid_to_lonlat_arrays
 from ..processing.terrain import ASPECTS, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
 from . import tool
-from .common import boundary, clean, number, raster
+from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster
 from .context import ToolContext, ToolError
 
 ORDER_COLORS = np.array([[125, 211, 252], [56, 189, 248], [14, 165, 233], [2, 132, 199], [3, 105, 161], [30, 64, 175]], dtype=float)
@@ -40,6 +41,28 @@ def elevation_rgba(z: np.ndarray, lo: float, hi: float) -> np.ndarray:
     return _grid_rgba(z, viridis((z - lo) / ((hi - lo) or 1)).astype(float))
 
 
+def flow_png(ctx_dir, name: str, z: np.ndarray, shade: np.ndarray, acc: np.ndarray, order: np.ndarray, basin: np.ndarray | None = None, outlet: tuple[int, int] | None = None) -> None:
+    """Saves the flow map (optionally with a watershed and its outlet) thinned to display size; shade is the hillshade already thinned by display_grid."""
+    from ..processing.render import save_png
+
+    k = max(1, -(-max(z.shape) // DISPLAY_SIDE))
+    thin = lambda a: a[::k, ::k] if (a is not None and k > 1) else a
+    o = (outlet[0] // k, outlet[1] // k) if outlet is not None else None
+    save_png(flow_rgba(thin(z), shade, thin(acc), thin(order), thin(basin), o), ctx_dir / name)
+
+
+def save_npz(path, arrays: dict[str, np.ndarray]) -> None:
+    """np.savez with deflate only for integer grids: float grids barely compress, and deflating them costs most of the save time."""
+    import zipfile
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+        for key, a in arrays.items():
+            info = zipfile.ZipInfo(key + ".npy")
+            info.compress_type = zipfile.ZIP_DEFLATED if a.dtype.kind in "iub" else zipfile.ZIP_STORED
+            with z.open(info, "w", force_zip64=True) as fh:
+                np.lib.format.write_array(fh, np.ascontiguousarray(a), allow_pickle=False)
+
+
 def flow_rgba(z: np.ndarray, hs: np.ndarray, acc: np.ndarray, order: np.ndarray, basin: np.ndarray | None = None, outlet: tuple[int, int] | None = None) -> np.ndarray:
     max_log = math.log10(max(float(acc.max()), 1))
     shade = np.where(np.isfinite(hs), hs, 0.5)[..., None]
@@ -53,6 +76,33 @@ def flow_rgba(z: np.ndarray, hs: np.ndarray, acc: np.ndarray, order: np.ndarray,
     if outlet is not None:
         out[outlet] = [255, 255, 255, 255]
     return out
+
+
+MAP_STREAM_POINTS = 250_000  # vertices the browser map draws comfortably; exports keep every line
+
+
+def map_streams(fc: dict) -> tuple[dict, str | None]:
+    """The highest whole Strahler orders whose lines fit MAP_STREAM_POINTS vertices, and a note when lower orders are left off the map."""
+    feats = fc["features"]
+    points: dict[int, int] = {}
+    for ft in feats:
+        o = ft["properties"]["strahler"]
+        points[o] = points.get(o, 0) + len(ft["geometry"]["coordinates"])
+    total, lowest = 0, None
+    for o in sorted(points, reverse=True):
+        if total + points[o] > MAP_STREAM_POINTS:
+            break
+        total += points[o]
+        lowest = o
+    if lowest == min(points, default=None):
+        return fc, None
+    shown = [ft for ft in feats if lowest is not None and ft["properties"]["strahler"] >= lowest]
+    tail = "the flow layer shows every channel cell and the streams export holds all lines."
+    if not shown:
+        note = f"The stream network ({len(feats):,} line{'s' if len(feats) != 1 else ''}) is too large to draw as lines; {tail}"
+    else:
+        note = f"The map draws streams of Strahler order {lowest} and above ({len(shown):,} of {len(feats):,} lines); {tail}"
+    return {"type": "FeatureCollection", "features": shown}, note
 
 
 def hydrology_markdown(f: dict, valid_km2: float) -> str:
@@ -80,14 +130,14 @@ def watershed_line(area_m2: float, mean_elevation: float | None, mean_slope: flo
 
 @tool("terrain")
 def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
-    r = raster(ctx, inputs, "dem")
+    r = raster(ctx, inputs, "dem", pixels=settings().dem_pixels)
     t = analyze_terrain(r, boundary(params))
     ctx.progress(0.6, "Rendering layers")
     e = t["elevation"]
     layers = {
-        "hillshade": ctx.png("hillshade.png", hillshade_rgba(t["_hillshade"])),
-        "slope": ctx.png("slope.png", slope_rgba(t["_slope"])),
-        "elevation": ctx.png("elevation.png", elevation_rgba(t["_dem"], e["min"], e["max"])),
+        "hillshade": ctx.png("hillshade.png", hillshade_rgba(display_grid(t["_hillshade"]))),
+        "slope": ctx.png("slope.png", slope_rgba(display_grid(t["_slope"]))),
+        "elevation": ctx.png("elevation.png", elevation_rgba(display_grid(t["_dem"]), e["min"], e["max"])),
     }
     image = {"url": layers["slope"], "bounds": r.meta.latlng_bounds, "label": "Slope classes", "legend": [{"color": c["color"], "label": c["label"]} for c in SLOPE_CLASSES]} if r.meta.latlng_bounds else None
     return clean({"tool": "terrain", "name": r.meta.filename, "markdown": terrain_markdown(t, r.meta), "terrain": t, "layers": layers,
@@ -96,27 +146,36 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
 
 @tool("hydrology")
 def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
-    r = raster(ctx, inputs, "dem")
+    r = raster(ctx, inputs, "dem", pixels=settings().dem_pixels)
     km2 = number(params, "thresholdKm2", 0.5, 0.0001, 100000, "Set the stream threshold as a positive area in km².")
     t = analyze_terrain(r, boundary(params))
     geo: Ground = t["_geo"]
     ctx.progress(0.3, "Filling depressions and routing flow")
     f = flow_routing(t["_dem"], geo, km2 * 1e6)
     ctx.progress(0.75, "Tracing streams")
-    ll = grid_to_lonlat(r, f["width"], f["height"])
+    ll = grid_to_lonlat_arrays(r, f["width"], f["height"])
     downloads = []
     streams = None
     if ll:
         streams = stream_lines(f, ll)
         name = f"{r.meta.filename.rsplit('.', 1)[0]}_streams.geojson"
         downloads.append(ctx.download("Export streams (GeoJSON)", name, ctx.json(name, streams), "application/geo+json"))
-    np.savez_compressed(ctx.dir / "flow.npz", dir=f["dir"], acc=f["acc"], order=f["order"], dem=t["_dem"], slope=t["_slope"], hillshade=t["_hillshade"], cell=geo.cell_area)
-    flow_png = ctx.png("flow.png", flow_rgba(t["_dem"], t["_hillshade"], f["acc"], f["order"]))
+    # Kept for watershed clicks; accumulation as float32 is ample for finding the outlet, and the hillshade only feeds the image.
+    shade = display_grid(t["_hillshade"])
+    save_npz(ctx.dir / "flow.npz", {"dir": f["dir"], "acc": f["acc"].astype(np.float32), "order": f["order"], "dem": t["_dem"], "slope": t["_slope"], "shade": shade, "cell": geo.cell_area})
+    flow_png(ctx.dir, "flow.png", t["_dem"], shade, f["acc"], f["order"])
+    flow_url = ctx.url("flow.png")
     stats = {k: f[k] for k in ("width", "height", "thresholdM2", "maxOrder", "lengthByOrder", "raisedCells", "maxRaise")}
-    valid_km2 = float((np.isfinite(t["_dem"]) * geo.cell_area[:, None]).sum()) / 1e6
-    return clean({"tool": "terrain", "name": r.meta.filename, "flow": stats, "layer": flow_png, "streams": streams, "downloads": downloads,
-                  "markdown": hydrology_markdown(stats, valid_km2),
-                  "demFile": inputs.get("dem"), "boundary": params.get("boundary")})
+    valid_km2 = float(np.isfinite(t["_dem"]).sum(axis=1) @ geo.cell_area) / 1e6
+    notes = []
+    if streams is not None:
+        streams, note = map_streams(streams)
+        notes += [note] if note else []
+    out = clean({"tool": "terrain", "name": r.meta.filename, "flow": stats, "layer": flow_url, "downloads": downloads, "notes": notes,
+                 "markdown": hydrology_markdown(stats, valid_km2),
+                 "demFile": inputs.get("dem"), "boundary": params.get("boundary")})
+    out["streams"] = streams  # finite, rounded coordinates already; walking them through clean() is slow on large networks
+    return out
 
 
 @tool("contours")
