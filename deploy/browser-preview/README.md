@@ -12,6 +12,11 @@ fixes made since:
   `scipy.stats.t.ppf` to 1e-10) instead of an interpolated table.
 - SPI classes use the McKee et al. (1993) limits (−1.0 is moderately dry).
 - Repeated notes are shown once (they gave React duplicate keys).
+- The residential plot tool reads each GeoTIFF's window around the property
+  at full resolution. It used to coarsen the whole image to 4 MP first, while
+  reporting the native cell size (same fix as the server).
+- Hydrology draws the highest whole stream orders that fit 250,000 vertices
+  on the map, with a note; Export streams keeps every line.
 - The build escapes the two U+FFFD string literals of bundled libraries,
   which the artifact publisher otherwise rejects.
 
@@ -22,7 +27,7 @@ git worktree add ../terrax-browser 0254a69
 cd ../terrax-browser
 git apply ../TerraX/deploy/browser-preview/terrax-browser.patch
 npm ci
-npx tsx --test tests/*.test.ts      # 88 unit tests
+npx tsx --test tests/*.test.ts      # 90 unit tests
 npm run build:preview               # → dist-preview/
 ```
 
