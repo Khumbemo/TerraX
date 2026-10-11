@@ -421,3 +421,40 @@ def test_plot_images_in_a_national_grid_are_placed_on_the_property(tmp_path):
     ref = max((p for p in utm["patches"] if p["zone"] == "crossing"), key=lambda p: p["areaInside"])
     assert biggest["areaInside"] == pytest.approx(ref["areaInside"], rel=0.1) and biggest["depthInside"] == pytest.approx(ref["depthInside"], abs=0.6)
     assert cmp["changedInside"] == pytest.approx(utm["changedInside"], rel=0.1)
+
+
+def test_dinf_specific_catchment_area_on_a_cone_and_planes():
+    """Outward cone: a = πr² / 2πr = r/2; uniform plane: a = upslope flow length (Tarboton 1997's test surfaces)."""
+    import math
+
+    from terrax.processing.rio import Ground
+    from terrax.processing.terrain import dinf_flow, fill_depressions, flow_routing
+
+    n, c0 = 201, 100
+    g = Ground(np.ones(n), np.ones(n), np.ones(n), "")
+    rr, cc = np.mgrid[0:n, 0:n]
+    rad = np.hypot(rr - c0, cc - c0)
+    cone = (1000 - rad).astype(np.float64)
+    d = dinf_flow(fill_depressions(cone)[0], g)
+    ring = (rad > 10) & (rad < 80)
+    err = (d["sca"][ring] - rad[ring] / 2) / (rad[ring] / 2)
+    d8 = (flow_routing(cone, g, 1e12)["acc"][ring] - rad[ring] / 2) / (rad[ring] / 2)
+    assert abs(err.mean()) < 0.02 and np.median(np.abs(err)) < 0.1
+    assert np.median(np.abs(err)) < np.median(np.abs(d8)) / 4  # D8 cannot spread flow on divergent slopes
+    # Wetness rises outward on the cone: catchment grows while the slope stays 45°.
+    twi = d["twi"]
+    assert np.nanmean(twi[(rad > 60) & (rad < 70)]) > np.nanmean(twi[(rad > 20) & (rad < 30)]) + 0.9  # ln(65/25) ≈ 0.96
+    for deg in (0, 30, 45, 60):
+        t = math.radians(deg)
+        x, y = cc.astype(float), -rr.astype(float)
+        d = dinf_flow(fill_depressions(-(x * math.cos(t) + y * math.sin(t)))[0], g)
+        length = np.full(x.shape, np.inf)
+        if math.cos(t) > 1e-9:
+            length = np.minimum(length, (x + 0.5) / math.cos(t))
+        if math.sin(t) > 1e-9:
+            length = np.minimum(length, (n - 0.5 + y) / math.sin(t))
+        inner = (rr > 20) & (rr < n - 20) & (cc > 20) & (cc < n - 20)
+        assert np.median(np.abs(d["sca"][inner] / length[inner] - 1)) < 0.02, deg
+        # Mass balance: everything leaves through outlet cells (no lower facet), and nothing is lost on the way.
+        outlets = d["tanb"] == 0
+        assert d["acc"][outlets].sum() == pytest.approx(n * n, rel=1e-9), deg

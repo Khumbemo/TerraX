@@ -80,6 +80,13 @@ def test_terrain_hydrology_watershed_contours(client):
     assert ws["cells"] > 1 and ws["areaM2"] > 0 and ws["geojson"]["features"]
     c = run(client, "contours", {"dem": dem}, {"interval": t["suggestedInterval"]})
     assert c["contours"]["lines"] == 23
+    # D∞ adds a wetness layer; the D8 stream network and its numbers stay the same.
+    d = run(client, "hydrology", {"dem": dem}, {"thresholdKm2": 0.5, "method": "dinf"})
+    assert d["method"] == "dinf" and d["flow"] == h["flow"] and len(d["streams"]["features"]) == 42
+    w = d["wetness"]["summary"]
+    assert w["q1"] < w["median"] < w["q3"] and client.get(d["wetness"]["layer"]).status_code == 200
+    assert "Topographic wetness index" in d["markdown"] and h["wetness"] is None
+    assert "D8 or D∞" in run_err(client, "hydrology", {"dem": dem}, {"method": "mfd"})
 
 
 def test_landcover(client):

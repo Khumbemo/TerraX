@@ -54,6 +54,20 @@ test('terrain: streams, watershed boundary and contours', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('terrain: D∞ flow adds a wetness index layer', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Terrain');
+  await page.click('button:has-text("Try synthetic DEM")');
+  await page.selectOption('#terrain-flow-method', 'dinf');
+  await page.click('#terrain-flow');
+  await expect(page.locator('.stat', { hasText: 'Median wetness index' })).toBeVisible();
+  await page.click('[role="tab"]:has-text("Wetness (TWI)")');
+  await expect(page.locator('figcaption .legend-labels')).toContainText('ln(a / tan β)');
+  await expect(page.locator('img.raster-canvas')).toHaveAttribute('src', /wetness\.png/);
+  await expect(page.locator('.report-card')).toContainText('Topographic wetness index');
+  expect(errors).toEqual([]);
+});
+
 test('photos: EXIF location on the map and comparing two photos', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Space & aerial photos');

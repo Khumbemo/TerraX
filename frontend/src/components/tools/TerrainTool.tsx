@@ -20,7 +20,8 @@ interface Props {
   onBoundary?: (b: Boundary) => void;
 }
 
-type Layer = 'hillshade' | 'slope' | 'elevation' | 'flow';
+type Layer = 'hillshade' | 'slope' | 'elevation' | 'flow' | 'wetness';
+type FlowMethod = 'd8' | 'dinf';
 
 interface TerrainJob {
   name: string;
@@ -51,6 +52,9 @@ interface HydroJob {
   streams: FeatureCollection | null;
   downloads: Download[];
   notes?: string[];
+  method?: FlowMethod;
+  /** Topographic wetness index from D∞ flow (method "dinf" only). */
+  wetness?: { layer: string; summary: { median: number; q1: number; q3: number; min: number; max: number } | null; range: [number, number]; colors: string[] } | null;
   markdown: string;
 }
 
@@ -82,6 +86,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
   const [out, setOut] = useState<TerrainJob | null>(null);
   const [layer, setLayer] = useState<Layer>('hillshade');
   const [thresholdKm2, setThresholdKm2] = useState('0.5');
+  const [flowMethod, setFlowMethod] = useState<FlowMethod>('d8');
   const [flow, setFlow] = useState<HydroJob | null>(null);
   const [basin, setBasin] = useState<Basin | null>(null);
   const [interval, setInterval_] = useState('');
@@ -107,7 +112,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
     pendingContours.current = null;
     setShowContours(false);
     setInterval_(String(r.suggestedInterval));
-    if (layer === 'flow') setLayer('hillshade');
+    if (layer === 'flow' || layer === 'wetness') setLayer('hillshade');
   };
 
   const pick = async (picked: File | string) => {
@@ -129,6 +134,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
         { title: 'Slope classes', url: out.layers.slope },
         { title: 'Hillshade', url: out.layers.hillshade },
         ...(flow ? [{ title: 'Flow and streams', url: basin?.layer ?? flow.layer }] : []),
+        ...(flow?.wetness ? [{ title: 'Topographic wetness index (D∞)', url: flow.wetness.layer }] : []),
       ],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,7 +144,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
     if (!dem) return;
     const km2 = Number(thresholdKm2);
     if (!Number.isFinite(km2) || km2 <= 0) return fail('Set the channel threshold as a positive area in km², for example 0.5.');
-    const r = await job.run('flow', (signal, onProgress) => runJob<HydroJob>('hydrology', { dem: dem.id }, { thresholdKm2: km2, boundary }, { signal, onProgress }), fail);
+    const r = await job.run('flow', (signal, onProgress) => runJob<HydroJob>('hydrology', { dem: dem.id }, { thresholdKm2: km2, method: flowMethod, boundary }, { signal, onProgress }), fail);
     if (!r) return;
     setFlow(r);
     setBasin(null);
@@ -191,13 +197,19 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
   const busy = Boolean(job.busy);
   const slopeTotal = result ? result.slopeClassCounts.reduce((a, b) => a + b, 0) || 1 : 1;
   const aspTotal = result ? result.aspectCounts.reduce((a, b) => a + b, 0) || 1 : 1;
-  const image = !out ? null : layer === 'flow' && flow ? (basin?.layer ?? flow.layer) : out.layers[layer === 'flow' ? 'hillshade' : layer];
+  const image = !out
+    ? null
+    : layer === 'flow' && flow
+      ? (basin?.layer ?? flow.layer)
+      : layer === 'wetness' && flow?.wetness
+        ? flow.wetness.layer
+        : out.layers[layer === 'flow' || layer === 'wetness' ? 'hillshade' : layer];
 
   return (
     <div className="tool-body">
       <p className="tool-intro">
         Upload a digital elevation model (single-band GeoTIFF in metres), for example SRTM (USGS/SRTMGL1_003), Copernicus GLO-30 or ASTER GDEM exported from Earth
-        Engine. Use a projected CRS (UTM) or WGS84.
+        Engine, in any coordinate reference system: pixel sizes are measured in metres on the ground.
       </p>
       <FileDrop id="terrain-file" label="Elevation model (DEM)" accept=".tif,.tiff" hint="GeoTIFF · elevation in metres" busy={job.busy === 'upload'} loaded={dem?.name} onFile={f => pick(f)} />
       <div className="param-row">
@@ -219,15 +231,25 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
           </div>
 
           <div className="view-toggles" role="tablist">
-            {((flow ? ['hillshade', 'slope', 'elevation', 'flow'] : ['hillshade', 'slope', 'elevation']) as Layer[]).map(l => (
+            {(['hillshade', 'slope', 'elevation', ...(flow ? ['flow'] : []), ...(flow?.wetness ? ['wetness'] : [])] as Layer[]).map(l => (
               <button key={l} type="button" role="tab" aria-selected={layer === l} className={layer === l ? 'active' : ''} onClick={() => setLayer(l)}>
-                {l === 'hillshade' ? 'Hillshade' : l === 'slope' ? 'Slope classes' : l === 'elevation' ? 'Elevation' : 'Flow & streams'}
+                {l === 'hillshade' ? 'Hillshade' : l === 'slope' ? 'Slope classes' : l === 'elevation' ? 'Elevation' : l === 'flow' ? 'Flow & streams' : 'Wetness (TWI)'}
               </button>
             ))}
           </div>
           <figure className="raster-figure">
             <ArtifactImage url={image} width={result.width} height={result.height} label={`${layer} of ${result.filename}`} onPick={layer === 'flow' ? pickOutlet : undefined} />
             {layer === 'flow' && <figcaption className="field-hint">Streams are blue (darker = higher Strahler order). Click a stream to outline the watershed draining to that point.</figcaption>}
+            {layer === 'wetness' && flow?.wetness && (
+              <figcaption>
+                <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${flow.wetness.colors.join(', ')})` }} />
+                <div className="legend-labels">
+                  <span>{fmt(flow.wetness.range[0], 3)} dry</span>
+                  <span>ln(a / tan β)</span>
+                  <span>wet {fmt(flow.wetness.range[1], 3)}</span>
+                </div>
+              </figcaption>
+            )}
             {layer === 'elevation' && (
               <figcaption className="legend-labels">
                 <span>{fmt(result.elevation.min)} m</span>
@@ -244,6 +266,13 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                 <span>Channel threshold (km²)</span>
                 <input id="terrain-threshold" type="number" step="0.1" min="0.01" value={thresholdKm2} onChange={e => setThresholdKm2(e.target.value)} />
               </label>
+              <label className="param" title="D8 sends all flow to one neighbour; D∞ splits it between two, which also gives the topographic wetness index.">
+                <span>Flow accumulation</span>
+                <select id="terrain-flow-method" value={flowMethod} onChange={e => setFlowMethod(e.target.value as FlowMethod)}>
+                  <option value="d8">D8 (streams)</option>
+                  <option value="dinf">D∞ + wetness index</option>
+                </select>
+              </label>
               <button type="button" id="terrain-flow" className="btn" onClick={computeFlow} disabled={busy}>
                 {job.busy === 'flow' ? 'Routing flow…' : flow ? 'Recompute flow' : 'Compute flow & streams'}
               </button>
@@ -259,6 +288,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
               <div className="stat-grid">
                 <Stat label="Highest stream order" value={String(flow.flow.maxOrder)} />
                 <Stat label="Channel length" value={`${fmt(flow.flow.lengthByOrder.reduce((a, b) => a + b, 0) / 1000, 4)} km`} />
+                {flow.wetness?.summary && <Stat label="Median wetness index" value={fmt(flow.wetness.summary.median, 3)} />}
                 {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt(((basin.areaM2 / 1e4) * ACRES_PER_HA) / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
                 {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
               </div>
