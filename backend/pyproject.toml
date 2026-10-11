@@ -46,6 +46,8 @@ filterwarnings = [
     "error::RuntimeWarning:terrax",
     # rasterio's own transform helpers still use the Affine * operator (affine 2.4 deprecation); not TerraX code.
     "ignore:Use `@` matmul instead of `\\*` mul operator:PendingDeprecationWarning:rasterio",
+    # rasterize() builds an in-memory dataset and reads its transform before setting it; harmless (strip masks are tested equal to whole-grid masks).
+    "ignore:Dataset has no geotransform:rasterio.errors.NotGeoreferencedWarning:rasterio",
 ]
 
 [tool.ruff]

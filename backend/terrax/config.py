@@ -33,6 +33,17 @@ class Settings:
     cors_origins: tuple[str, ...] = field(
         default_factory=lambda: tuple(o.strip() for o in os.environ.get("TERRAX_CORS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip())
     )
+    #: Full-resolution pixel budget for tools that work in strips (forest, indices, series, land cover);
+    #: larger rasters are resampled to it. Memory is about 10 bytes per pixel plus the strips in flight.
+    max_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_MAX_PIXELS", "1e8"))))
+    #: Pixel budget for tools that need the whole grid in memory at once (terrain flow routing, plot change, previews).
+    grid_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_GRID_PIXELS", "4e6"))))
+    #: Threads that process strips of one raster in parallel (GDAL reads and NumPy release the GIL).
+    tile_threads: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_TILE_THREADS", "0")) or min(4, os.cpu_count() or 1)))
+    #: Hard time limit for one job, minutes (the job is told to stop a minute earlier).
+    job_minutes: int = field(default_factory=lambda: max(2, int(os.environ.get("TERRAX_JOB_MINUTES", "60"))))
+    #: Restart a Celery worker process after a job leaves it above this much memory, MB (0 = never).
+    worker_max_memory_mb: int = field(default_factory=lambda: int(os.environ.get("TERRAX_WORKER_MAX_MEMORY_MB", "0")))
     #: Largest accepted upload, bytes.
     max_upload: int = field(default_factory=lambda: int(os.environ.get("TERRAX_MAX_UPLOAD_MB", "500")) * 1024 * 1024)
     #: Delete uploads and jobs older than this many hours (0 keeps them).

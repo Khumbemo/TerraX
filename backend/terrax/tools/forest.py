@@ -21,8 +21,8 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         raise ToolError("Choose a method: ndvi, hansen or burn.")
     mmu = number(params, "mmuHa", 0, 0, 1000, "Set the minimum mapping unit between 0 (off) and 1,000 ha.")
     bnd = boundary(params)
-    a = raster(ctx, inputs, "a")
-    b = raster(ctx, inputs, "b", required=mode != "hansen")
+    a = raster(ctx, inputs, "a", full=True)
+    b = raster(ctx, inputs, "b", required=mode != "hansen", full=True)
     ctx.progress(0.15, "Reading rasters")
     if mode == "ndvi":
         f_thr = number(params, "forestThreshold", 0.5, -1, 1, "Set the forest threshold between −1 and 1, and the loss threshold below 0 (for example −0.2).")

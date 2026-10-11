@@ -93,16 +93,36 @@ def guess_band_map(n: int) -> dict:
     return {}
 
 
-def looks_scaled(g: Grid) -> bool:
+def looks_scaled(g: Grid | np.ndarray) -> bool:
     """Median of valid values above 1.5: reflectance scaled by 10,000."""
-    flat = g.data.ravel()
+    flat = (g.data if isinstance(g, Grid) else g).ravel()
     step = max(1, flat.size // 20000)
     s = flat[::step]
     s = np.sort(s[np.isfinite(s)])
     return s.size > 0 and quantile_sorted(s, 0.5) > 1.5
 
 
-def compute_index_grid(raster: Raster, index: str, bands: dict) -> tuple[Grid, list[str]]:
+@dataclass
+class IndexPlan:
+    """A spectral index ready to compute on any rows of a raster."""
+
+    d: IndexDef
+    idx: list[int]
+    scale: float
+    notes: list[str]
+
+    def compute(self, arrays: list[np.ndarray]) -> np.ndarray:
+        b = {r: a.astype(np.float64) * self.scale for r, a in zip(self.d.needs, arrays, strict=True)}
+        with np.errstate(all="ignore"):
+            out = self.d.compute(b)
+        return np.where(np.isfinite(out), out, np.nan).astype(np.float32)
+
+    def rows(self, raster: Raster, r0: int, r1: int) -> np.ndarray:
+        return self.compute(raster.read_rows(self.idx, r0, r1))
+
+
+def plan_index(raster: Raster, index: str, bands: dict, sample: list[np.ndarray] | None = None) -> IndexPlan:
+    """Checks the band roles and decides the reflectance scale (from `sample`, or a decimated read of the raster)."""
     d = index_def(index)
     miss = missing_bands(index, bands)
     if miss:
@@ -110,17 +130,25 @@ def compute_index_grid(raster: Raster, index: str, bands: dict) -> tuple[Grid, l
     idx = [int(bands[r]) for r in d.needs]
     if len(set(idx)) != len(idx):
         raise ValueError("Assign a different band to each role.")
-    grids = raster.read_bands(idx)
     notes: list[str] = []
     scale = 1.0
-    if d.needs_reflectance and any(looks_scaled(g) for g in grids):
-        scale = 1 / 10000
-        notes.append(f"{d.short} uses absolute reflectance; band values look scaled by 10,000 (as in Sentinel-2 L2A from Earth Engine) and were divided by 10,000. Raw ESA L2A files from 2022 onward also need the −1000 offset removed first.")
-    b = {r: g.data.astype(np.float64) * scale for r, g in zip(d.needs, grids, strict=True)}
-    with np.errstate(all="ignore"):
-        out = d.compute(b)
-    out = np.where(np.isfinite(out), out, np.nan).astype(np.float32)
+    if d.needs_reflectance:
+        if sample is None:
+            sample = raster.overview(idx)
+        if any(looks_scaled(a) for a in sample):
+            scale = 1 / 10000
+            notes.append(f"{d.short} uses absolute reflectance; band values look scaled by 10,000 (as in Sentinel-2 L2A from Earth Engine) and were divided by 10,000. Raw ESA L2A files from 2022 onward also need the −1000 offset removed first.")
     band_text = ", ".join(f"band {i + 1} = {r.upper()}" for r, i in zip(d.needs, idx, strict=True))
     notes.insert(0, f"{d.short} = {d.formula} ({d.reference}); {band_text}. {d.reading}")
+    return IndexPlan(d, idx, scale, notes)
+
+
+def compute_index_grid(raster: Raster, index: str, bands: dict) -> tuple[Grid, list[str]]:
+    """The index on the whole analysis grid (scale decided from the whole grid)."""
+    d = index_def(index)
+    if missing_bands(index, bands):
+        plan_index(raster, index, bands, sample=[])  # raises the missing-bands message
+    grids = raster.read_bands([int(bands[r]) for r in d.needs])
+    plan = plan_index(raster, index, bands, sample=[g.data for g in grids])
     g0 = grids[0]
-    return Grid(g0.width, g0.height, out, g0.resample_factor), notes
+    return Grid(g0.width, g0.height, plan.compute([g.data for g in grids]), g0.resample_factor), plan.notes

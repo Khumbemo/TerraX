@@ -14,29 +14,39 @@ EIGHT = np.ones((3, 3), dtype=int)
 
 def label_patches(mask: np.ndarray) -> tuple[np.ndarray, int]:
     """8-connected component labels (0 outside, 1..n patch ids in raster-scan order)."""
-    labels, n = ndimage.label(mask, structure=EIGHT)
-    return labels.astype(np.int32), int(n)
+    labels = np.empty(mask.shape, dtype=np.int32)
+    n = ndimage.label(mask, structure=EIGHT, output=labels)
+    return labels, int(n)
 
 
 def patch_areas(labels: np.ndarray, n: int, cell_area_rows: np.ndarray) -> np.ndarray:
-    """Area per patch id (index 0 unused), same unit as the row cell areas."""
-    w = np.broadcast_to(cell_area_rows[:, None], labels.shape)
-    return np.bincount(labels.ravel(), weights=w.ravel(), minlength=n + 1)
+    """Area per patch id (index 0 unused), same unit as the row cell areas.
+
+    Counted in blocks of rows so the per-cell weights never exist for the whole grid at once.
+    """
+    area = np.zeros(n + 1)
+    h, w = labels.shape
+    step = max(1, 4_000_000 // max(1, w))
+    for r0 in range(0, h, step):
+        block = labels[r0 : r0 + step]
+        area += np.bincount(block.ravel(), weights=np.repeat(cell_area_rows[r0 : r0 + step], w), minlength=n + 1)
+    return area
 
 
 def apply_mmu(classes: np.ndarray, is_target: np.ndarray, replace_with: int, mmu: float, cell_area_rows: np.ndarray) -> dict:
-    """Patches of target cells smaller than `mmu` become `replace_with` (in place)."""
+    """Patches of target cells smaller than `mmu` become `replace_with` (in place); returns counts and the area removed."""
     labels, n = label_patches(is_target)
     area = patch_areas(labels, n, cell_area_rows)
     small = area < mmu
     small[0] = False
-    removed_mask = small[labels]
-    classes[removed_mask] = replace_with
+    classes[small[labels]] = replace_with
+    pixels = np.bincount(labels.ravel(), minlength=n + 1)
     kept_ids = np.flatnonzero(~small)[1:] if n else np.array([], dtype=int)
     kept_area = area[kept_ids] if kept_ids.size else np.array([])
     return {
         "removedPatches": int(small.sum()),
-        "removedMask": removed_mask,
+        "removedPixels": int(pixels[small].sum()),
+        "removedArea": float(area[small].sum()),
         "keptCount": int(kept_ids.size),
         "keptLargest": float(kept_area.max()) if kept_area.size else 0.0,
     }

@@ -8,6 +8,7 @@ from typing import Any, Literal, overload
 
 import numpy as np
 
+from ..config import settings
 from ..processing.render import classes_rgba
 from ..processing.rio import Raster
 from .context import ToolContext, ToolError
@@ -49,10 +50,11 @@ def boundary(params: dict) -> dict | None:
 
 
 @overload
-def raster(ctx: ToolContext, inputs: dict, slot: str, required: Literal[True] = ...) -> Raster: ...
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: Literal[True] = ..., *, full: bool = ...) -> Raster: ...
 @overload
-def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool) -> Raster | None: ...
-def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True) -> Raster | None:
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool, *, full: bool = ...) -> Raster | None: ...
+def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True, *, full: bool = False) -> Raster | None:
+    """An input GeoTIFF; `full` opens it at full resolution (up to TERRAX_MAX_PIXELS) for tools that work in strips."""
     fid = inputs.get(slot)
     if not fid:
         if required:
@@ -61,11 +63,22 @@ def raster(ctx: ToolContext, inputs: dict, slot: str, required: bool = True) -> 
     f = ctx.file(str(fid))
     if f.kind != "raster":
         raise ToolError(f"{f.name} is not a GeoTIFF raster TerraX can read.")
-    return Raster(f.path, f.name)
+    return Raster(f.path, f.name, max_pixels=settings().max_pixels if full else None)
+
+
+#: Longest side of map overlay pictures; full-resolution class maps are thinned to this for display only.
+DISPLAY_SIDE = 4096
+
+
+def display_grid(a: np.ndarray, side: int = DISPLAY_SIDE) -> np.ndarray:
+    """Every k-th cell of a grid so its longest side is at most `side` (a view; nearest neighbour)."""
+    k = max(1, -(-max(a.shape[:2]) // side))
+    return a[::k, ::k] if k > 1 else a
 
 
 def class_overlay(ctx: ToolContext, name: str, classes: np.ndarray, legend: Sequence[Mapping[str, Any]], r: Raster, label: str) -> dict | None:
     """Saves a class map as PNG and returns the map-image description (None without a WGS84 footprint)."""
+    classes = display_grid(classes)
     palette = {c["id"]: tuple(c["color"]) for c in legend}
     url = ctx.png(name, classes_rgba(classes, palette, alpha=255))
     bounds = r.meta.latlng_bounds

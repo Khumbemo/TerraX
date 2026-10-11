@@ -33,8 +33,9 @@ services:
 
   worker:
     <<: *backend
-    # Each worker process runs one job at a time; raise --concurrency on bigger machines.
-    command: ["celery", "-A", "terrax.tasks", "worker", "--loglevel=INFO", "--concurrency=2"]
+    # Each worker process runs one job at a time, using TERRAX_TILE_THREADS cores for large rasters,
+    # so CPU use is about concurrency × threads. Add machines with: docker compose up --scale worker=3
+    command: ["celery", "-A", "terrax.tasks", "worker", "--loglevel=INFO", "--concurrency=${TERRAX_WORKER_CONCURRENCY:-2}"]
     healthcheck:
       disable: true
 

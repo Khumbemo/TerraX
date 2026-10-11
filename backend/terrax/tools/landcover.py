@@ -11,7 +11,7 @@ from .context import ToolContext, ToolError
 
 @tool("landcover")
 def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
-    r = raster(ctx, inputs, "file")
+    r = raster(ctx, inputs, "file", full=True)
     try:
         bands = [int(b) for b in params.get("bands") or []]
         k = int(params.get("k", 4))

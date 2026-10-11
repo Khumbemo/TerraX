@@ -98,10 +98,39 @@ Settings are environment variables (see `backend/.env.example`):
 - `TERRAX_EAGER`: run each job inside its request (tests, development)
 - `TERRAX_JOB_THREADS`: run jobs on this many background threads, with no Redis (one-container hosting)
 - `TERRAX_STATIC`: folder with the built web app, so the API serves it itself
+- `TERRAX_MAX_PIXELS`, `TERRAX_TILE_THREADS` and `TERRAX_GRID_PIXELS`: resolution and parallelism for large rasters (see **Large rasters**)
+- `TERRAX_WORKER_CONCURRENCY`, `TERRAX_JOB_MINUTES` and `TERRAX_WORKER_MAX_MEMORY_MB`: Celery workers
 - `GEMINI_API_KEY` and `GEMINI_MODEL`
 - `TERRAX_CORS`
 - `TERRAX_MAX_UPLOAD_MB`
 - `TERRAX_RETENTION_HOURS`
+
+## Large rasters
+
+Forest loss, satellite indices, multi-date series and land cover run at **full resolution** up to `TERRAX_MAX_PIXELS` (default 100 million pixels, for example a 10,000 × 10,000 scene). Larger files are resampled to that budget, and the report says so.
+
+These tools read the raster in strips of whole rows and process the strips on `TERRAX_TILE_THREADS` cores (default up to 4). For the whole raster they keep only a one-byte class map and running totals. Tests check that strips give the same numbers as one whole-grid pass, including boundaries, minimum mapping units and latitude-dependent cell areas.
+
+Measured on 4 cores, against the previous whole-grid code at full resolution:
+
+| Analysis | Raster | Before | Now |
+|---|---|---|---|
+| Forest loss (NDVI change) | 100 MP × 2 dates | 41.8 s, 5.7 GB | 7.3 s, 0.8 GB |
+| Satellite statistics (exact quartiles) | 100 MP | 26.8 s, 3.2 GB | 5.3 s, 0.9 GB |
+| Land cover (k-means, k = 5) | 36 MP × 4 bands | 46.4 s, 5.5 GB | 14.2 s, 1.8 GB |
+
+Results were identical in each case.
+
+Terrain flow routing and the residential plot comparison need the whole grid in memory at once, so they keep their own budget, `TERRAX_GRID_PIXELS` (default 4 MP). Previews and map overlays are drawn at display size, while the statistics, areas and polygons come from the full grid.
+
+For heavy workloads:
+
+- **Memory per job:** about 10 bytes per pixel plus the strips in flight, so roughly 1 GB at 100 MP. Land cover needs more, about 1.8 GB for 36 MP with 4 bands.
+- **CPU:** each worker process runs one job at a time on `TERRAX_TILE_THREADS` cores, so total CPU use is `TERRAX_WORKER_CONCURRENCY` × threads per container. Scale out with `docker compose up --scale worker=N`.
+- **Limits:**
+  - `TERRAX_JOB_MINUTES` stops runaway jobs (default 60 minutes).
+  - `TERRAX_WORKER_MAX_MEMORY_MB` replaces a worker process that a big job left large.
+  - A job that hits either limit reports what to change instead of failing silently.
 
 ## AI
 
@@ -116,7 +145,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 135 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool and one-container hosting |
+| `cd backend && pytest` | 144 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 

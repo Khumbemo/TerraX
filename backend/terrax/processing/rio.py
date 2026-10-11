@@ -13,9 +13,10 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
 from rasterio.warp import transform_bounds
+from rasterio.windows import Window
 
-#: Pixel budget for analysis grids; larger rasters are resampled to this size.
-ANALYSIS_PIXEL_LIMIT = 4_000_000
+from ..config import settings
+
 #: Mean radius of the WGS84 authalic sphere (equal-area), metres.
 R_AUTHALIC = 6371007.1809
 RAD = math.pi / 180
@@ -72,10 +73,16 @@ class Grid:
 
 
 class Raster:
-    """An opened GeoTIFF read onto one analysis grid of at most ANALYSIS_PIXEL_LIMIT cells."""
+    """An opened GeoTIFF read onto one analysis grid of at most `max_pixels` cells.
 
-    def __init__(self, path: Path, filename: str | None = None):
+    Tools that hold the whole grid in memory use the default budget
+    (TERRAX_GRID_PIXELS); tools that work in strips pass the larger
+    full-resolution budget (TERRAX_MAX_PIXELS) and read with `read_rows`.
+    """
+
+    def __init__(self, path: Path, filename: str | None = None, max_pixels: int | None = None):
         self.path = Path(path)
+        limit = max_pixels or settings().grid_pixels
         with rasterio.open(self.path) as ds:
             warnings: list[str] = []
             bbox = pixel = None
@@ -106,7 +113,7 @@ class Raster:
                 except Exception:  # any CRS failure only loses the footprint
                     warnings.append(f"EPSG:{epsg} could not be converted to WGS84 for the map footprint." if epsg else "The file uses a custom projection that could not be converted to WGS84 for the map footprint.")
             total = ds.width * ds.height
-            scale = math.sqrt(ANALYSIS_PIXEL_LIMIT / total) if total > ANALYSIS_PIXEL_LIMIT else 1.0
+            scale = math.sqrt(limit / total) if total > limit else 1.0
             self.gw = max(1, round(ds.width * scale))
             self.gh = max(1, round(ds.height * scale))
             if scale < 1:
@@ -127,22 +134,62 @@ class Raster:
             return None
         return from_bounds(*self.meta.bbox, self.gw, self.gh)
 
-    def read_bands(self, indices: list[int]) -> list[Grid]:
-        """Reads 0-based bands onto the analysis grid as float32 with NaN for no data."""
+    @property
+    def resample_factor(self) -> float:
+        """Original pixels per analysis-grid cell (1 at full resolution)."""
+        return (self.meta.width * self.meta.height) / (self.gw * self.gh)
+
+    def _check_bands(self, indices: list[int]) -> None:
         n = self.meta.bands
         for i in indices:
             if i < 0 or i >= n:
                 raise ValueError(f"Band {i + 1} does not exist; the file has {n} band{'' if n == 1 else 's'}.")
+
+    def _clean(self, a: np.ndarray) -> np.ndarray:
+        a = a.astype(np.float32, copy=False)
+        bad = ~np.isfinite(a)
+        if self.meta.nodata is not None:
+            bad |= a == np.float32(self.meta.nodata)
+        a[bad] = np.nan
+        return a
+
+    def read_bands(self, indices: list[int]) -> list[Grid]:
+        """Reads 0-based bands onto the whole analysis grid as float32 with NaN for no data."""
+        self._check_bands(indices)
         out = []
         with rasterio.open(self.path) as ds:
             for i in indices:
-                a = ds.read(i + 1, out_shape=(self.gh, self.gw), resampling=Resampling.nearest, masked=False).astype(np.float32)
-                bad = ~np.isfinite(a)
-                if self.meta.nodata is not None:
-                    bad |= a == np.float32(self.meta.nodata)
-                a[bad] = np.nan
-                out.append(Grid(self.gw, self.gh, a, (self.meta.width * self.meta.height) / (self.gw * self.gh)))
+                a = self._clean(ds.read(i + 1, out_shape=(self.gh, self.gw), resampling=Resampling.nearest, masked=False))
+                out.append(Grid(self.gw, self.gh, a, self.resample_factor))
         return out
+
+    def pixel(self, col: int, row: int) -> list[float | None]:
+        """Every band's value at one full-resolution pixel (None for no data)."""
+        with rasterio.open(self.path) as ds:
+            v = self._clean(ds.read(window=Window(col, row, 1, 1), masked=False)).reshape(-1)
+        return [None if not np.isfinite(x) else float(x) for x in v]
+
+    def overview(self, indices: list[int], max_side: int = 1024) -> list[np.ndarray]:
+        """A decimated read of whole bands (at most `max_side` cells a side), for checks that only need a sample."""
+        self._check_bands(indices)
+        k = max(1.0, max(self.meta.width, self.meta.height) / max_side)
+        shape = (max(1, round(self.meta.height / k)), max(1, round(self.meta.width / k)))
+        with rasterio.open(self.path) as ds:
+            return [self._clean(ds.read(i + 1, out_shape=shape, resampling=Resampling.nearest, masked=False)) for i in indices]
+
+    def read_rows(self, indices: list[int], r0: int, r1: int) -> list[np.ndarray]:
+        """Analysis-grid rows r0..r1 (exclusive) of 0-based bands, float32 with NaN for no data.
+
+        Each call opens its own dataset handle, so strips can be read from
+        several threads at once. At full resolution this is a plain windowed
+        read; on a resampled grid the window covers the same fraction of the
+        file, so the strips together equal one whole-grid read.
+        """
+        self._check_bands(indices)
+        sy = self.meta.height / self.gh
+        window = Window(0, r0 * sy, self.meta.width, (r1 - r0) * sy)
+        with rasterio.open(self.path) as ds:
+            return [self._clean(ds.read(i + 1, window=window, out_shape=(r1 - r0, self.gw), resampling=Resampling.nearest, masked=False)) for i in indices]
 
 
 def _looks_geographic(bbox) -> bool:

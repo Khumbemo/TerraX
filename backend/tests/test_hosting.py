@@ -68,3 +68,18 @@ def test_jobs_on_background_threads(client, monkeypatch):
         time.sleep(0.05)
     assert st["state"] == "done", st
     assert abs(st["result"]["result"]["loss"]["ha"] - 184.05) < 1e-6
+
+
+def test_time_limit_and_memory_errors_are_readable(client, monkeypatch):
+    from celery.exceptions import SoftTimeLimitExceeded
+
+    from terrax import tools
+
+    a = client.post("/api/samples", json={"name": "forest_ndvi_2016_synthetic.tif"}).json()
+    for exc, text in ((SoftTimeLimitExceeded(), "minute limit"), (MemoryError(), "ran out of memory")):
+        def boom(*_args, exc=exc):
+            raise exc
+
+        monkeypatch.setitem(tools.load_all(), "forest", boom)
+        job = client.post("/api/jobs", json={"tool": "forest", "inputs": {"a": a["id"]}, "params": {}}).json()
+        assert job["state"] == "error" and text in job["message"], job
