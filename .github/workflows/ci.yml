@@ -17,8 +17,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -39,13 +39,13 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/pyproject.toml
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -63,7 +63,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests (real API, jobs in-process)
         run: npm run test:e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the compose stack
         run: docker compose build
       - name: Start it and check the API through nginx
@@ -95,3 +95,29 @@ jobs:
         run: docker compose logs --tail 100
       - run: docker compose down -v
         if: always()
+
+  onebox:
+    name: One-container image (Render, Hugging Face)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the root Dockerfile
+        run: docker build -t terrax-onebox .
+      - name: Start it as Render would (PORT set by the host) and check the app and API
+        run: |
+          docker run -d --name onebox -p 8090:10000 -e PORT=10000 terrax-onebox
+          for i in $(seq 1 60); do
+            if curl -fsS -o /tmp/health.json http://localhost:8090/api/health && grep -q '"jobs":"threads"' /tmp/health.json; then
+              cat /tmp/health.json
+              curl -fsS http://localhost:8090/ | grep -q '<div id="root"'
+              curl -fsS -X POST -H 'Content-Type: application/json' -d '{"name":"terrain_dem_synthetic.tif"}' http://localhost:8090/api/samples | grep -q '"kind":"raster"'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The one-container image did not become healthy" >&2
+          exit 1
+      - name: Logs on failure
+        if: failure()
+        run: docker logs onebox --tail 100

@@ -95,7 +95,9 @@ Settings are environment variables (see `backend/.env.example`):
 
 - `REDIS_URL`
 - `TERRAX_STORAGE`
-- `TERRAX_EAGER`
+- `TERRAX_EAGER`: run each job inside its request (tests, development)
+- `TERRAX_JOB_THREADS`: run jobs on this many background threads, with no Redis (one-container hosting)
+- `TERRAX_STATIC`: folder with the built web app, so the API serves it itself
 - `GEMINI_API_KEY` and `GEMINI_MODEL`
 - `TERRAX_CORS`
 - `TERRAX_MAX_UPLOAD_MB`
@@ -114,15 +116,39 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 129 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant and every API tool |
+| `cd backend && pytest` | 135 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool and one-container hosting |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 
-CI (`.github/workflows/ci.yml`) runs all three, then builds and starts the Docker Compose stack.
+CI (`.github/workflows/ci.yml`) runs all three, then builds and starts the Docker Compose stack and the one-container image.
 
 ## Hosting
 
-TerraX needs its Python server, so static hosts such as GitHub Pages or Netlify cannot run it on their own. Deploy the Docker Compose stack on any machine or VM, or run the `backend` image as three services (API, worker, beat) next to a managed Redis, and serve `frontend/dist` behind a proxy that forwards `/api`. `frontend/nginx.conf` is a working example. If the API is on another origin, build the app with `VITE_API_BASE=https://api.example.org` and add that origin to `TERRAX_CORS`.
+TerraX needs its Python server, so a static host such as GitHub Pages or Netlify cannot run it. The older browser-only build, which runs every analysis in the browser and is kept as a claude.ai artifact, is described in `deploy/browser-preview/`.
+
+### Free, one container: Hugging Face Spaces or Render
+
+The root `Dockerfile` builds a single container for hosts that run one service. In it, the FastAPI server serves the web app itself (`TERRAX_STATIC`) and runs analyses on background threads (`TERRAX_JOB_THREADS`), so nginx, Redis and Celery are not needed.
+
+**Hugging Face Spaces.** The free CPU tier has 2 vCPU and 16 GB of memory, which is enough for real rasters.
+
+1. Create a write token at huggingface.co → Settings → Access Tokens.
+2. Upload the app: `HF_TOKEN=hf_... python deploy/huggingface/upload.py <your-name>/terrax`. This creates the Space if needed and uploads the repository with the Space README (`deploy/huggingface/README.md`).
+3. Optional: upload automatically on every push to `main`. In GitHub → Settings → Secrets and variables → Actions, add the secret `HF_TOKEN` and the variable `HF_SPACE` (for example `khumbemo/terrax`). The **Deploy to Hugging Face Spaces** workflow then runs on each push.
+
+**Render.** [Deploy with the blueprint](https://render.com/deploy?repo=https://github.com/Khumbemo/TerraX) (`render.yaml`). The free plan has 512 MB of memory. It runs the sample data one analysis at a time, sleeps after 15 idle minutes and takes about a minute to wake. Large rasters need a paid plan.
+
+On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are kept for `TERRAX_RETENTION_HOURS` and are lost when the container restarts.
+
+To run the same container yourself:
+
+```bash
+docker build -t terrax . && docker run -p 7860:7860 terrax   # http://localhost:7860
+```
+
+### Full stack: Docker Compose
+
+On any machine or VM, `docker compose up --build` runs the web app (nginx), the API, Celery workers, the scheduler and Redis, with uploads kept in a volume. You can also run the `backend` image as three services (API, worker, beat) next to a managed Redis, and serve `frontend/dist` behind a proxy that forwards `/api`. `frontend/nginx.conf` is a working example. If the API is on another origin, build the app with `VITE_API_BASE=https://api.example.org` and add that origin to `TERRAX_CORS`.
 
 ## Scientific notes
 

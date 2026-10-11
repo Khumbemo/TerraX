@@ -1,0 +1,23 @@
+# Render Blueprint: TerraX as one web service built from the root Dockerfile.
+# Deploy: https://render.com/deploy?repo=https://github.com/Khumbemo/TerraX
+services:
+  - type: web
+    name: terrax
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # The free plan (512 MB, sleeps after 15 idle minutes) runs the samples; large rasters need a paid plan.
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # One analysis at a time keeps memory within the free plan.
+      - key: TERRAX_JOB_THREADS
+        value: "1"
+      - key: TERRAX_MAX_UPLOAD_MB
+        value: "100"
+      - key: TERRAX_RETENTION_HOURS
+        value: "24"
+      # Optional: server-side Gemini key for the AI assistants (entered in the Render dashboard, never stored here).
+      - key: GEMINI_API_KEY
+        sync: false

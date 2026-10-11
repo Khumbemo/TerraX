@@ -103,6 +103,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
     setFlow(null);
     setBasin(null);
     setContours(null);
+    pendingContours.current = null;
     setShowContours(false);
     setInterval_(String(r.suggestedInterval));
     if (layer === 'flow') setLayer('hillshade');
@@ -149,6 +150,10 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
     if (b) setBasin(b);
   };
 
+  // The contour job in flight, so "Export contours" pressed while the map is
+  // still loading them waits for that job instead of cancelling it.
+  const pendingContours = useRef<{ iv: number; promise: Promise<ContourJob | null> } | null>(null);
+
   const loadContours = async (iv: number): Promise<ContourJob | null> => {
     if (!dem) return null;
     if (contours && contours.contours.interval === iv) return contours;
@@ -156,7 +161,11 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
       fail('Set a positive contour interval in metres.');
       return null;
     }
-    const r = await job.run('contours', (signal, onProgress) => runJob<ContourJob>('contours', { dem: dem.id }, { interval: iv, boundary }, { signal, onProgress }), fail);
+    if (pendingContours.current?.iv === iv) return pendingContours.current.promise;
+    const promise = job.run('contours', (signal, onProgress) => runJob<ContourJob>('contours', { dem: dem.id }, { interval: iv, boundary }, { signal, onProgress }), fail);
+    pendingContours.current = { iv, promise };
+    const r = await promise;
+    if (pendingContours.current?.promise === promise) pendingContours.current = null;
     if (r) setContours(r);
     return r;
   };

@@ -98,11 +98,20 @@ def monthly_anomalies(monthly: list[MonthValue]) -> dict:
     return {"climatology": clim, "rows": rows}
 
 
-SPI_CLASSES = [(2, "Extremely wet"), (1.5, "Very wet"), (1, "Moderately wet"), (-1, "Near normal"), (-1.5, "Moderately dry"), (-2, "Severely dry"), (-math.inf, "Extremely dry")]
+# McKee, Doesken & Kleist (1993): 1.0 to 1.49 is moderately wet and −1.0 to −1.49 moderately dry, so wet classes
+# include their lower bound and dry classes their upper bound (SPI = −1.0 is moderately dry, as the "≤ −1" counts assume).
+SPI_WET = [(2.0, "Extremely wet"), (1.5, "Very wet"), (1.0, "Moderately wet")]
+SPI_DRY = [(-2.0, "Extremely dry"), (-1.5, "Severely dry"), (-1.0, "Moderately dry")]
 
 
 def spi_class(v: float) -> str:
-    return next(label for lo, label in SPI_CLASSES if v >= lo)
+    for lo, label in SPI_WET:
+        if v >= lo:
+            return label
+    for hi, label in SPI_DRY:
+        if v <= hi:
+            return label
+    return "Near normal"
 
 
 def compute_spi(monthly: list[MonthValue], scale: int, daily_input: bool) -> dict:

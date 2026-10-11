@@ -1,14 +1,19 @@
 """Celery application and the task that runs every TerraX job.
 
-Workers start with ``celery -A terrax.tasks worker``. With TERRAX_EAGER=true the
-API runs jobs in its own process instead (no Redis needed).
+Workers start with ``celery -A terrax.tasks worker``. Without Redis, the API can
+run jobs itself: TERRAX_EAGER=true runs each one inside its request (tests,
+development) and TERRAX_JOB_THREADS=n runs them on n background threads
+(one-container hosting).
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 
 from celery import Celery
 
@@ -69,9 +74,45 @@ def purge_task() -> int:
     return storage.purge_old()
 
 
+@lru_cache(maxsize=1)
+def _job_pool(threads: int) -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=threads, thread_name_prefix="terrax-job")
+
+
 def submit(job_id: str) -> None:
-    """Queues a job on the workers, or runs it right away in eager mode."""
-    if settings().eager:
+    """Queues a job on the workers, runs it on a background thread, or runs it right away in eager mode."""
+    s = settings()
+    if s.eager:
         run_job(job_id)
+    elif s.job_threads > 0:
+        _job_pool(s.job_threads).submit(run_job, job_id)
     else:
         run_job_task.delay(job_id)
+
+
+def job_mode() -> str:
+    """How jobs run: "inline" (eager), "threads" or "celery"."""
+    s = settings()
+    return "inline" if s.eager else "threads" if s.job_threads > 0 else "celery"
+
+
+_purge_started = threading.Event()
+
+
+def start_purge_thread(every_s: float = 3600.0) -> None:
+    """Hourly clean-up when no Celery beat runs (thread mode); started once per process."""
+    if _purge_started.is_set():
+        return
+    _purge_started.set()
+
+    def loop() -> None:
+        while True:
+            try:
+                n = storage.purge_old()
+                if n:
+                    log.info("purged %d old upload/job folders", n)
+            except Exception:  # a failed clean-up must not stop later ones
+                log.exception("purge failed")
+            time.sleep(every_s)
+
+    threading.Thread(target=loop, name="terrax-purge", daemon=True).start()

@@ -1,7 +1,8 @@
 """TerraX HTTP API.
 
 Run with ``uvicorn terrax.api.main:app``. Jobs go to Celery workers through
-Redis (or run in-process with TERRAX_EAGER=true).
+Redis, or run in this process (TERRAX_EAGER=true inline, TERRAX_JOB_THREADS=n on
+background threads). With TERRAX_STATIC set it also serves the built web app.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from .. import __version__, storage
 from ..config import settings
-from ..tasks import submit
+from ..tasks import job_mode, start_purge_thread, submit
 
 app = FastAPI(title="TerraX API", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(GZipMiddleware, minimum_size=2048)
@@ -50,7 +51,7 @@ async def not_found(_: Request, exc: KeyError) -> JSONResponse:
 def health() -> dict[str, Any]:
     s = settings()
     redis_ok: bool | None = None
-    if not s.eager:
+    if job_mode() == "celery":
         try:
             import redis
 
@@ -59,7 +60,7 @@ def health() -> dict[str, Any]:
             redis_ok = False
     from ..tools import load_all
 
-    return {"ok": True, "version": __version__, "eager": s.eager, "redis": redis_ok, "tools": sorted(load_all()), "ai": bool(s.gemini_api_key)}
+    return {"ok": True, "version": __version__, "eager": s.eager, "jobs": job_mode(), "redis": redis_ok, "tools": sorted(load_all()), "ai": bool(s.gemini_api_key)}
 
 
 # ── Files ────────────────────────────────────────────────────────────────────
@@ -183,3 +184,36 @@ def include_routers() -> None:
 
 
 include_routers()
+
+
+_NO_CACHE = {"Cache-Control": "no-cache"}
+_IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
+def mount_web_app(target: FastAPI, folder: Path) -> None:
+    """Serves the built web app (frontend/dist) from the API, as nginx does in docker-compose.
+
+    Hashed files under assets/ are cached for a year; the app shell, service
+    worker and manifest are revalidated so updates arrive; any other path that
+    is not a file (and not /api) gets index.html.
+    """
+    root = folder.resolve()
+    index = root / "index.html"
+    if not index.is_file():
+        raise RuntimeError(f"TERRAX_STATIC={folder} has no index.html; build the web app first (npm run build).")
+
+    @target.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    def web_app(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404, "Not found.")
+        f = (root / path).resolve()
+        if path and f.is_file() and f.is_relative_to(root):
+            headers = _IMMUTABLE if path.startswith("assets/") else _NO_CACHE if f.name in ("index.html", "sw.js", "manifest.webmanifest") else None
+            return FileResponse(f, headers=headers)
+        return FileResponse(index, headers=_NO_CACHE)
+
+
+if (_static := settings().static_dir) is not None:
+    mount_web_app(app, _static)
+if job_mode() == "threads":
+    start_purge_thread()
