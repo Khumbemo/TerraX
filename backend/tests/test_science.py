@@ -312,3 +312,41 @@ def test_images_without_exif(tmp_path):
     bad.write_bytes(b"not an image at all")
     assert read_exif(bad) is None
     assert io
+
+
+def test_plot_images_are_read_at_full_resolution_around_the_property(monkeypatch):
+    """The plot grid samples each file's own pixels, whatever the whole-raster budget."""
+    import json
+    from pathlib import Path
+
+    from terrax.processing.encroachment import prepare_geo_stack
+    from terrax.processing.rio import Raster
+
+    samples = Path(__file__).resolve().parents[1] / "data" / "samples"
+    bnd = {"geojson": json.loads((samples / "plot_boundary_synthetic.geojson").read_text())}
+    files = [samples / f"plot_{d}_synthetic.tif" for d in ("2019-02-10", "2024-02-08")]
+
+    def stack():
+        return prepare_geo_stack([{"raster": Raster(f), "label": f.stem} for f in files], bnd, 15)
+
+    full = stack()
+    monkeypatch.setenv("TERRAX_GRID_PIXELS", "1000")  # would coarsen a whole-raster read about 100×
+    small = stack()
+    assert (full["width"], full["height"], full["cellM"]) == (small["width"], small["height"], small["cellM"])
+    for a, b in zip(full["layers"], small["layers"], strict=True):
+        for x, y in zip(a["rgb"], b["rgb"], strict=True):
+            np.testing.assert_array_equal(x, y)
+
+
+def test_read_window_decimates_to_every_step_th_pixel(monkeypatch):
+    from pathlib import Path
+
+    from terrax.processing.rio import Raster
+
+    path = Path(__file__).resolve().parents[1] / "data" / "samples" / "plot_2024-02-08_synthetic.tif"
+    r = Raster(path)
+    (full,), step = r.read_window([0], 5, 7, r.meta.width - 3, r.meta.height - 2)
+    assert step == 1 and full.shape == (r.meta.height - 9, r.meta.width - 8)
+    (thin,), step = r.read_window([0], 5, 7, r.meta.width - 3, r.meta.height - 2, max_pixels=full.size // 10)
+    assert step == 4
+    np.testing.assert_array_equal(thin, full[::step, ::step])

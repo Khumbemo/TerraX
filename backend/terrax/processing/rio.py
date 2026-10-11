@@ -177,6 +177,31 @@ class Raster:
         with rasterio.open(self.path) as ds:
             return [self._clean(ds.read(i + 1, out_shape=shape, resampling=Resampling.nearest, masked=False)) for i in indices]
 
+    def read_window(self, indices: list[int], col0: int, row0: int, col1: int, row1: int, max_pixels: int | None = None) -> tuple[list[np.ndarray], int]:
+        """Full-resolution pixels [row0:row1, col0:col1] (clipped to the file) of 0-based bands, and the decimation step.
+
+        The step is 1 unless the window exceeds `max_pixels` (default TERRAX_MAX_PIXELS); then every step-th
+        pixel is read, so array index (i, j) is file pixel (row0 + i * step, col0 + j * step).
+        """
+        self._check_bands(indices)
+        col0, row0 = max(0, col0), max(0, row0)
+        col1, row1 = min(self.meta.width, col1), min(self.meta.height, row1)
+        if col1 <= col0 or row1 <= row0:
+            return [np.full((0, 0), np.nan, np.float32) for _ in indices], 1
+        limit = max_pixels or settings().max_pixels
+        w, h = col1 - col0, row1 - row0
+        step = max(1, math.ceil(math.sqrt(w * h / limit))) if w * h > limit else 1
+        with rasterio.open(self.path) as ds:
+            if step == 1:
+                return [self._clean(ds.read(i + 1, window=Window(col0, row0, w, h), masked=False)) for i in indices], 1
+            # Strips of whole step-aligned rows at full resolution, keeping every step-th row and column.
+            rows = max(step, (4_000_000 // w) // step * step)
+            out = []
+            for i in indices:
+                parts = [ds.read(i + 1, window=Window(col0, r, w, min(rows, row1 - r)), masked=False)[::step, ::step] for r in range(row0, row1, rows)]
+                out.append(self._clean(np.concatenate(parts)))
+            return out, step
+
     def read_rows(self, indices: list[int], r0: int, r1: int) -> list[np.ndarray]:
         """Analysis-grid rows r0..r1 (exclusive) of 0-based bands, float32 with NaN for no data.
 
