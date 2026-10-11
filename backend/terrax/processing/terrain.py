@@ -84,7 +84,7 @@ def analyze_terrain(raster: Raster, boundary=None) -> dict:
     plan = StripPlan(raster, boundary)
     geo = plan.geo
     if not geo:
-        raise ValueError("The DEM has no ground units TerraX can use (supported: WGS84, Web Mercator, WGS84 UTM), so slope cannot be computed.")
+        raise ValueError("The DEM has no coordinate reference system (or one PROJ cannot convert to WGS84), so its ground units are unknown and slope cannot be computed.")
     h, w = plan.height, plan.width
     dem = np.full((h, w), np.nan, dtype=np.float32)
     slope = np.full((h, w), np.nan, dtype=np.float32)

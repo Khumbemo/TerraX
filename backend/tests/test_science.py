@@ -350,3 +350,74 @@ def test_read_window_decimates_to_every_step_th_pixel(monkeypatch):
     (thin,), step = r.read_window([0], 5, 7, r.meta.width - 3, r.meta.height - 2, max_pixels=full.size // 10)
     assert step == 4
     np.testing.assert_array_equal(thin, full[::step, ::step])
+
+
+@pytest.mark.parametrize(("crs", "metres_per_unit"), [("EPSG:7755", 1.0), ("+proj=lcc +lat_0=24 +lon_0=80 +lat_1=12.47 +lat_2=35.17 +x_0=4000000 +y_0=4000000 +datum=WGS84 +units=us-ft", 1200 / 3937)])
+def test_any_projected_crs_has_ground_units(tmp_path, crs, metres_per_unit):
+    """A national LCC grid (metres, or US survey feet) gets true cell sizes: the same ground as a UTM file of the area."""
+    import rasterio
+    from pyproj import Transformer
+    from rasterio.transform import from_origin
+
+    from terrax.processing.rio import Raster, ground_geometry
+
+    lon, lat = 91.7, 26.15  # Guwahati
+    x, y = Transformer.from_crs(4326, crs, always_xy=True).transform(lon, lat)
+    cell = 30 / metres_per_unit  # about 30 m on the ground
+    path = tmp_path / "lcc.tif"
+    with rasterio.open(path, "w", driver="GTiff", width=200, height=150, count=1, dtype="float32", crs=crs, transform=from_origin(x, y, cell, cell)) as d:
+        d.write(np.ones((1, 150, 200), np.float32))
+    r = Raster(path)
+    g = ground_geometry(r.meta, 200, 150)
+    assert g is not None and "WGS84 ellipsoid" in g.note
+    # Ground distance of one cell edge, from geodesics of the projected corners.
+    from pyproj import Geod
+
+    back = Transformer.from_crs(crs, 4326, always_xy=True)
+    lo0, la0 = back.transform(x, y)
+    lo1, la1 = back.transform(x + cell * 200, y)
+    true_dx = Geod(ellps="WGS84").inv(lo0, la0, lo1, la1)[2] / 200
+    assert g.dx[0] == pytest.approx(true_dx, rel=1e-5)
+    assert g.cell_area.sum() * 200 == pytest.approx(200 * 150 * g.dx.mean() * g.dy.mean(), rel=2e-3)
+    assert 29 < g.dx.mean() < 31 and 29 < g.dy.mean() < 31
+
+
+def test_plot_images_in_a_national_grid_are_placed_on_the_property(tmp_path):
+    import json
+    from pathlib import Path
+
+    import rasterio
+    from rasterio.warp import Resampling, calculate_default_transform, reproject
+
+    from terrax.processing.encroachment import compare_layers, prepare_geo_stack
+    from terrax.processing.rio import Raster
+
+    samples = Path(__file__).resolve().parents[1] / "data" / "samples"
+    bnd = {"geojson": json.loads((samples / "plot_boundary_synthetic.geojson").read_text())}
+    dst_crs = "+proj=lcc +lat_0=24 +lon_0=80 +lat_1=12.47 +lat_2=35.17 +x_0=4000000 +y_0=4000000 +datum=WGS84 +units=us-ft"
+    imgs = []
+    for d in ("2019-02-10", "2024-02-08"):
+        src_path, out = samples / f"plot_{d}_synthetic.tif", tmp_path / f"{d}.tif"
+        with rasterio.open(src_path) as src:
+            tr, w, h = calculate_default_transform(src.crs, dst_crs, src.width, src.height, *src.bounds, resolution=0.5 * 3937 / 1200)
+            with rasterio.open(out, "w", driver="GTiff", width=w, height=h, count=3, dtype=src.dtypes[0], crs=dst_crs, transform=tr, nodata=0) as dst:
+                for b in range(1, 4):
+                    reproject(rasterio.band(src, b), rasterio.band(dst, b), dst_transform=tr, dst_crs=dst_crs, resampling=Resampling.nearest)
+        imgs.append({"raster": Raster(out), "label": d})
+    stack = prepare_geo_stack(imgs, bnd, 15)
+    # 0.5 m of LCC grid is 0.5 / k_lcc m of ground, and k_utm × that on the property's UTM grid (PROJ's own scale factors).
+    from pyproj import Proj
+
+    ring = bnd["geojson"]["features"][0]["geometry"]["coordinates"][0]
+    lon, lat = (sum(p[i] for p in ring[:-1]) / (len(ring) - 1) for i in (0, 1))
+    k_lcc = Proj(dst_crs).get_factors(lon, lat).meridional_scale
+    k_utm = Proj(f"EPSG:{stack['epsg']}").get_factors(lon, lat).meridional_scale
+    assert stack["cellM"] == pytest.approx(0.5 / k_lcc * k_utm, rel=2e-3)
+    cmp = compare_layers(stack, 0, 1, {})
+    utm = compare_layers(prepare_geo_stack([{"raster": Raster(samples / f"plot_{d}_synthetic.tif"), "label": d} for d in ("2019-02-10", "2024-02-08")], bnd, 15), 0, 1, {})
+    # The same extension as from the original UTM images (the ≈ 50 m² shed). Resampling twice with nearest neighbour moves
+    # edges by up to a cell, so the 0.5 m fence-shift strip can land either side of the 1 m alignment tolerance.
+    biggest = max((p for p in cmp["patches"] if p["zone"] == "crossing"), key=lambda p: p["areaInside"])
+    ref = max((p for p in utm["patches"] if p["zone"] == "crossing"), key=lambda p: p["areaInside"])
+    assert biggest["areaInside"] == pytest.approx(ref["areaInside"], rel=0.1) and biggest["depthInside"] == pytest.approx(ref["depthInside"], abs=0.6)
+    assert cmp["changedInside"] == pytest.approx(utm["changedInside"], rel=0.1)
