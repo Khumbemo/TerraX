@@ -41,6 +41,12 @@ terrax = ["agents/*.json"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+    # A NaN or overflow in TerraX's own maths fails the test instead of passing quietly.
+    "error::RuntimeWarning:terrax",
+    # rasterio's own transform helpers still use the Affine * operator (affine 2.4 deprecation); not TerraX code.
+    "ignore:Use `@` matmul instead of `\\*` mul operator:PendingDeprecationWarning:rasterio",
+]
 
 [tool.ruff]
 line-length = 200

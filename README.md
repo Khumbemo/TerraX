@@ -124,7 +124,7 @@ CI (`.github/workflows/ci.yml`) runs all three, then builds and starts the Docke
 
 ## Hosting
 
-TerraX needs its Python server, so a static host such as GitHub Pages or Netlify cannot run it.
+TerraX needs its Python server, so a static host such as GitHub Pages or Netlify cannot run it. The older browser-only build, which runs every analysis in the browser and is kept as a claude.ai artifact, is described in `deploy/browser-preview/`.
 
 ### Free, one container: Hugging Face Spaces or Render
 

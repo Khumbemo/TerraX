@@ -79,9 +79,10 @@ def analyze_terrain(raster: Raster, boundary=None) -> dict:
         flat = int(flat_m.sum())
         deg = np.degrees(asp)
         comp = np.where(deg < 0, 90 - deg, np.where(deg > 90, 360 - deg + 90, 90 - deg))
-        sector = np.round(comp / 45).astype(np.int64) % 8
         steep = ok & ~flat_m
-        aspect_counts = [int(x) for x in np.bincount(sector[steep], minlength=8)]
+        # Compass sector (N, NE, … NW) of each counted cell; cells outside the DEM or the boundary have no aspect.
+        sector = np.round(comp[steep] / 45).astype(np.int64) % 8
+        aspect_counts = [int(x) for x in np.bincount(sector, minlength=8)]
         asp = np.where((dzdx == 0) & (dzdy == 0), 0, asp)
         zen = math.radians(45)
         az = math.radians((360 - 315 + 90) % 360)
