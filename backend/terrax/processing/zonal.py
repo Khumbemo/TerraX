@@ -64,8 +64,9 @@ def no_overlap(boundary: dict, raster: Raster) -> ValueError:
     return ValueError(f"The boundary “{boundary['name']}” does not overlap {raster.meta.filename}. Check that both cover the same area.")
 
 
-def clip_note(boundary: dict, inside: int) -> str:
-    return f"Limited to the analysis boundary “{boundary['name']}” ({boundary['areaM2'] / 10_000:.2f} ha; {inside:,} grid cells inside)."
+def clip_note(boundary: dict, inside: int, centres: bool = False) -> str:
+    cells = "grid cells whose centres fall inside" if centres else "grid cells inside"
+    return f"Limited to the analysis boundary “{boundary['name']}” ({boundary['areaM2'] / 10_000:.2f} ha; {inside:,} {cells})."
 
 
 def clip_to_boundary(raster: Raster, grid: Grid, boundary: dict | None) -> str | None:
@@ -73,4 +74,4 @@ def clip_to_boundary(raster: Raster, grid: Grid, boundary: dict | None) -> str |
         return None
     inside, n = boundary_mask(raster, grid, boundary)
     apply_mask(grid, inside)
-    return f"Limited to the analysis boundary “{boundary['name']}” ({boundary['areaM2'] / 10_000:.2f} ha; {n:,} grid cells whose centres fall inside)."
+    return clip_note(boundary, n, centres=True)

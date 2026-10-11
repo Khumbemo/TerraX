@@ -127,3 +127,27 @@ def test_land_cover_strips_equal_whole_grid(monkeypatch):
     for a, b in zip(whole["stats"], strips["stats"], strict=True):
         assert a["bandMeans"] == pytest.approx(b["bandMeans"], rel=1e-12) and a["ha"] == pytest.approx(b["ha"], rel=1e-12)
     assert whole["notes"] == strips["notes"]
+
+
+def test_terrain_strips_equal_whole_grid(tmp_path, monkeypatch):
+    from terrax.processing.terrain import analyze_terrain
+
+    rng = np.random.default_rng(9)
+    yy, xx = np.mgrid[0:403, 0:517]
+    z = 800 + 300 * np.sin(yy / 50) * np.cos(xx / 70) + rng.normal(0, 1, (403, 517))
+    z[100:110, 200:230] = np.nan
+    r = Raster(_tif(tmp_path / "dem.tif", z))
+    out = []
+    for tile, threads in ((10**9, "1"), (517 * 9, "4")):
+        monkeypatch.setattr(tiles, "TILE_PIXELS", tile)
+        monkeypatch.setenv("TERRAX_TILE_THREADS", threads)
+        out.append(analyze_terrain(r, BOUNDARY))
+    whole, strips = out
+    for k in ("_slope", "_hillshade", "_dem"):
+        assert np.array_equal(whole[k], strips[k], equal_nan=True), k
+    for k in ("slopeClassCounts", "aspectCounts", "flatCount", "notes"):
+        assert whole[k] == strips[k], k
+    for g in ("elevation", "slope"):
+        for k in ("n", "min", "max", "median", "q1", "q3"):
+            assert whole[g][k] == strips[g][k]
+        assert strips[g]["mean"] == pytest.approx(whole[g]["mean"], rel=1e-12)

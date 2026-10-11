@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
@@ -152,3 +153,62 @@ def fmt_p(p: float) -> str:
 
 def thousands(n: int | float) -> str:
     return f"{int(n):,}"
+
+
+# ── Large arrays (strip processing) ───────────────────────────────────────────
+
+class ValueBuffer:
+    """Values gathered strip by strip (from several threads) into one preallocated buffer."""
+
+    def __init__(self, cells: int, dtype: type = np.float32):
+        self.buf: np.ndarray = np.empty(cells, dtype=dtype)
+        self.n = 0
+        self.lock = threading.Lock()
+
+    def add(self, v: np.ndarray) -> None:
+        with self.lock:
+            self.buf[self.n : self.n + v.size] = v
+            self.n += v.size
+
+    @property
+    def values(self) -> np.ndarray:
+        return self.buf[: self.n]
+
+
+def summarize_large(vals: np.ndarray) -> Summary | None:
+    """summarize() for a large array without float64 copies or a full sort of the whole of it.
+
+    Quartiles are exact (type 7 on the selected order statistics); the mean and
+    SD use float64 sums over blocks, equal to summarize() up to rounding.
+    """
+    n = int(vals.size)
+    if not n:
+        return None
+    step = 4_000_000
+    total = sum(float(vals[i : i + step].astype(np.float64).sum()) for i in range(0, n, step))
+    mean = total / n
+    ss = sum(float(((vals[i : i + step].astype(np.float64) - mean) ** 2).sum()) for i in range(0, n, step))
+    ks = sorted({k for p in (0.25, 0.5, 0.75) for k in (math.floor((n - 1) * p), math.ceil((n - 1) * p))} | {0, n - 1})
+    part = np.partition(vals, ks)
+
+    def q(p: float) -> float:
+        h = (n - 1) * p
+        lo, hi = math.floor(h), math.ceil(h)
+        a, b = float(part[lo]), float(part[hi])
+        return a + (h - lo) * (b - a)
+
+    return Summary(n=n, mean=mean, sd=math.sqrt(ss / (n - 1)) if n > 1 else 0.0, min=float(part[0]), max=float(part[-1]), median=q(0.5), q1=q(0.25), q3=q(0.75))
+
+
+def histogram_large(vals: np.ndarray, vmin: float, vmax: float, bins: int = 30) -> list[dict]:
+    """histogram() counted in blocks."""
+    if vals.size == 0 or not (math.isfinite(vmin) and math.isfinite(vmax)):
+        return []
+    if vmin == vmax:
+        return [{"x0": vmin, "x1": vmax, "count": int(vals.size)}]
+    width = (vmax - vmin) / bins
+    counts = np.zeros(bins, dtype=np.int64)
+    for i in range(0, vals.size, 4_000_000):
+        a = vals[i : i + 4_000_000].astype(np.float64)
+        counts += np.bincount(np.minimum(bins - 1, np.floor((a - vmin) / width).astype(int)), minlength=bins)
+    return [{"x0": vmin + i * width, "x1": vmin + (i + 1) * width, "count": int(counts[i])} for i in range(bins)]

@@ -287,21 +287,34 @@ def apply_qa(raster: Raster, grids: list[Grid], qa: dict) -> tuple[float, str]:
     return frac, f"Quality mask from band {qa['band'] + 1} ({QA_KINDS[qa['kind']]['rule']}) removed {frac * 100:.1f} % of pixels."
 
 
-def grid_to_lonlat(raster: Raster, width: int, height: int):
-    """(col, row) on an analysis grid of width × height → [lon, lat] (7 decimals), or None without a CRS."""
+def grid_to_lonlat_arrays(raster: Raster, width: int, height: int):
+    """Vectorised (cols, rows) on an analysis grid of width × height → (lon, lat) arrays (unrounded), or None without a CRS."""
     meta = raster.meta
     if not meta.bbox or (not meta.geographic and raster.crs is None):
         return None
     minx, miny, maxx, maxy = meta.bbox
     cw, ch = (maxx - minx) / width, (maxy - miny) / height
     if meta.geographic:
-        return lambda col, row: [round(minx + col * cw, 7), round(maxy - row * ch, 7)]
+        return lambda cols, rows: (minx + np.asarray(cols, dtype=np.float64) * cw, maxy - np.asarray(rows, dtype=np.float64) * ch)
     from pyproj import Transformer
 
     tr = Transformer.from_crs(raster.crs, "EPSG:4326", always_xy=True)
 
+    def f(cols, rows):
+        lon, lat = tr.transform(minx + np.asarray(cols, dtype=np.float64) * cw, maxy - np.asarray(rows, dtype=np.float64) * ch)
+        return np.asarray(lon, dtype=np.float64), np.asarray(lat, dtype=np.float64)
+
+    return f
+
+
+def grid_to_lonlat(raster: Raster, width: int, height: int):
+    """(col, row) on an analysis grid of width × height → [lon, lat] (7 decimals), or None without a CRS."""
+    many = grid_to_lonlat_arrays(raster, width, height)
+    if many is None:
+        return None
+
     def f(col, row):
-        lon, lat = tr.transform(minx + col * cw, maxy - row * ch)
-        return [round(lon, 7), round(lat, 7)]
+        lon, lat = many([col], [row])
+        return [round(float(lon[0]), 7), round(float(lat[0]), 7)]
 
     return f

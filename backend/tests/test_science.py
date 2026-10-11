@@ -17,7 +17,7 @@ from terrax.processing.photo import read_exif
 from terrax.processing.rio import Ground
 from terrax.processing.stats import histogram, normal_cdf, quantile_sorted, summarize, trend_test
 from terrax.processing.table import read_table
-from terrax.processing.terrain import contour_grid, fill_depressions, flow_routing, nice_interval, snap_outlet, watershed
+from terrax.processing.terrain import contour_grid, fill_depressions, flow_routing, nice_interval, snap_outlet, stream_lines, watershed
 
 from .conftest import SAMPLES
 
@@ -209,6 +209,49 @@ def test_strahler_and_watershed_on_y_valley():
     assert cells > w * 10 and mask[2, 3] == 1 and mask[0, 2] == 0
     assert f["lengthByOrder"][1] > 0 and f["lengthByOrder"][2] > 0
 
+
+
+def test_stream_lines_split_at_junctions_like_the_cell_walk():
+    w, h = 13, 22
+
+    def seg(px, py, ax, ay, bx, by):
+        t = max(0, min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2)))
+        return math.hypot(px - ax - t * (bx - ax), py - ay - t * (by - ay))
+
+    g = grid(w, h, lambda x, y: 200 - 2 * y + 8 * min(seg(x, y, 2, 0, 6, 10), seg(x, y, 10, 0, 6, 10), seg(x, y, 6, 10, 6, 21)))
+    f = flow_routing(g, unit_ground(h), 900)
+    fc = stream_lines(f, lambda c, r: (np.asarray(c, dtype=float), np.asarray(r, dtype=float)))
+    # Reference: walk each source or junction cell downstream in plain Python.
+    d, o = f["dir"], f["order"]
+    DR, DC = (-1, -1, -1, 0, 0, 1, 1, 1), (-1, 0, 1, -1, 1, -1, 0, 1)
+
+    def down(r, c):
+        k = d[r, c]
+        rr, cc = r + DR[k], c + DC[k]
+        return None if k < 0 or not (0 <= rr < h and 0 <= cc < w) else (rr, cc)
+
+    inflow = np.zeros((h, w), int)
+    for r, c in zip(*np.nonzero(o), strict=True):
+        m = down(r, c)
+        if m and o[m]:
+            inflow[m] += 1
+    ref = []
+    for r, c in zip(*np.nonzero(o), strict=True):
+        if inflow[r, c] == 1:
+            continue
+        pts, cur = [(r, c)], (r, c)
+        while (m := down(*cur)) and o[m]:
+            pts.append(m)
+            if inflow[m] != 1:
+                break
+            cur = m
+        if len(pts) >= 2:
+            ref.append((int(o[r, c]), [[cc + 0.5, rr + 0.5] for rr, cc in pts]))
+    got = [(ft["properties"]["strahler"], ft["geometry"]["coordinates"]) for ft in fc["features"]]
+    assert got == ref
+    assert {s for s, _ in got} == {1, 2}
+    covered = {tuple(p) for _, line in got for p in line}
+    assert all((c + 0.5, r + 0.5) in covered for r, c in zip(*np.nonzero(o), strict=True))
 
 def test_contours_on_a_plane():
     w, h = 5, 6

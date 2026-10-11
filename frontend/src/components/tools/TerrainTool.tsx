@@ -50,6 +50,7 @@ interface HydroJob {
   layer: string;
   streams: FeatureCollection | null;
   downloads: Download[];
+  notes?: string[];
   markdown: string;
 }
 
@@ -262,6 +263,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                 {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
               </div>
             )}
+            {flow && <Notes items={flow.notes ?? []} />}
             <div className="button-row">
               {basin && onBoundary && (
                 <button

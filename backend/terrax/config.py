@@ -36,7 +36,10 @@ class Settings:
     #: Full-resolution pixel budget for tools that work in strips (forest, indices, series, land cover);
     #: larger rasters are resampled to it. Memory is about 10 bytes per pixel plus the strips in flight.
     max_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_MAX_PIXELS", "1e8"))))
-    #: Pixel budget for tools that need the whole grid in memory at once (terrain flow routing, plot change, previews).
+    #: Pixel budget for DEMs (terrain, hydrology, watersheds): slope works in strips, flow routing needs the whole grid
+    #: (about 40 bytes a pixel), so this budget sits between the two others.
+    dem_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_DEM_PIXELS", "2.5e7"))))
+    #: Pixel budget for tools that need the whole grid in memory at once (plot change, contours, previews).
     grid_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_GRID_PIXELS", "4e6"))))
     #: Threads that process strips of one raster in parallel (GDAL reads and NumPy release the GIL).
     tile_threads: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_TILE_THREADS", "0")) or min(4, os.cpu_count() or 1)))

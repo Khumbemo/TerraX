@@ -11,7 +11,7 @@ from .context import ToolContext, ToolError
 @tool("survey")
 def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     decl = params.get("declination")
-    decl = float(decl) if decl not in (None, "") else None
+    decl = None if decl is None or decl == "" else float(decl)
     if decl is not None and not -90 <= decl <= 90:
         raise ToolError("Declination must be between −90° and 90° (east positive).")
     if params.get("geojson"):

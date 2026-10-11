@@ -79,11 +79,11 @@ def preview(data: np.ndarray, max_side: int = PREVIEW_MAX_SIDE) -> np.ndarray:
 
 
 def save_png(rgba: np.ndarray, path: Path) -> Path:
-    Image.fromarray(rgba, "RGBA").save(path, optimize=True)
+    Image.fromarray(rgba, "RGBA").save(path, compress_level=6)
     return path
 
 
 def png_bytes(rgba: np.ndarray) -> bytes:
     buf = io.BytesIO()
-    Image.fromarray(rgba, "RGBA").save(buf, format="PNG", optimize=True)
+    Image.fromarray(rgba, "RGBA").save(buf, format="PNG", compress_level=6)
     return buf.getvalue()
