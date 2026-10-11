@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 from celery import Celery
+from celery.exceptions import SoftTimeLimitExceeded
 
 from . import storage
 from .config import settings
@@ -30,8 +31,10 @@ celery_app.conf.update(
     result_serializer="json",
     task_acks_late=True,  # a job is re-queued if its worker dies mid-run
     worker_prefetch_multiplier=1,  # long jobs: one at a time per worker process
-    task_time_limit=60 * 30,
-    task_soft_time_limit=60 * 25,
+    task_time_limit=60 * _s.job_minutes,
+    task_soft_time_limit=60 * (_s.job_minutes - 1),
+    # Heavy rasters can leave a worker process large; it is replaced after the job (Celery counts KiB).
+    worker_max_memory_per_child=_s.worker_max_memory_mb * 1024 or None,
     result_expires=3600,
     broker_connection_retry_on_startup=True,
     beat_schedule={"purge-old-files": {"task": "terrax.purge", "schedule": 3600.0}},
@@ -58,6 +61,14 @@ def run_job(job_id: str) -> dict:
         return storage.update_job(job_id, state="error", message=str(err), error=str(err))
     except ValueError as err:  # data problems raised by the processing modules
         return storage.update_job(job_id, state="error", message=str(err), error=str(err))
+    except SoftTimeLimitExceeded:
+        msg = (f"The analysis took longer than the {settings().job_minutes}-minute limit and was stopped. "
+               "Try a smaller area (an analysis boundary) or a coarser export, or raise TERRAX_JOB_MINUTES on the server.")
+        return storage.update_job(job_id, state="error", message=msg, error=msg)
+    except MemoryError:
+        msg = ("The server ran out of memory for this raster. Try a smaller area or a coarser export, "
+               "or lower TERRAX_MAX_PIXELS / TERRAX_TILE_THREADS, or run the workers on a machine with more memory.")
+        return storage.update_job(job_id, state="error", message=msg, error=msg)
     except Exception as err:  # record any failure so the UI stops waiting
         log.exception("job %s failed", job_id)
         msg = f"The analysis failed unexpectedly ({type(err).__name__}: {err})."

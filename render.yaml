@@ -14,6 +14,11 @@ services:
       # One analysis at a time keeps memory within the free plan.
       - key: TERRAX_JOB_THREADS
         value: "1"
+      # 512 MB: full resolution up to 20 MP, one strip at a time.
+      - key: TERRAX_MAX_PIXELS
+        value: "20000000"
+      - key: TERRAX_TILE_THREADS
+        value: "1"
       - key: TERRAX_MAX_UPLOAD_MB
         value: "100"
       - key: TERRAX_RETENTION_HOURS
