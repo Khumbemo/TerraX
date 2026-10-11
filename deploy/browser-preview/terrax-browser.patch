@@ -178,10 +178,52 @@ index ebf399e..dcbe20e 100644
              ))}
            </ul>
 diff --git a/src/components/tools/TerrainTool.tsx b/src/components/tools/TerrainTool.tsx
-index 1963e1f..37cb0a4 100644
+index 1963e1f..f8bd61e 100644
 --- a/src/components/tools/TerrainTool.tsx
 +++ b/src/components/tools/TerrainTool.tsx
-@@ -393,7 +393,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -3,7 +3,7 @@ import { downloadText, safeFilename } from '../../lib/download';
+ import { labelPatches, patchAreas, patchesToGeoJson } from '../../lib/patches';
+ import { groundGeometry } from '../../lib/rasterio';
+ import { flowRoutingAsync } from '../../lib/compute';
+-import { contoursGeoJson, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
++import { contoursGeoJson, mapStreams, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
+ import { makeBoundary } from '../../lib/vector';
+ import { viridis } from '../../lib/colormap';
+ import { mapImage } from '../../lib/overlay';
+@@ -56,6 +56,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+   const [layer, setLayer] = useState<Layer>('hillshade');
+   const [thresholdKm2, setThresholdKm2] = useState('0.5');
+   const [flow, setFlow] = useState<FlowResult | null>(null);
++  const [streamNote, setStreamNote] = useState<string | null>(null);
+   const [basin, setBasin] = useState<Basin | null>(null);
+   const [interval, setInterval_] = useState('');
+   const [showContours, setShowContours] = useState(false);
+@@ -133,8 +134,10 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+     const base = baseOutput.current;
+     if (!base || !raster || !result) return;
+     const contours = showContours ? contoursGeoJson(demGrid(result), raster.meta, Number(interval)) : null;
+-    const streams = flow ? streamLines(flow, raster.meta) : null;
+-    const features = [...(contours?.fc.features ?? []), ...(streams?.features ?? [])];
++    const all = flow ? streamLines(flow, raster.meta) : null;
++    const streams = all ? mapStreams(all) : null;
++    setStreamNote(streams?.note ?? null);
++    const features = [...(contours?.fc.features ?? []), ...(streams?.fc.features ?? [])];
+     onOutput({
+       ...base,
+       markdown: base.markdown + hydroMarkdown(flow, basin),
+@@ -316,6 +319,11 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+                 {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
+               </div>
+             )}
++            {flow && streamNote && (
++              <ul className="hint-list">
++                <li>{streamNote}</li>
++              </ul>
++            )}
+             <div className="button-row">
+               {basin && onBoundary && (
+                 <button
+@@ -393,7 +401,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
            </div>
  
            <ul className="hint-list">
@@ -271,6 +313,89 @@ index 59ab690..061626a 100644
  - Map: Settings → Map (or the map's Layers button) picks one base map and any number of overlays with opacity: offline Natural Earth outlines; CARTO Dark/Positron/Voyager; OpenStreetMap; OpenFreeMap Liberty/Positron/Bright (vector, no key); Protomaps from a .pmtiles file or URL; OpenTopoMap; Esri World Topographic and World Imagery; Stadia (Alidade, Outdoors, Stamen Toner/Terrain/Watercolor; account or key); MapTiler (key); EOX Sentinel-2 cloudless 2016 (CC BY) and 2020 (non-commercial); NASA GIBS MODIS Terra and VIIRS daily true colour with a date picker, Black Marble 2016 and Earth at Night 2012; CARTO place labels; custom XYZ tiles and custom WMS (e.g. ISRO Bhuvan). The Layers panel also toggles the basemap, result overlay (with opacity and legend), features and analysis boundary.
  - Residential plot: property boundary (analysis boundary or a GeoJSON/KML/GPX/shapefile) plus images of the plot from different years: GeoTIFFs are resampled onto a UTM grid around the plot; same-view JPG/PNG screenshots work after tracing the plot on the latest image (with an optional ground width for scale). Relative radiometric normalisation (iterative linear fit on pseudo-invariant pixels), change magnitude from standardised residuals with a robust threshold, patches joined across small gaps, and classification into: crossing the boundary (possible encroachment; area inside and depth), thin strips along the line (likely misalignment), along the inside edge, elsewhere inside, outside. Swipe viewer, timeline against the current image, GeoJSON export. It is a screening aid, not proof of ownership or encroachment.
  - Weather & climate: CSV/TSV/XLSX time series or climate GeoTIFFs. Detects rainfall, temperature, humidity, soil moisture, evapotranspiration and solar radiation; Mann–Kendall trend with Theil–Sen slope, seasonal cycle, Seasonal Kendall test and monthly anomalies (records of two years or more), Standardized Precipitation Index at 1/3/6/12 months (precipitation, 10+ years; 30+ recommended), value classes (IMD rainfall categories, soil-moisture ranges) and daily rainfall indices (rainy days ≥ 2.5 mm, heaviest day, longest dry spell).
+diff --git a/src/lib/rasterio.ts b/src/lib/rasterio.ts
+index 46febc4..ad7dfee 100644
+--- a/src/lib/rasterio.ts
++++ b/src/lib/rasterio.ts
+@@ -5,6 +5,8 @@ import { bboxToLatLng, type LatLngBounds } from './geo';
+ 
+ /** Pixel budget for analysis grids; larger rasters are resampled to this size. */
+ export const ANALYSIS_PIXEL_LIMIT = 4_000_000;
++/** Pixel budget for a full-resolution window (readWindow); larger windows keep every step-th pixel. */
++export const WINDOW_PIXEL_LIMIT = 16_000_000;
+ 
+ /** Mean radius of the WGS84 authalic sphere (equal-area), metres. */
+ const R_AUTHALIC = 6371007.1809;
+@@ -51,10 +53,22 @@ export interface Grid {
+   resampleFactor: number;
+ }
+ 
++export interface RasterWindow {
++  /** Row-major values per band, NaN for no-data; index (i, j) is file pixel (row0 + i·step, col0 + j·step). */
++  data: Float32Array[];
++  width: number;
++  height: number;
++  col0: number;
++  row0: number;
++  step: number;
++}
++
+ export interface OpenRaster {
+   meta: GeoMeta;
+   /** Reads bands (0-based) onto one analysis grid of at most ANALYSIS_PIXEL_LIMIT cells. */
+   readBands: (indices: number[]) => Promise<Grid[]>;
++  /** Reads file pixels [row0, row1) × [col0, col1) (clipped) at full resolution; every step-th pixel beyond maxPixels. */
++  readWindow?: (indices: number[], col0: number, row0: number, col1: number, row1: number, maxPixels?: number) => Promise<RasterWindow>;
+ }
+ 
+ function readEpsg(geoKeys: Record<string, unknown> | null): { epsg: number | null; geographic: boolean; userDefined: boolean } {
+@@ -114,8 +128,13 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+ 
+   const meta: GeoMeta = { filename: file.name, sizeBytes: file.size, width, height, bands, noData, bbox, epsg, geographic: geographic || epsg === 4326, latLngBounds, pixelSize, warnings };
+ 
+-  const readBands = async (indices: number[]): Promise<Grid[]> => {
++  const checkBands = (indices: number[]) => {
+     for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
++  };
++  const clean = (v: number) => (Number.isFinite(v) && (noData === null || v !== noData) ? v : NaN);
++
++  const readBands = async (indices: number[]): Promise<Grid[]> => {
++    checkBands(indices);
+     const rasters = (await image.readRasters({ samples: indices, width: gw, height: gh, resampleMethod: 'nearest', interleave: false })) as unknown as ArrayLike<number>[];
+     return rasters.map(band => {
+       const data = new Float32Array(gw * gh);
+@@ -127,7 +146,30 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+     });
+   };
+ 
+-  return { meta, readBands };
++  const readWindow = async (indices: number[], col0: number, row0: number, col1: number, row1: number, maxPixels = WINDOW_PIXEL_LIMIT): Promise<RasterWindow> => {
++    checkBands(indices);
++    const c0 = Math.max(0, Math.floor(col0)), r0 = Math.max(0, Math.floor(row0));
++    const c1 = Math.min(width, Math.ceil(col1)), r1 = Math.min(height, Math.ceil(row1));
++    const w = Math.max(0, c1 - c0), h = Math.max(0, r1 - r0);
++    const step = w * h > maxPixels ? Math.ceil(Math.sqrt((w * h) / maxPixels)) : 1;
++    const ow = Math.ceil(w / step), oh = Math.ceil(h / step);
++    const data = indices.map(() => new Float32Array(ow * oh));
++    // Strips of whole step-aligned rows, so a decimated window never holds more than a strip at full resolution.
++    const rows = Math.max(step, Math.floor(Math.max(1, Math.floor(4_000_000 / Math.max(1, w))) / step) * step);
++    for (let y = r0; y < r1; y += rows) {
++      const y1 = Math.min(r1, y + rows);
++      const strip = (await image.readRasters({ samples: indices, window: [c0, y, c1, y1], interleave: false })) as unknown as ArrayLike<number>[];
++      strip.forEach((band, b) => {
++        for (let sr = 0; sr < y1 - y; sr += step) {
++          const orow = (y - r0 + sr) / step;
++          for (let sc = 0, oc = 0; sc < w; sc += step, oc++) data[b][orow * ow + oc] = clean(band[sr * w + sc]);
++        }
++      });
++    }
++    return { data, width: ow, height: oh, col0: c0, row0: r0, step };
++  };
++
++  return { meta, readBands, readWindow };
+ }
+ 
+ /** True when two rasters share a grid closely enough for pixel-by-pixel comparison. */
 diff --git a/src/lib/tools/carbon.ts b/src/lib/tools/carbon.ts
 index e9e687e..70b8084 100644
 --- a/src/lib/tools/carbon.ts
@@ -347,6 +472,96 @@ index e9e687e..70b8084 100644
  }
  
  function estimate(values: number[]): Estimate {
+diff --git a/src/lib/tools/encroachment.ts b/src/lib/tools/encroachment.ts
+index 5ac3737..0bc3629 100644
+--- a/src/lib/tools/encroachment.ts
++++ b/src/lib/tools/encroachment.ts
+@@ -133,21 +133,38 @@ export async function prepareGeoStack(images: { raster: OpenRaster; label: strin
+     if (!proj || !meta.bbox) throw new Error(`${meta.filename} is not in a supported CRS (WGS84, Web Mercator or UTM).`);
+     const idx = rgbBands(meta.bands);
+     const uniq = [...new Set(idx)];
+-    const grids = await img.raster.readBands(uniq);
+-    const byBand = new Map(uniq.map((b, i) => [b, grids[i]]));
+-    const g0 = grids[0];
++    // Nearest file pixel of each cell centre at the file's own resolution (or the analysis grid, for rasters without window reads).
+     const [bx0, by0, bx1, by1] = meta.bbox;
+-    const cw = (bx1 - bx0) / g0.width, ch = (by1 - by0) / g0.height;
+-    const out: [Float32Array, Float32Array, Float32Array] = [new Float32Array(width * height), new Float32Array(width * height), new Float32Array(width * height)];
+-    let inside = 0;
++    const sw = img.raster.readWindow ? meta.width : (await img.raster.readBands([uniq[0]]))[0].width;
++    const sh = img.raster.readWindow ? meta.height : Math.round((meta.height * sw) / meta.width);
++    const cw = (bx1 - bx0) / sw, ch = (by1 - by0) / sh;
++    const cols = new Int32Array(width * height).fill(-1), rows = new Int32Array(width * height).fill(-1);
++    let inside = 0, c0 = Infinity, r0 = Infinity, c1 = -Infinity, r1 = -Infinity;
+     for (let k = 0; k < width * height; k++) {
+       const [x, y] = proj(lons[k], lats[k]);
+       const col = Math.floor((x - bx0) / cw), row = Math.floor((by1 - y) / ch);
+-      const ok = col >= 0 && row >= 0 && col < g0.width && row < g0.height;
+-      if (ok) inside++;
+-      for (let b = 0; b < 3; b++) out[b][k] = ok ? byBand.get(idx[b])!.data[row * g0.width + col] : NaN;
++      if (!(col >= 0 && row >= 0 && col < sw && row < sh)) continue;
++      inside++;
++      cols[k] = col;
++      rows[k] = row;
++      if (col < c0) c0 = col;
++      if (col >= c1) c1 = col + 1;
++      if (row < r0) r0 = row;
++      if (row >= r1) r1 = row + 1;
+     }
+     if (inside < width * height * 0.5) throw new Error(`${meta.filename} covers less than half of the property area. Check that it shows this property.`);
++    // Only the window around the property is read, so large orthophotos keep their full resolution.
++    let win: { data: Float32Array[]; width: number; col0: number; row0: number; step: number };
++    if (img.raster.readWindow) win = await img.raster.readWindow(uniq, c0, r0, c1, r1);
++    else win = { data: (await img.raster.readBands(uniq)).map(g => g.data), width: sw, col0: 0, row0: 0, step: 1 };
++    if (win.step > 1) notes.push(`${meta.filename}: the area around the property was read at every ${win.step}th pixel to stay within the browser's memory budget; the analysis grid is coarser than that anyway.`);
++    const byBand = new Map(uniq.map((b, i) => [b, win.data[i]]));
++    const out: [Float32Array, Float32Array, Float32Array] = [new Float32Array(width * height), new Float32Array(width * height), new Float32Array(width * height)];
++    for (let k = 0; k < width * height; k++) {
++      const ok = cols[k] >= 0;
++      const at = ok ? Math.floor((rows[k] - win.row0) / win.step) * win.width + Math.floor((cols[k] - win.col0) / win.step) : 0;
++      for (let b = 0; b < 3; b++) out[b][k] = ok ? byBand.get(idx[b])![at] : NaN;
++    }
+     if (inside < width * height) notes.push(`${meta.filename} does not cover the whole analysis area; uncovered cells are ignored.`);
+     layers.push({ label: img.label, date: img.date, rgb: out });
+   }
+diff --git a/src/lib/tools/hydrology.ts b/src/lib/tools/hydrology.ts
+index 646dc93..3ff9139 100644
+--- a/src/lib/tools/hydrology.ts
++++ b/src/lib/tools/hydrology.ts
+@@ -286,6 +286,33 @@ export function streamLines(f: FlowResult, meta: GeoMeta): FeatureCollection<Lin
+   return { type: 'FeatureCollection', features };
+ }
+ 
++/** Vertices the map draws comfortably; the streams export keeps every line. */
++export const MAP_STREAM_POINTS = 250_000;
++
++/** The highest whole Strahler orders whose lines fit MAP_STREAM_POINTS vertices, and a note when lower orders are left off the map. */
++export function mapStreams(fc: FeatureCollection<LineString>): { fc: FeatureCollection<LineString>; note: string | null } {
++  const points = new Map<number, number>();
++  for (const f of fc.features) {
++    const o = Number(f.properties?.strahler);
++    points.set(o, (points.get(o) ?? 0) + f.geometry.coordinates.length);
++  }
++  const orders = [...points.keys()].sort((a, b) => b - a);
++  let total = 0, lowest: number | null = null;
++  for (const o of orders) {
++    if (total + points.get(o)! > MAP_STREAM_POINTS) break;
++    total += points.get(o)!;
++    lowest = o;
++  }
++  if (!orders.length || lowest === orders[orders.length - 1]) return { fc, note: null };
++  const shown = lowest === null ? [] : fc.features.filter(f => Number(f.properties?.strahler) >= lowest!);
++  const n = fc.features.length;
++  const tail = 'the flow layer shows every channel cell and Export streams holds all lines.';
++  const note = shown.length
++    ? `The map draws streams of Strahler order ${lowest} and above (${shown.length.toLocaleString('en')} of ${n.toLocaleString('en')} lines); ${tail}`
++    : `The stream network (${n.toLocaleString('en')} line${n === 1 ? '' : 's'}) is too large to draw as lines; ${tail}`;
++  return { fc: { type: 'FeatureCollection', features: shown }, note };
++}
++
+ /** A "nice" contour interval giving about `target` levels over the relief. */
+ export function niceInterval(relief: number, target = 10): number {
+   if (!(relief > 0)) return 1;
 diff --git a/src/lib/tools/survey.ts b/src/lib/tools/survey.ts
 index 365425d..a2558d1 100644
 --- a/src/lib/tools/survey.ts
@@ -631,6 +846,72 @@ index 8922f0e..54f52f4 100644
    // Zero months: probability of zero enters H, so a dry month gets a negative SPI.
    const dry = computeSpi(monthlySeries(40, (y, m) => (m === 0 && y % 4 === 0 ? 0 : 50 + ((y * 7 + m * 3) % 11))), 1, false);
    const jan0 = dry.rows.find(x => x.month === 0 && x.year === 2000)!;
+diff --git a/tests/encroachment.test.ts b/tests/encroachment.test.ts
+index 20ff148..7234fb1 100644
+--- a/tests/encroachment.test.ts
++++ b/tests/encroachment.test.ts
+@@ -126,3 +126,38 @@ test('synthetic residential sample: shed grows across the east boundary; fence s
+   assert.equal(early.length, 1);
+   assert.ok(early[0].depthInside >= 2 && early[0].depthInside <= 3, `2021 depth ${early[0].depthInside}`); // true 2.5 m
+ });
++
++test('plot images over the analysis budget are sampled at full resolution around the property', async () => {
++  const { readFileSync } = await import('node:fs');
++  const dir = new URL('../public/data/samples/', import.meta.url);
++  const boundary = { name: 'p', areaM2: 0, geojson: JSON.parse(readFileSync(new URL('plot_boundary_synthetic.geojson', dir), 'utf8')) };
++  // A 2100 × 2100 (4.4 MP) image around the sample plot at 0.1 m; a whole-raster read would coarsen it.
++  const src = await openGeoTiff(new File([readFileSync(new URL('plot_2024-02-08_synthetic.tif', dir))], 'src.tif'));
++  const [sx0, , , sy1] = src.meta.bbox!;
++  const [g] = [await src.readBands([0, 1, 2])];
++  const n = 2100, res = 0.1, e0 = sx0 - 5, n0 = sy1 + 5;
++  const rnd = lcg(7);
++  const data = new Uint8Array(n * n * 3);
++  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
++    const sc = Math.floor((e0 + (c + 0.5) * res - sx0) / src.meta.pixelSize![0]), sr = Math.floor((sy1 - (n0 - (r + 0.5) * res)) / src.meta.pixelSize![1]);
++    for (let b = 0; b < 3; b++) {
++      const v = sc >= 0 && sr >= 0 && sc < g[b].width && sr < g[b].height ? g[b].data[sr * g[b].width + sc] : 60;
++      data[(r * n + c) * 3 + b] = Math.max(0, Math.min(255, Math.round(v + (rnd() - 0.5) * 30)));
++    }
++  }
++  const buf = await writeArrayBuffer(data, { width: n, height: n, SamplesPerPixel: 3, BitsPerSample: [8, 8, 8], SampleFormat: [1, 1, 1], PlanarConfiguration: 1, ModelPixelScale: [res, res, 0], ModelTiepoint: [0, 0, 0, e0, n0, 0], GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: 32646 });
++  const big = await openGeoTiff(new File([buf], 'big.tif'));
++  const before = await openGeoTiff(new File([readFileSync(new URL('plot_2019-02-10_synthetic.tif', dir))], 'before.tif'));
++  // Reference: the same file held at full resolution, sampled without window reads.
++  const planes = [0, 1, 2].map(b => Float32Array.from({ length: n * n }, (_, k) => data[k * 3 + b]));
++  const native = { meta: big.meta, readBands: async (ix: number[]) => ix.map(i => ({ width: n, height: n, data: planes[i], resampleFactor: 1 })) };
++  const got = await prepareGeoStack([{ raster: before, label: 'a', date: null }, { raster: big, label: 'b', date: null }], boundary, 15);
++  const ref = await prepareGeoStack([{ raster: before, label: 'a', date: null }, { raster: native, label: 'b', date: null }], boundary, 15);
++  assert.equal(got.cellM, 0.1);
++  for (let b = 0; b < 3; b++) assert.deepEqual(got.layers[1].rgb[b], ref.layers[1].rgb[b]);
++  // Decimated windows keep exactly every step-th pixel.
++  const full = await big.readWindow!([1], 7, 5, 1007, 905);
++  const thin = await big.readWindow!([1], 7, 5, 1007, 905, full.width * full.height / 10);
++  assert.equal(thin.step, 4);
++  for (let i = 0; i < thin.height; i++) for (let j = 0; j < thin.width; j++) assert.equal(thin.data[0][i * thin.width + j], full.data[0][i * 4 * full.width + j * 4]);
++});
+diff --git a/tests/hydrology.test.ts b/tests/hydrology.test.ts
+index 79048b8..032a95f 100644
+--- a/tests/hydrology.test.ts
++++ b/tests/hydrology.test.ts
+@@ -66,3 +66,18 @@ test('contours: a plane gives one straight chained line per level', () => {
+   assert.equal(niceInterval(730), 50);
+   assert.equal(niceInterval(18), 2);
+ });
++
++test('map streams keep whole highest orders within the vertex budget', async () => {
++  const { mapStreams, MAP_STREAM_POINTS } = await import('../src/lib/tools/hydrology');
++  const line = (strahler: number, n: number) => ({ type: 'Feature' as const, properties: { strahler }, geometry: { type: 'LineString' as const, coordinates: Array.from({ length: n }, () => [0, 0]) } });
++  const fc = (...f: ReturnType<typeof line>[]) => ({ type: 'FeatureCollection' as const, features: f });
++  const small = fc(line(1, 10), line(2, 5));
++  assert.equal(mapStreams(small).fc, small);
++  assert.equal(mapStreams(small).note, null);
++  const big = mapStreams(fc(line(1, MAP_STREAM_POINTS), line(2, 40), line(3, 5)));
++  assert.deepEqual(big.fc.features.map(f => f.properties.strahler), [2, 3]);
++  assert.match(big.note ?? '', /order 2 and above \(2 of 3 lines\)/);
++  const none = mapStreams(fc(line(4, MAP_STREAM_POINTS + 1)));
++  assert.equal(none.fc.features.length, 0);
++  assert.match(none.note ?? '', /\(1 line\) is too large to draw/);
++});
 diff --git a/tests/survey-geodesic.test.ts b/tests/survey-geodesic.test.ts
 new file mode 100644
 index 0000000..36fd02f
