@@ -179,6 +179,8 @@ def main() -> None:
     photo()
     inventory()
     landcover_training()
+    radar_samples()
+    canopy_sample()
 
 
 def landcover_training() -> None:
@@ -197,6 +199,57 @@ def landcover_training() -> None:
              box(120, 120, 135, 135, "Forest"), box(20, 150, 35, 165, "Forest")]
     (OUT / "landcover_training_synthetic.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}, indent=1), encoding="utf-8")
     print("wrote landcover_training_synthetic.geojson")
+
+
+def radar_samples() -> None:
+    """Two Sentinel-1-like VV/VH images (dB, 10 m) over the forest scene; a 600 m × 500 m clearing appears in the second.
+
+    Speckle is gamma-distributed with ENL 4.4 (IW GRDH); forest VV −7.5 dB, VH −13 dB; the clearing VV −11, VH −20 dB.
+    """
+    n_w, n_h = 300, 240
+    g = np.random.default_rng(1001)
+    for t, day in enumerate(("2023-01-08", "2024-01-03")):
+        vv, vh = np.full((n_h, n_w), -7.5), np.full((n_h, n_w), -13.0)
+        if t:
+            vv[60:110, 150:210], vh[60:110, 150:210] = -11.0, -20.0
+        bands = [10 * np.log10(10 ** (m / 10) * g.gamma(4.4, 1 / 4.4, m.shape)) for m in (vv, vh)]
+        write_tif(f"s1_vv_vh_{day}_synthetic.tif", bands, res=10, e0=E0 + 1000, n0=N0 - 1000)
+        with rasterio.open(OUT / f"s1_vv_vh_{day}_synthetic.tif", "r+") as d:
+            d.set_band_description(1, "VV")
+            d.set_band_description(2, "VH")
+
+
+def canopy_sample() -> None:
+    """A small airborne LiDAR tile (LAZ, 20 points per m²): sloping ground (class 2) and 25 cone crowns of 8–30 m."""
+    import laspy
+    from pyproj import CRS
+
+    g = np.random.default_rng(2002)
+    size, n = 120.0, 288_000
+    x, y = g.uniform(0, size, n), g.uniform(0, size, n)
+    ground = 140 + 0.06 * x + 0.03 * y
+    top = np.zeros(n)
+    for i in range(5):
+        for j in range(5):
+            tx, ty = 12 + 24 * i + g.uniform(-4, 4), 12 + 24 * j + g.uniform(-4, 4)
+            th = float(g.uniform(8, 30))
+            r = 0.22 * th + 1
+            d = np.hypot(x - tx, y - ty)
+            top = np.maximum(top, np.where(d < r, th * (1 - 0.45 * d / r), 0))
+    canopy = top > 0
+    under = canopy & (g.random(n) < 0.3)
+    hdr = laspy.LasHeader(point_format=1, version="1.4")
+    hdr.offsets, hdr.scales = [E0 + 2000, N0 - 2000, 0], [0.001, 0.001, 0.001]
+    hdr.add_crs(CRS.from_epsg(32646))
+    las = laspy.LasData(hdr)
+    las.x = E0 + 2000 + np.concatenate([x, x[under]])
+    las.y = N0 - 2000 + np.concatenate([y, y[under]])
+    las.z = np.concatenate([ground + top, ground[under]])
+    las.classification = np.concatenate([np.where(canopy, 5, 2), np.full(under.sum(), 2)]).astype(np.uint8)
+    las.return_number = np.concatenate([np.ones(n), np.full(under.sum(), 2)]).astype(np.uint8)
+    las.number_of_returns = np.concatenate([np.where(under, 2, 1), np.full(under.sum(), 2)]).astype(np.uint8)
+    las.write(str(OUT / "lidar_forest_synthetic.laz"))
+    print("wrote lidar_forest_synthetic.laz")
 
 
 def _pip(poly, x, y) -> np.ndarray:

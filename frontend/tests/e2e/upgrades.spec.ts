@@ -168,3 +168,31 @@ test('land cover: classify, rename a class and export', async ({ page }) => {
   await expect.poll(() => mapState<boolean>(page, `m => !!m.getLayer('tx-image-r')`)).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('radar: speckle-filtered Sentinel-1 pair maps the clearing', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Radar (Sentinel-1)');
+  await page.click('button:has-text("Try synthetic pair")');
+  await expect(page.locator('.stat', { hasText: 'VH decrease' })).toContainText('ha');
+  const ha = Number((await page.locator('.stat', { hasText: 'VH decrease' }).locator('.stat-value').innerText()).split(' ')[0]);
+  expect(ha).toBeGreaterThan(25);
+  expect(ha).toBeLessThan(35); // the 600 m × 500 m clearing is 30 ha
+  await expect(page.locator('#radar-vh')).toHaveValue('1');
+  await expect(page.locator('.report-card')).toContainText('Lee (1980)');
+  await page.click('[role="tab"]:has-text("False colour")');
+  await expect(page.locator('img.raster-canvas')).toHaveAttribute('src', /composite\.png/);
+  expect(errors).toEqual([]);
+});
+
+test('canopy: LiDAR point cloud gives height, cover and tree tops', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Canopy height');
+  await page.click('button:has-text("Try synthetic LiDAR")');
+  await expect(page.locator('.stat', { hasText: 'Tree tops' })).toContainText('25');
+  await expect(page.locator('.stat', { hasText: 'Canopy cover' })).toContainText('%');
+  await expect(page.locator('.report-card')).toContainText('Popescu & Wynne');
+  await expect.poll(() => mapState<number>(page, `m => m.getSource('tx-features') ? m.getSource('tx-features').serialize().data.features.length : 0`)).toBe(25);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export canopy height model")')]);
+  expect(dl.suggestedFilename()).toBe('chm.tif');
+  expect(errors).toEqual([]);
+});

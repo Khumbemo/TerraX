@@ -12,7 +12,8 @@ export async function start(page: Page, name = 'Test Operator') {
 }
 
 export async function openTool(page: Page, name: string) {
-  await page.locator('.tool-card', { hasText: name }).click();
+  // The exact card title: hasText matches any card whose text mentions the name ("terrain" also appears on Canopy height).
+  await page.locator(`.tool-card[data-name="${name}"]`).click();
   await expect(page.locator('.tool-workspace h2', { hasText: name })).toBeVisible();
 }
 

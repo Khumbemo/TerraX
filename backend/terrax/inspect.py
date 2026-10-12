@@ -10,6 +10,7 @@ RASTER_EXT = {".tif", ".tiff", ".vrt", ".img", ".jp2"}
 TABLE_EXT = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm"}
 VECTOR_EXT = {".geojson", ".json", ".kml", ".gpx", ".shp", ".gpkg"}
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp"}
+POINTCLOUD_EXT = {".las", ".laz"}
 
 
 def describe(path: Path) -> tuple[str, dict[str, Any]]:
@@ -43,6 +44,18 @@ def describe(path: Path) -> tuple[str, dict[str, Any]]:
             return kind, {"entries": names[:50]}
         if ext in VECTOR_EXT:
             return "vector", {"format": ext.lstrip(".").upper()}
+        if ext in POINTCLOUD_EXT:
+            import laspy
+
+            with laspy.open(str(path)) as f:
+                h = f.header
+                try:
+                    crs = h.parse_crs()
+                except Exception:  # an unreadable CRS record
+                    crs = None
+                return "pointcloud", {"format": ext.lstrip(".").upper(), "points": int(h.point_count), "version": str(h.version), "pointFormat": int(h.point_format.id),
+                                      "crs": crs.name if crs is not None else None, "epsg": crs.to_epsg() if crs is not None else None,
+                                      "bounds": [float(v) for v in (*h.mins, *h.maxs)]}
     except Exception as err:  # unreadable files are reported, not fatal
         return "other", {"error": f"{path.name} could not be read: {err}"}
     return "other", {}

@@ -183,3 +183,39 @@ def test_landcover_random_forest_sample_and_accuracy(client):
     up = client.post("/api/files", files={"file": ("bad.csv", buf.getvalue().encode(), "text/csv")}).json()
     bad = client.post(f"/api/landcover/{job_id}/accuracy", json={"file": up["id"]})
     assert bad.status_code == 400 and "Built-up, Forest, Water" in bad.json()["detail"]
+
+
+def test_radar_single_and_change(client):
+    a = sample(client, "s1_vv_vh_2023-01-08_synthetic.tif")
+    b = sample(client, "s1_vv_vh_2024-01-03_synthetic.tif")
+    one = run(client, "radar", {"before": a})
+    assert one["bands"] == {"vv": 0, "vh": 1} and one["radar"]["dates"][0]["scale"] == "db" and "change" not in one["radar"]
+    assert client.get(one["layers"]["composite"]).status_code == 200
+    res = run(client, "radar", {"before": a, "after": b}, {"window": 5, "thresholdDb": 3})
+    ch = res["radar"]["change"]
+    assert ch["ha"]["1"] == pytest.approx(30, rel=0.15)  # the 600 m × 500 m clearing
+    assert ch["share"]["3"] < 0.01 and "Change (VH log ratio)" in res["markdown"]
+    tif = client.get(res["downloads"][0]["url"])
+    assert tif.status_code == 200 and tif.content[:2] in (b"II", b"MM")
+    assert "different bands" in run_err(client, "radar", {"before": a}, {"vv": 1, "vh": 1})
+
+
+def test_canopy_from_point_cloud_and_rasters(client, tmp_path):
+    import rasterio
+
+    cloud = sample(client, "lidar_forest_synthetic.laz")
+    res = run(client, "canopy", {"cloud": cloud}, {"cell": 1, "threshold": 2, "minTree": 5})
+    c = res["canopy"]
+    assert c["trees"]["count"] == 25 and 8 <= c["height"]["max"] <= 30.5 and 0.05 < c["cover"] < 0.6
+    assert res["map"]["geojson"]["features"] and "Popescu & Wynne" in res["markdown"]
+    chm_url = next(d["url"] for d in res["downloads"] if d["filename"].endswith(".tif"))
+    p = tmp_path / "chm.tif"
+    p.write_bytes(client.get(chm_url).content)
+    with rasterio.open(p) as d:
+        assert d.crs.to_epsg() == 32646 and d.res == (1.0, 1.0)
+    # The exported CHM as input gives the same answer.
+    with p.open("rb") as fh:
+        fid = client.post("/api/files", files={"file": ("chm.tif", fh, "image/tiff")}).json()["id"]
+    again = run(client, "canopy", {"chm": fid}, {"threshold": 2, "minTree": 5})
+    assert again["canopy"]["trees"]["count"] == 25 and again["canopy"]["cover"] == pytest.approx(c["cover"], abs=1e-9)
+    assert "point cloud, a canopy height model" in run_err(client, "canopy", {}, {})

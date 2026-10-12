@@ -550,3 +550,138 @@ def test_accuracy_matches_olofsson_2014_worked_example():
     assert r["overallAccuracy"] == pytest.approx(0.95, abs=0.005) and r["overallCi"] == pytest.approx(0.02, abs=0.005)
     assert r["classes"][0]["userAccuracy"] == pytest.approx(0.88, abs=0.005) and r["classes"][0]["userCi"] == pytest.approx(0.07, abs=0.005)
     assert r["classes"][0]["producerAccuracy"] == pytest.approx(0.75, abs=0.005)
+
+
+def _s1_pair(tmp_path, n=200, enl=4.4, seed=2, db=True):
+    """Two Sentinel-1-like VV/VH images with gamma speckle; a 60 × 50 px clearing appears in the second (VH −13 → −20 dB)."""
+    import rasterio
+    from rasterio.transform import from_origin
+
+    rng = np.random.default_rng(seed)
+    paths = []
+    for t in (0, 1):
+        vv = np.full((n, n), -7.5)
+        vh = np.full((n, n), -13.0)
+        if t:
+            vv[40:100, 50:100], vh[40:100, 50:100] = -11.0, -20.0
+        bands = []
+        for mean_db in (vv, vh):
+            lin = 10 ** (mean_db / 10) * rng.gamma(enl, 1 / enl, (n, n))  # multiplicative speckle, mean 1
+            bands.append(10 * np.log10(lin) if db else lin)
+        p = tmp_path / f"s1_{t}.tif"
+        with rasterio.open(p, "w", driver="GTiff", width=n, height=n, count=2, dtype="float32", crs="EPSG:32646", transform=from_origin(500000, 3000000, 10, 10)) as d:
+            d.write(np.stack(bands).astype(np.float32))
+        paths.append(p)
+    return paths
+
+
+def test_lee_filter_reduces_speckle_and_keeps_the_mean():
+    from terrax.processing.radar import lee_filter
+
+    rng = np.random.default_rng(1)
+    z = 0.05 * rng.gamma(4.4, 1 / 4.4, (300, 300))
+    f = lee_filter(z, 7, 4.4)
+    assert f.mean() == pytest.approx(0.05, rel=0.01)
+    assert f.std() / f.mean() < (z.std() / z.mean()) / 4  # 49-pixel window on a homogeneous area: CV falls about √49-fold
+    step = np.hstack([z[:, :150], 4 * z[:, 150:]])  # a 6 dB edge
+    fs = lee_filter(step, 7, 4.4)
+    assert fs[:, 140:146].mean() == pytest.approx(0.05, rel=0.05) and fs[:, 154:160].mean() == pytest.approx(0.2, rel=0.05)
+
+
+def test_hist_stats_quartiles_within_half_a_bin():
+    from terrax.processing.radar import HistStats
+
+    v = np.random.default_rng(4).normal(-12, 3, 200_001).astype(np.float32)
+    h = HistStats(-60, 40, 0.01)
+    for part in np.array_split(v, 7):
+        h.add(part)
+    d = h.dict()
+    assert d is not None and d["n"] == v.size and d["mean"] == pytest.approx(float(v.astype(np.float64).mean()), abs=1e-9)
+    for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+        assert abs(d[key] - float(np.quantile(v, p))) <= 0.005 + 1e-6
+
+
+@pytest.mark.parametrize("db", [True, False])
+def test_radar_change_finds_the_clearing_and_strips_equal_whole_grid(tmp_path, monkeypatch, db):
+    from terrax.processing import radar, tiles
+    from terrax.processing.rio import Raster
+
+    paths = _s1_pair(tmp_path, db=db)
+    monkeypatch.setattr(tiles, "TILE_PIXELS", 10**9)
+    whole = radar.analyze_radar([Raster(p) for p in paths], 0, 1, size=5)
+    monkeypatch.setattr(tiles, "TILE_PIXELS", 200 * 13)  # 16 strips with 2-row halos
+    monkeypatch.setenv("TERRAX_TILE_THREADS", "4")
+    res = radar.analyze_radar([Raster(p) for p in paths], 0, 1, size=5)
+    assert np.array_equal(whole["change"]["classes"], res["change"]["classes"])
+    assert res["dates"][0]["scale"] == ("db" if db else "linear")
+    # The clearing is 60 × 50 px = 3,000 px = 30 ha at 10 m: a 7 dB VH drop against ±3 dB.
+    cls = res["change"]["classes"]
+    assert (cls[45:95, 55:95] == 1).mean() > 0.97  # inside, away from the edges
+    assert (cls[120:, 120:] == 1).mean() < 0.01  # false alarms in the unchanged forest
+    assert res["change"]["ha"]["1"] == pytest.approx(30, rel=0.12)
+    vh = res["dates"][0]["vh"]
+    assert vh["median"] == pytest.approx(-13 - 0.4, abs=0.6)  # filtered speckle: the dB median sits a little below the linear mean
+    assert "Lee (1980)" in radar.radar_markdown(res)
+
+
+def _forest_cloud(path, unit=1.0, crs="EPSG:32646", seed=8):
+    """A 100 m × 100 m LAS: ground z = 120 + 0.05x (class 2) and 16 cone crowns of known heights on a 25 m grid.
+
+    unit converts metres to the file's units (feet: 3937/1200), applied to x, y and z.
+    """
+    import laspy
+    from pyproj import CRS
+
+    rng = np.random.default_rng(seed)
+    trees = [(12.5 + 25 * i, 12.5 + 25 * j, 8.0 + 2.0 * (4 * i + j) % 17) for i in range(4) for j in range(4)]
+    n = 200_000  # 20 returns per m², typical of current airborne LiDAR
+    x, y = rng.uniform(0, 100, n), rng.uniform(0, 100, n)
+    ground = 120 + 0.05 * x
+    top = np.zeros(n)
+    for tx, ty, th in trees:
+        r = 0.25 * th  # crown radius grows with height
+        d = np.hypot(x - tx, y - ty)
+        top = np.maximum(top, np.where(d < r, th * (1 - 0.4 * d / r), 0))
+    canopy = top > 0
+    # First returns: crown surface where there is canopy, ground elsewhere; under crowns some last returns reach the ground.
+    under = canopy & (rng.random(n) < 0.3)
+    xs = [x, x[under]]
+    ys = [y, y[under]]
+    zs = [ground + top, ground[under]]
+    cls = [np.where(canopy, 5, 2), np.full(under.sum(), 2)]
+    ret = [np.ones(n, int), np.full(under.sum(), 2)]
+    hdr = laspy.LasHeader(point_format=1, version="1.4")
+    hdr.offsets = [500000 * unit, 3000000 * unit, 0]
+    hdr.scales = [0.001, 0.001, 0.001]
+    hdr.add_crs(CRS.from_user_input(crs), keep_compatibility=False)  # LAS 1.4 WKT (custom CRSs have no EPSG GeoKeys)
+    las = laspy.LasData(hdr)
+    las.x = (500000 + np.concatenate(xs)) * unit
+    las.y = (3000000 + np.concatenate(ys)) * unit
+    las.z = np.concatenate(zs) * unit
+    las.classification = np.concatenate(cls).astype(np.uint8)
+    las.return_number = np.concatenate(ret).astype(np.uint8)
+    las.number_of_returns = np.where(np.concatenate(ret) == 2, 2, 1).astype(np.uint8)
+    las.write(str(path))
+    return trees
+
+
+@pytest.mark.parametrize(("unit", "crs"), [(1.0, "EPSG:32646"), (3937 / 1200, "+proj=tmerc +lat_0=0 +lon_0=93 +k=0.9996 +x_0=500000 +y_0=0 +datum=WGS84 +units=us-ft +vunits=us-ft")])
+def test_canopy_height_from_a_point_cloud(tmp_path, unit, crs):
+    from terrax.processing.canopy import analyze_canopy, chm_from_las
+
+    path = tmp_path / ("forest.laz" if unit == 1 else "forest_ft.las")
+    trees = _forest_cloud(path, unit, crs)
+    g = chm_from_las(path, cell=1.0)
+    assert (g["width"], g["height"]) == (100, 100) or abs(g["width"] - 100) <= 1
+    chm = g["chm"]
+    for tx, ty, th in trees:
+        c, r = int(tx), int(100 - ty)
+        peak = np.nanmax(chm[max(0, r - 1) : r + 2, max(0, c - 1) : c + 2])
+        # The highest return in a cell is never above the apex and, at 20 points/m², rarely more than 0.6 m below it.
+        assert th - 0.6 <= peak <= th + 0.01, (tx, ty, th, peak)  # in metres whatever the file's units
+    res = analyze_canopy(chm, np.full(chm.shape[0], 1.0), 1.0, threshold=2.0, min_tree=5.0)
+    assert res["trees"]["count"] == len(trees)
+    # Crown height falls from h at the centre to 0.6 h at the edge (≥ 4.8 m here), so the whole disc of radius h/4 is above 2 m.
+    crown = sum(math.pi * (0.25 * th) ** 2 for _, _, th in trees)
+    assert res["cover"] == pytest.approx(crown / 1e4, abs=0.02)
+    assert res["height"]["max"] == pytest.approx(max(t[2] for t in trees), abs=0.6)
