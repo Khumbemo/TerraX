@@ -287,10 +287,13 @@ def classify_supervised(raster: Raster, bands: list[int], training: dict, roles:
         k = len(labels)
         cm = np.zeros((k, k), dtype=np.int64)
         np.add.at(cm, (pred.astype(np.int64) - 1, y.astype(np.int64) - 1), 1)  # rows: predicted, columns: reference
-        diag = np.diag(cm).astype(float)
-        validation = {"folds": folds, "confusion": cm.tolist(), "overall": float(diag.sum() / cm.sum()),
-                      "user": [None if cm[i].sum() == 0 else float(diag[i] / cm[i].sum()) for i in range(k)],
-                      "producer": [None if cm[:, j].sum() == 0 else float(diag[j] / cm[:, j].sum()) for j in range(k)]}
+        table: list[list[int]] = cm.tolist()
+        rows_n = [sum(r) for r in table]
+        cols_n = [sum(r[j] for r in table) for j in range(k)]
+        hits = [table[i][i] for i in range(k)]
+        validation = {"folds": folds, "confusion": table, "overall": sum(hits) / sum(rows_n),
+                      "user": [hits[i] / rows_n[i] if rows_n[i] else None for i in range(k)],
+                      "producer": [hits[j] / cols_n[j] if cols_n[j] else None for j in range(k)]}
     rf = RandomForestClassifier(n_estimators=trees, random_state=seed, n_jobs=threads).fit(X, y)
     rf.n_jobs = 1  # strips already run in parallel threads (tree traversal releases the GIL)
 
