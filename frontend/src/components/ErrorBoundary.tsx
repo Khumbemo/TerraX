@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportError } from '../lib/errorReport';
 
 interface Props {
   children: React.ReactNode;
@@ -21,6 +22,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error(`TerraX: ${this.props.area ?? 'app'} crashed`, error, info.componentStack);
+    reportError(error, `Render error (${this.props.area ?? 'app'})`);
   }
 
   reset = () => this.setState({ error: null });

@@ -8,6 +8,8 @@ import { openTool, start } from './helpers';
 // The TerraX server fetches Open-Meteo, NASA POWER and Earth Search itself (tested with
 // pytest on recorded responses). Here the browser-facing /api/live endpoints and the
 // Sentinel-2 job are mocked, and everything after them runs on the real API.
+// Files are uploaded with page.request, which shares the page's cookies: uploads
+// belong to the browser (guest or account) that made them.
 
 async function upload(request: APIRequestContext, name: string, body: Buffer, mimeType: string) {
   const r = await request.post('/api/files', { multipart: { file: { name, mimeType, buffer: body } } });
@@ -15,14 +17,14 @@ async function upload(request: APIRequestContext, name: string, body: Buffer, mi
   return r.json();
 }
 
-test('weather: fetched ERA5 daily data is analysed', async ({ page, request }) => {
+test('weather: fetched ERA5 daily data is analysed', async ({ page }) => {
   const errors = await start(page);
   const rows = ['date,precipitation_sum (mm),temperature_2m_mean (°C)'];
   for (let d = 0; d < 800; d++) {
     const t = new Date(Date.UTC(2022, 0, 1) + d * 86_400_000).toISOString().slice(0, 10);
     rows.push(`${t},${d % 3 ? 0 : 6.5},${(15 + 8 * Math.sin((d / 365) * 2 * Math.PI)).toFixed(2)}`);
   }
-  const file = await upload(request, 'open-meteo_era5_25.674_94.108_2022-01-01_2024-03-10.csv', Buffer.from(rows.join('\n')), 'text/csv');
+  const file = await upload(page.request, 'open-meteo_era5_25.674_94.108_2022-01-01_2024-03-10.csv', Buffer.from(rows.join('\n')), 'text/csv');
   let sent: Record<string, unknown> = {};
   await page.route('**/api/live/weather', async route => {
     sent = JSON.parse(route.request().postData() ?? '{}');
@@ -59,7 +61,7 @@ test('weather: long monthly sample gives SPI and a seasonal trend', async ({ pag
   expect(errors).toEqual([]);
 });
 
-test('satellite: a Sentinel-2 window loads as a masked NDVI layer', async ({ page, request }) => {
+test('satellite: a Sentinel-2 window loads as a masked NDVI layer', async ({ page }) => {
   const errors = await start(page);
   // A 5-band reflectance window as the server writes it (blue, green, red, NIR, SCL with clouds on the west half).
   const dir = mkdtempSync(join(tmpdir(), 'terrax-s2-'));
@@ -74,7 +76,7 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
     for i, a in enumerate(b + [scl], 1):
         d.write(a, i)
 `]);
-  const file = await upload(request, 'S2B_46RFQ_20240301_0_L2A.tif', readFileSync(path), 'image/tiff');
+  const file = await upload(page.request, 'S2B_46RFQ_20240301_0_L2A.tif', readFileSync(path), 'image/tiff');
   const item = { id: 'S2B_46RFQ_20240301_0_L2A', datetime: '2024-03-01T04:25:00Z', cloud: 4.1, epsg: 32646, assets: {}, processingBaseline: '05.10' };
   await page.route('**/api/live/sentinel/search', async route => {
     expect(JSON.parse(route.request().postData() ?? '{}').bbox).toHaveLength(4);
@@ -101,7 +103,7 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
   expect(errors).toEqual([]);
 });
 
-test('radar: two searched Sentinel-1 dates give a change map', async ({ page, request }) => {
+test('radar: two searched Sentinel-1 dates give a change map', async ({ page }) => {
   const errors = await start(page);
   // Two VV/VH windows as the server writes them (γ⁰, linear power), the second with a 7 dB VH drop over 50 × 50 px.
   const dir = mkdtempSync(join(tmpdir(), 'terrax-s1-'));
@@ -117,7 +119,7 @@ for k, path in enumerate(${JSON.stringify(paths)}):
     with rasterio.open(path, 'w', driver='GTiff', width=200, height=200, count=2, dtype='float32', crs='EPSG:32646', transform=from_origin(609000, 2842000, 10, 10), nodata=float('nan')) as d:
         d.write(vh * 5, 1); d.write(vh, 2); d.set_band_description(1, 'VV'); d.set_band_description(2, 'VH')
 `]);
-  const files = [await upload(request, 'S1A_a.tif', readFileSync(paths[0]), 'image/tiff'), await upload(request, 'S1A_b.tif', readFileSync(paths[1]), 'image/tiff')];
+  const files = [await upload(page.request, 'S1A_a.tif', readFileSync(paths[0]), 'image/tiff'), await upload(page.request, 'S1A_b.tif', readFileSync(paths[1]), 'image/tiff')];
   const items = ['2024-03-03', '2024-01-03'].map(d => ({ id: `S1A_IW_${d}`, datetime: `${d}T23:41:00Z`, orbitState: 'descending', relativeOrbit: 77, platform: 'SENTINEL-1A', epsg: 32646, assets: {} }));
   await page.route('**/api/live/sentinel1/search', async route => {
     expect(JSON.parse(route.request().postData() ?? '{}').orbit).toBe('descending');

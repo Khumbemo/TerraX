@@ -282,7 +282,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                 <p>
                   TerraX is a set of tools: Forest loss, Carbon &amp; biomass, Land survey, Residential plot, Weather &amp; climate, Satellite imagery, Land cover, Terrain,
                   and Space &amp; aerial photos. Files you add are uploaded to the TerraX server, which runs each analysis in Python (rasterio, GeoPandas, scikit-learn,
-                  SciPy) as a background job and keeps uploads and results for a limited time (72 hours by default). When AI is on and you ask for an interpretation or use an
+                  SciPy) as a background job. Only you (and the server's administrators) can see your uploads and results; a guest's are kept for 72 hours by default, an account's for 30 days. When AI is on and you ask for an interpretation or use an
                   assistant, the server sends the computed results (and for tables a sample of up to 150 rows) to Google's Gemini API.
                 </p>
                 <h4>Forest loss</h4>

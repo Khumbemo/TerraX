@@ -2530,3 +2530,122 @@ details[open] > summary {
 .class-popup .muted {
   font-size: 11px;
 }
+
+/* ── Accounts: sign-in, history, projects, admin ── */
+.account-modal {
+  max-width: 760px;
+}
+.account-page {
+  width: min(460px, 100%);
+}
+.account-tabs {
+  padding: 10px 18px 0;
+  flex-wrap: wrap;
+}
+.account-body {
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.account-form h3,
+.admin-panel h3 {
+  margin: 14px 0 4px;
+  font-size: 14px;
+}
+.account-form .input-group > span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.account-form input {
+  width: 100%;
+}
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+.param.grow {
+  flex: 1 1 220px;
+}
+.history-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.history-item {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.history-item.expired {
+  opacity: 0.65;
+}
+.history-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr) auto auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.history-row.static {
+  cursor: default;
+  grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr) auto;
+}
+.history-row:hover:not(.static) {
+  background: rgba(127, 127, 127, 0.08);
+}
+.history-tool {
+  font-weight: 600;
+}
+.history-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-when,
+.history-state {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.history-item.state-error .history-state {
+  color: var(--danger);
+}
+.history-item > .button-row {
+  padding: 0 10px 8px;
+}
+.history-detail {
+  padding: 4px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.share-list {
+  margin: 0;
+  padding-left: 18px;
+}
+@media (max-width: 640px) {
+  .history-row,
+  .history-row.static {
+    grid-template-columns: 1fr auto;
+  }
+  .history-name {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

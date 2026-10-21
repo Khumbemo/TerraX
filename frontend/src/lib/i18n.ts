@@ -43,7 +43,7 @@ const HI: Record<string, string> = {
   'session.hint': 'आपकी बनाई रिपोर्टों पर दिखाया जाता है।',
   'session.start': 'सत्र शुरू करें',
   'session.note':
-    'TerraX में कोई उपयोगकर्ता खाता नहीं है। आपकी फ़ाइलें विश्लेषण के लिए उस TerraX सर्वर पर अपलोड होती हैं जिसका आप उपयोग कर रहे हैं, और सीमित समय (डिफ़ॉल्ट 72 घंटे) बाद हटा दी जाती हैं। यदि आप AI चालू करते हैं, तो व्याख्या माँगने पर परिणामों का सारांश Google के Gemini API को भेजा जाता है।',
+    'आपकी फ़ाइलें विश्लेषण के लिए उस TerraX सर्वर पर अपलोड होती हैं जिसका आप उपयोग कर रहे हैं, और केवल आप उन्हें देख सकते हैं। अतिथि के रूप में वे सीमित समय (डिफ़ॉल्ट 72 घंटे) बाद हटा दी जाती हैं; खाते के साथ वे अधिक समय (डिफ़ॉल्ट 30 दिन) तक रखी जाती हैं, आपके इतिहास और प्रोजेक्ट के साथ। यदि आप AI चालू करते हैं, तो व्याख्या माँगने पर परिणामों का सारांश Google के Gemini API को भेजा जाता है।',
   'prefs.display': 'प्रदर्शन',
   'prefs.theme': 'थीम',
   'prefs.dark': 'गहरा',
@@ -97,7 +97,7 @@ const EN: Record<string, string> = {
   'session.hint': 'Shown on the reports you create.',
   'session.start': 'Start session',
   'session.note':
-    "TerraX has no user accounts. Files you add are uploaded to the TerraX server you are using, analysed there, and deleted after a limited time (72 hours by default). If you set up AI, a summary of the results is sent to Google's Gemini API when you ask for an interpretation.",
+    "Files you add are uploaded to the TerraX server you are using and analysed there; only you can see them. As a guest they are deleted after a limited time (72 hours by default); with an account they are kept longer (30 days by default), with your history and projects. If you set up AI, a summary of the results is sent to Google's Gemini API when you ask for an interpretation.",
   'prefs.display': 'Display',
   'prefs.theme': 'Theme',
   'prefs.dark': 'Dark',
