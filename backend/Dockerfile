@@ -21,4 +21,6 @@ USER terrax
 VOLUME ["/data/storage"]
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"
-CMD ["uvicorn", "terrax.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+# The client address and HTTPS come from X-Forwarded-* through TERRAX_TRUSTED_PROXIES (docker-compose: 1, nginx);
+# uvicorn's own proxy handling would trust the left-most, client-written entry.
+CMD ["uvicorn", "terrax.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

@@ -19,6 +19,7 @@ from ..config import settings
 from ..processing.accuracy import allocate, assess, stratified_sample
 from ..processing.rio import Raster, grid_to_lonlat_arrays
 from ..processing.stats import fmt
+from ..signing import sign_urls
 
 router = APIRouter()
 
@@ -98,7 +99,7 @@ def sample(job_id: str, req: SampleRequest, p: Principal = Depends(principal)) -
     base = res["landcover"]["filename"].rsplit(".", 1)[0]
     (art / f"{base}_validation_sample.csv").write_text(lines.getvalue(), encoding="utf-8")
     def download(label: str, name: str, media: str) -> dict:
-        return {"label": label, "filename": name, "url": f"/api/jobs/{job_id}/artifacts/{name}", "mediaType": media}
+        return {"label": label, "filename": name, "url": sign_urls(f"/api/jobs/{job_id}/artifacts/{name}", job_id), "mediaType": media}
 
     downloads = [download("Validation sample (CSV)", f"{base}_validation_sample.csv", "text/csv")]
     if feats:

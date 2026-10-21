@@ -103,3 +103,101 @@ test('a server that requires accounts shows only the sign-in page until signed i
   await expect(page.locator('.modal-backdrop')).toHaveCount(0); // no dialog left over from before signing in
   expect(errors).toEqual([]);
 });
+
+/** RFC 6238 TOTP (HMAC-SHA1, 30 s, 6 digits), as an authenticator app computes it. */
+async function totp(secret: string, offset = 0): Promise<string> {
+  const { createHmac } = await import('node:crypto');
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const ch of secret.replace(/\s/g, '')) bits += alphabet.indexOf(ch).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g)!.map(b => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + offset));
+  const mac = createHmac('sha1', key).update(counter).digest();
+  const o = mac[mac.length - 1] & 0x0f;
+  return String((mac.readUInt32BE(o) & 0x7fffffff) % 1e6).padStart(6, '0');
+}
+
+test('two-factor sign-in, signing out other devices and the audit log', async ({ page, browser }) => {
+  const errors = await start(page);
+  const email = unique('totp');
+  await page.click('#account-button');
+  await page.click('#account-tab-signup');
+  await page.fill('#signup-email', email);
+  await page.fill('#signup-password', 'correct horse battery');
+  await page.click('#signup-submit');
+  await expect(page.locator('#account-button')).toHaveText(email);
+
+  // Set up an authenticator: a QR code and the key; the first code turns it on and shows recovery codes.
+  await page.click('#account-button');
+  await page.click('#account-tab-account');
+  await page.click('#totp-start');
+  await expect(page.locator('#totp-setup svg.qr-code')).toBeVisible();
+  const secret = (await page.locator('#totp-secret').innerText()).replace(/\s/g, '');
+  expect(secret).toMatch(/^[A-Z2-7]{32}$/);
+  await page.fill('#totp-code', await totp(secret));
+  await page.click('#totp-enable');
+  await expect(page.locator('#recovery-codes pre')).toContainText(/^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}/);
+  const recovery = (await page.locator('#recovery-codes pre').innerText()).split('\n')[0];
+
+  // Another device: the password alone is not enough; a recovery code is.
+  const other = await browser.newContext();
+  const second = await other.newPage();
+  await start(second);
+  await second.click('#account-button');
+  await second.fill('#signin-email', email);
+  await second.fill('#signin-password', 'correct horse battery');
+  await second.click('#signin-submit');
+  await expect(second.locator('#signin-code')).toBeVisible();
+  await expect(second.locator('#account-button')).toHaveText('Sign in');
+  await second.fill('#signin-code', recovery);
+  await second.click('#signin-submit');
+  await expect(second.locator('.toast', { hasText: `Signed in as ${email}` })).toBeVisible();
+
+  // The first device lists both and signs the second one out.
+  await page.click('#account-tab-history');
+  await page.click('#account-tab-account');
+  await expect(page.locator('#sessions .history-item')).toHaveCount(2);
+  await expect(page.locator('#sessions')).toContainText('(this device)');
+  await page.click('#sessions-end-others');
+  await expect(page.locator('.toast', { hasText: 'Signed out 1 other device' })).toBeVisible();
+  await expect(page.locator('#sessions .history-item')).toHaveCount(1);
+  expect((await (await second.request.get('/api/auth/me')).json()).user).toBeNull();
+  await other.close();
+
+  // The administrator sees it all in the audit log.
+  await page.click('#signout'); // the dialog stays open, on the sign-in form
+  await page.click('#account-tab-signin');
+  await page.fill('#signin-email', 'admin@terrax.test');
+  await page.fill('#signin-password', 'e2e admin passphrase');
+  await page.click('#signin-submit');
+  await page.click('#account-button');
+  await page.click('#account-tab-admin');
+  await page.fill('#admin-audit-q', email);
+  for (const action of ['auth.signup', 'auth.2fa_enabled', 'auth.login', 'auth.sessions_ended']) await expect(page.locator('#admin-audit')).toContainText(action);
+  expect(await page.locator('#admin-audit').innerText()).not.toContain(recovery);
+  expect(errors).toEqual([]);
+});
+
+test('links back from e-mail and single sign-on open the right form and leave the address bar clean', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.route('**/api/auth/reset', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, email: 'r@terrax.test' }) }));
+  await page.goto('/?reset=the-token-from-the-mail');
+  await expect(page.locator('#reset-password')).toBeVisible();
+  expect(page.url()).not.toContain('the-token');
+  const sent = page.waitForRequest(r => r.url().endsWith('/api/auth/reset'));
+  await page.fill('#reset-password', 'a brand new passphrase');
+  await page.click('#reset-submit');
+  expect((await sent).postDataJSON()).toEqual({ token: 'the-token-from-the-mail', password: 'a brand new passphrase' });
+  await expect(page.locator('.toast', { hasText: 'New password set for r@terrax.test' })).toBeVisible();
+  await expect(page.locator('#signin-email')).toBeVisible();
+
+  await page.goto('/?signin_error=That%20sign-in%20took%20too%20long');
+  await expect(page.locator('.modal .notice')).toContainText('That sign-in took too long');
+  expect(page.url()).not.toContain('signin_error');
+  // A confirmation link that is no longer valid says so.
+  await page.goto('/?verify=expired-token');
+  await expect(page.locator('.modal .notice')).toContainText('not valid any more');
+  expect(errors).toEqual([]);
+});

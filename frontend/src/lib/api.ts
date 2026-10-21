@@ -107,6 +107,8 @@ export interface StoredFile<M = Record<string, any>> {
   created: number;
   meta: M & { error?: string };
   sample: boolean;
+  /** Signed, expiring token that opens the file's pictures (composites) without cookies, e.g. from an API on another site. */
+  token?: string;
 }
 
 /** Uploads a file (with progress) and returns what the server found in it. */

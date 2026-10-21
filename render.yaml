@@ -42,6 +42,27 @@ services:
       # internal URL written as postgresql+psycopg://USER:PASSWORD@HOST/DB.
       - key: DATABASE_URL
         sync: false
+      # Signs links to result pictures and tiles; generated once by Render so it survives restarts.
+      - key: TERRAX_SECRET_KEY
+        generateValue: true
+      # Optional: password-reset e-mail (all of the SMTP settings and the public address of the service).
+      - key: TERRAX_PUBLIC_URL
+        sync: false
+      - key: TERRAX_SMTP_HOST
+        sync: false
+      - key: TERRAX_SMTP_USER
+        sync: false
+      - key: TERRAX_SMTP_PASSWORD
+        sync: false
+      - key: TERRAX_SMTP_FROM
+        sync: false
+      # Optional: single sign-on (OpenID Connect).
+      - key: TERRAX_OIDC_ISSUER
+        sync: false
+      - key: TERRAX_OIDC_CLIENT_ID
+        sync: false
+      - key: TERRAX_OIDC_CLIENT_SECRET
+        sync: false
       # Optional error tracking (Sentry or a compatible service) and a token for Prometheus at /api/metrics.
       - key: SENTRY_DSN
         sync: false

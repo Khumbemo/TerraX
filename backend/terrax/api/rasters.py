@@ -12,8 +12,10 @@ from ..auth import Principal, principal
 from ..config import settings
 from ..processing.render import PREVIEW_MAX_SIDE, composite_rgba, png_bytes
 from ..processing.rio import Raster, qa_masked
+from ..signing import sign_urls
 
 router = APIRouter()
+media = APIRouter()
 
 
 def _raster(file_id: str, max_pixels: int | None = None) -> Raster:
@@ -23,10 +25,13 @@ def _raster(file_id: str, max_pixels: int | None = None) -> Raster:
     return Raster(f.path, f.name, max_pixels=max_pixels)
 
 
-@router.get("/api/rasters/{file_id}/composite.png")
-def composite(file_id: str, bands: str = Query(..., description="three 0-based band indices, e.g. 2,1,0"), lo: float = 2, hi: float = 98,
-              qaBand: int | None = None, qaKind: str | None = None, p: Principal = Depends(principal)) -> Response:
-    auth.own_file(p, file_id)
+@media.get("/api/rasters/{file_id}/composite.png")
+def composite(file_id: str, request: Request, bands: str = Query(..., description="three 0-based band indices, e.g. 2,1,0"), lo: float = 2, hi: float = 98,
+              qaBand: int | None = None, qaKind: str | None = None, t: str | None = Query(None, max_length=80)) -> Response:
+    from ..signing import check
+
+    if not (t and check("file", file_id, t)):
+        auth.own_file(principal(request), file_id)
     r = _raster(file_id)
     try:
         idx = [int(b) for b in bands.split(",")]
@@ -117,7 +122,7 @@ def watershed(job_id: str, req: OutletRequest, request: Request, p: Principal = 
     out_d: dict = {
         "outlet": [int(outlet[1]), int(outlet[0])], "cells": cells, "areaM2": area, "meanElevation": mean_z, "meanSlope": mean_s,
         "markdown": watershed_line(area, mean_z, mean_s),
-        "layer": f"/api/jobs/{job_id}/artifacts/{name}", "geojson": fc,
+        "layer": sign_urls(f"/api/jobs/{job_id}/artifacts/{name}", job_id), "geojson": fc,
     }
     if "facet" in d:  # a D∞ run: the share of each cell's flow that reaches the outlet
         from ..processing.terrain import dinf_dependence

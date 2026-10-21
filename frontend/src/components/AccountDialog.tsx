@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type FormEvent } from 'react';
-import { request } from '../lib/api';
+import { apiUrl, request } from '../lib/api';
 import { useAccount, type AccountTab } from '../lib/account';
 import type { Project } from '../lib/project';
 import { useToast } from '../lib/toast';
@@ -7,6 +7,7 @@ import { useToast } from '../lib/toast';
 const HistoryPanel = lazy(() => import('./account/HistoryPanel'));
 const ProjectsPanel = lazy(() => import('./account/ProjectsPanel'));
 const AdminPanel = lazy(() => import('./account/AdminPanel'));
+const SecurityPanel = lazy(() => import('./account/SecurityPanel'));
 
 interface Props {
   /** The current boundary, target, reports and preferences as a project document. */
@@ -19,7 +20,16 @@ interface Props {
   page?: boolean;
 }
 
-const TAB_LABEL: Record<AccountTab, string> = { signin: 'Sign in', signup: 'Create account', history: 'History', projects: 'Projects', account: 'Account', admin: 'Admin' };
+const TAB_LABEL: Record<AccountTab, string> = {
+  signin: 'Sign in',
+  signup: 'Create account',
+  forgot: 'Forgot password',
+  reset: 'New password',
+  history: 'History',
+  projects: 'Projects',
+  account: 'Account',
+  admin: 'Admin',
+};
 
 export default function AccountDialog({ currentProject, applyProject, saveReport, page }: Props) {
   const acc = useAccount();
@@ -31,7 +41,12 @@ export default function AccountDialog({ currentProject, applyProject, saveReport
   const signedIn = Boolean(user);
   const tabs: AccountTab[] = signedIn
     ? ['history', 'projects', 'account', ...(user?.role === 'admin' ? (['admin'] as AccountTab[]) : [])]
-    : [...(me?.mode === 'required' ? [] : (['history'] as AccountTab[])), 'signin', ...(me?.signup === 'open' ? (['signup'] as AccountTab[]) : [])];
+    : [
+        ...(me?.mode === 'required' ? [] : (['history'] as AccountTab[])),
+        'signin',
+        ...(me?.signup === 'open' ? (['signup'] as AccountTab[]) : []),
+        ...(tab === 'forgot' || tab === 'reset' ? [tab] : []), // shown only while in use
+      ];
   const active = tabs.includes(tab) ? tab : tabs[0];
   const close = () => acc.closeDialog(); // the full-page form has no close button, but signing in there clears any dialog asked for meanwhile
 
@@ -46,7 +61,8 @@ export default function AccountDialog({ currentProject, applyProject, saveReport
         )}
       </div>
       {page && <p className="field-hint">This TerraX server needs an account. Sign in{me?.signup === 'open' ? ' or create one' : ''} to continue.</p>}
-      {dialog?.reason && !signedIn && !page && <p className="notice">{dialog.reason}</p>}
+      {dialog?.reason && (!signedIn || dialog.tab === 'account') && <p className="notice">{dialog.reason}</p>}
+      {signedIn && me?.verifyEmail && !user!.emailVerified && <VerifyBanner />}
       <div className="view-toggles account-tabs" role="tablist">
         {tabs.map(t => (
           <button key={t} type="button" role="tab" id={`account-tab-${t}`} aria-selected={active === t} className={active === t ? 'active' : ''} onClick={() => setTab(t)}>
@@ -56,7 +72,9 @@ export default function AccountDialog({ currentProject, applyProject, saveReport
       </div>
       <div className="account-body">
         <Suspense fallback={<div className="loading-block">Loading…</div>}>
-          {active === 'signin' && <SignInForm onDone={close} />}
+          {active === 'signin' && <SignInForm onDone={close} onForgot={() => setTab('forgot')} />}
+          {active === 'forgot' && <ForgotForm onBack={() => setTab('signin')} />}
+          {active === 'reset' && <ResetForm token={dialog?.token ?? ''} onDone={() => setTab('signin')} />}
           {active === 'signup' && <SignUpForm onDone={close} />}
           {active === 'history' && <HistoryPanel saveReport={saveReport} guest={!signedIn} />}
           {active === 'projects' && <ProjectsPanel currentProject={currentProject} applyProject={applyProject} />}
@@ -74,11 +92,12 @@ export default function AccountDialog({ currentProject, applyProject, saveReport
   );
 }
 
-function SignInForm({ onDone }: { onDone: () => void }) {
-  const { signIn } = useAccount();
+function SignInForm({ onDone, onForgot }: { onDone: () => void; onForgot: () => void }) {
+  const { signIn, me } = useAccount();
   const notify = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState<string | null>(null); // null until the server asks for the second factor
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
@@ -86,7 +105,11 @@ function SignInForm({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await signIn(email, password);
+      const r = await signIn(email, password, code ?? undefined);
+      if ('twoFactor' in r) {
+        setCode('');
+        return;
+      }
       notify(`Signed in as ${r.user?.email}.${r.claimed ? ` Your ${r.claimed} upload${r.claimed === 1 ? '' : 's'} and analyses from this browser moved to your account.` : ''}`, 'success');
       onDone();
     } catch (err) {
@@ -99,18 +122,138 @@ function SignInForm({ onDone }: { onDone: () => void }) {
     <form className="account-form" onSubmit={submit}>
       <label className="input-group">
         <span>E-mail</span>
-        <input id="signin-email" type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} />
+        <input id="signin-email" type="email" autoComplete="username" required readOnly={code !== null} value={email} onChange={e => setEmail(e.target.value)} />
       </label>
       <label className="input-group">
         <span>Password</span>
-        <input id="signin-password" type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} />
+        <input id="signin-password" type="password" autoComplete="current-password" required readOnly={code !== null} value={password} onChange={e => setPassword(e.target.value)} />
       </label>
+      {code !== null && (
+        <label className="input-group">
+          <span>Code from your authenticator app (or a recovery code)</span>
+          <input id="signin-code" type="text" inputMode="numeric" autoComplete="one-time-code" required autoFocus maxLength={32} value={code} onChange={e => setCode(e.target.value)} />
+        </label>
+      )}
       {error && <p className="form-error" role="alert">{error}</p>}
       <button type="submit" id="signin-submit" className="btn btn-primary" disabled={busy}>
-        {busy ? 'Signing in…' : 'Sign in'}
+        {busy ? 'Signing in…' : code !== null ? 'Confirm code' : 'Sign in'}
       </button>
-      <p className="field-hint">Forgot your password? An administrator of this server can set a new one.</p>
+      {me?.sso && (
+        <a id="signin-sso" className="btn" href={apiUrl('/api/auth/oidc/start')}>
+          Sign in with {me.sso.name}
+        </a>
+      )}
+      {me?.mail ? (
+        <button type="button" id="signin-forgot" className="btn-link" onClick={onForgot}>
+          Forgot your password?
+        </button>
+      ) : (
+        <p className="field-hint">Forgot your password? An administrator of this server can set a new one.</p>
+      )}
     </form>
+  );
+}
+
+function ForgotForm({ onBack }: { onBack: () => void }) {
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await request('/api/auth/forgot', { method: 'POST', json: { email } });
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The link could not be sent.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (sent)
+    return (
+      <div className="account-form" id="forgot-sent">
+        <p>If {email} has an account here, a link to choose a new password is on its way. It works once, for one hour.</p>
+        <button type="button" className="btn" onClick={onBack}>
+          Back to sign-in
+        </button>
+      </div>
+    );
+  return (
+    <form className="account-form" onSubmit={submit}>
+      <p className="field-hint">Enter the address of your account and TerraX e-mails you a link to choose a new password.</p>
+      <label className="input-group">
+        <span>E-mail</span>
+        <input id="forgot-email" type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} />
+      </label>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <button type="submit" id="forgot-submit" className="btn btn-primary" disabled={busy}>
+        {busy ? 'Sending…' : 'Send the link'}
+      </button>
+      <button type="button" className="btn-link" onClick={onBack}>
+        Back to sign-in
+      </button>
+    </form>
+  );
+}
+
+function ResetForm({ token, onDone }: { token: string; onDone: () => void }) {
+  const notify = useToast();
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await request<{ email: string }>('/api/auth/reset', { method: 'POST', json: { token, password } });
+      notify(`New password set for ${r.email}. Every device was signed out; sign in with the new password.`, 'success');
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The password could not be set.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="account-form" onSubmit={submit}>
+      <label className="input-group">
+        <span>New password (at least 8 characters)</span>
+        <input id="reset-password" type="password" autoComplete="new-password" required minLength={8} autoFocus value={password} onChange={e => setPassword(e.target.value)} />
+      </label>
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <button type="submit" id="reset-submit" className="btn btn-primary" disabled={busy || !token}>
+        {busy ? 'Saving…' : 'Set the new password'}
+      </button>
+    </form>
+  );
+}
+
+function VerifyBanner() {
+  const { user } = useAccount();
+  const notify = useToast();
+  const [busy, setBusy] = useState(false);
+  const resend = async () => {
+    setBusy(true);
+    try {
+      await request('/api/auth/verify/resend', { method: 'POST', json: {} });
+      notify(`A new confirmation link was sent to ${user?.email}.`, 'success');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'The link could not be sent.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <p className="notice" id="verify-banner">
+      Confirm your address to start working: open the link sent to {user?.email}.{' '}
+      <button type="button" className="btn-link" disabled={busy} onClick={resend}>
+        Send a new link
+      </button>
+    </p>
   );
 }
 
@@ -128,7 +271,7 @@ function SignUpForm({ onDone }: { onDone: () => void }) {
     setError(null);
     try {
       const r = await signUp(email, password, name);
-      notify(`Account created.${r.claimed ? ` Your ${r.claimed} upload${r.claimed === 1 ? '' : 's'} and analyses from this browser are now in it.` : ''}`, 'success');
+      notify(`Account created.${r.verificationSent ? ` A link to confirm ${email} is on its way.` : ''}${r.claimed ? ` Your ${r.claimed} upload${r.claimed === 1 ? '' : 's'} and analyses from this browser are now in it.` : ''}`, 'success');
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'The account could not be created.');
@@ -187,8 +330,11 @@ function AccountPanel() {
       <button type="button" id="signout" className="btn" disabled={busy} onClick={() => run(signOut, 'Signed out.')}>
         Sign out
       </button>
+      <SecurityPanel />
       <h3>Change password</h3>
+      {!user.hasPassword && <p className="field-hint">You sign in with single sign-on. To add a password as well, use “Forgot your password?” on the sign-in form.</p>}
       <form
+        hidden={!user.hasPassword}
         onSubmit={e => {
           e.preventDefault();
           run(async () => {
@@ -224,8 +370,8 @@ function AccountPanel() {
         }}
       >
         <label className="input-group">
-          <span>Password</span>
-          <input id="delete-password" type="password" autoComplete="current-password" required value={del} onChange={e => setDel(e.target.value)} />
+          <span>{user.hasPassword ? 'Password' : 'Your e-mail address, to confirm'}</span>
+          <input id="delete-password" type={user.hasPassword ? 'password' : 'email'} autoComplete={user.hasPassword ? 'current-password' : 'off'} required value={del} onChange={e => setDel(e.target.value)} />
         </label>
         <button type="submit" className="btn btn-small btn-danger" disabled={busy}>
           Delete my account

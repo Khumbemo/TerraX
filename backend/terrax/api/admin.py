@@ -1,15 +1,15 @@
-"""Administration: accounts, recorded errors and usage (admins only)."""
+"""Administration: accounts, recorded errors, the audit log and usage (admins only). Every change is audited."""
 
 from __future__ import annotations
 
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
 
-from .. import auth, db
+from .. import audit, auth, db
 from ..auth import Principal, require_admin
 from .accounts import purge_owner_data
 
@@ -36,8 +36,10 @@ class NewUser(BaseModel):
 
 
 @router.post("/users", status_code=201)
-def add_user(req: NewUser) -> dict[str, Any]:
-    return auth.public_user(auth.create_user(req.email, req.password, req.name, req.role))
+def add_user(req: NewUser, request: Request) -> dict[str, Any]:
+    u = auth.create_user(req.email, req.password, req.name, req.role, verified=True)  # the admin vouches for the address
+    audit.record("admin.user_created", request, target=u["email"], detail={"role": u["role"]})
+    return auth.public_user(u)
 
 
 class UserPatch(BaseModel):
@@ -45,10 +47,14 @@ class UserPatch(BaseModel):
     disabled: bool | None = None
     password: str | None = Field(None, max_length=auth.MAX_PASSWORD)
     name: str | None = Field(None, max_length=120)
+    #: False turns two-factor sign-in off (someone who lost their phone and their recovery codes).
+    twoFactor: bool | None = None
+    #: True marks the e-mail address as confirmed.
+    emailVerified: bool | None = None
 
 
 @router.patch("/users/{user_id}")
-def change_user(user_id: str, req: UserPatch, p: Principal = Depends(require_admin)) -> dict[str, Any]:
+def change_user(user_id: str, req: UserPatch, request: Request, p: Principal = Depends(require_admin)) -> dict[str, Any]:
     u = auth.get_user(user_id)
     if u is None:
         raise KeyError(user_id)
@@ -64,18 +70,30 @@ def change_user(user_id: str, req: UserPatch, p: Principal = Depends(require_adm
         values["disabled"] = req.disabled
     if req.name is not None:
         values["name"] = req.name.strip()
+    if req.twoFactor is True:
+        raise HTTPException(400, "Only the account's owner can turn two-factor sign-in on (it needs their phone).")
+    if req.twoFactor is False:
+        values |= {"totp_enabled": False, "totp_secret": None, "totp_last_step": None}
+    if req.emailVerified is not None:
+        values["email_verified"] = req.emailVerified
     if values:
         with db.connect() as c:
             c.execute(update(db.users).where(db.users.c.id == user_id).values(**values))
             if req.disabled:
                 c.execute(delete(db.sessions).where(db.sessions.c.user_id == user_id))
+            if req.twoFactor is False:
+                c.execute(delete(db.recovery_codes).where(db.recovery_codes.c.user_id == user_id))
     if req.password:
         auth.set_password(user_id, req.password)
+    changed = {k: v for k, v in {"role": req.role, "disabled": req.disabled, "name": req.name, "twoFactor": req.twoFactor, "emailVerified": req.emailVerified}.items() if v is not None}
+    if req.password:
+        changed["password"] = "set"
+    audit.record("admin.user_changed", request, target=u["email"], detail=changed)
     return auth.public_user(auth.get_user(user_id) or u)
 
 
 @router.delete("/users/{user_id}", status_code=204)
-def remove_user(user_id: str, p: Principal = Depends(require_admin)) -> Response:
+def remove_user(user_id: str, request: Request, p: Principal = Depends(require_admin)) -> Response:
     u = auth.get_user(user_id)
     if u is None:
         raise KeyError(user_id)
@@ -84,6 +102,7 @@ def remove_user(user_id: str, p: Principal = Depends(require_admin)) -> Response
     purge_owner_data(f"u:{user_id}")
     with db.connect() as c:
         c.execute(delete(db.users).where(db.users.c.id == user_id))
+    audit.record("admin.user_deleted", request, target=u["email"])
     return Response(status_code=204)
 
 
@@ -101,10 +120,27 @@ def errors(source: str | None = None, limit: int = Query(100, ge=1, le=1000), be
 
 
 @router.delete("/errors", status_code=204)
-def clear_errors() -> Response:
+def clear_errors(request: Request) -> Response:
     with db.connect() as c:
-        c.execute(delete(db.errors))
+        n = c.execute(delete(db.errors)).rowcount
+    audit.record("admin.errors_cleared", request, detail={"count": n})
     return Response(status_code=204)
+
+
+@router.get("/audit")
+def audit_log(action: str | None = None, q: str = "", limit: int = Query(200, ge=1, le=1000), before: float | None = None) -> dict[str, Any]:
+    """Audit entries, newest first; `action` filters by prefix (auth., admin., or a full name), `q` by e-mail."""
+    stmt = select(db.audit)
+    if action:
+        stmt = stmt.where(db.audit.c.action.startswith(action))
+    if q:
+        needle = q.strip().lower()
+        stmt = stmt.where((db.audit.c.target.contains(needle, autoescape=True)) | (db.audit.c.actor_email.contains(needle, autoescape=True)))
+    if before is not None:
+        stmt = stmt.where(db.audit.c.at < before)
+    with db.connect() as c:
+        rows = c.execute(stmt.order_by(db.audit.c.at.desc(), db.audit.c.id.desc()).limit(limit)).all()
+    return {"entries": [{"id": r.id, "at": r.at, "actor": r.actor_email, "action": r.action, "target": r.target, "detail": r.detail, "ip": r.ip} for r in rows]}
 
 
 @router.get("/stats")

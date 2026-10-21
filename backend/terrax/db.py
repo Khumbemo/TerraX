@@ -2,8 +2,10 @@
 
 SQLite in the storage folder by default (one file, no server, fine for one machine with the API and the workers
 sharing a disk); set DATABASE_URL to a PostgreSQL URL (``postgresql+psycopg://user:pass@host/db``, with
-``pip install 'terrax[postgres]'``) when the API and workers run on several machines. Tables are created on first
-use, and later schema changes are applied by the numbered migrations below, recorded in ``schema_version``.
+``pip install 'terrax[postgres]'``) when the API and workers run on several machines. The schema is managed by
+Alembic (terrax/migrations): every start upgrades the database to the newest revision, and ``python -m terrax.manage
+migrate`` shows or applies them by hand. A database made by TerraX before Alembic (it has the tables but no
+``alembic_version``) is stamped at the first revision and upgraded from there.
 
 The bytes of uploads and results stay in the storage folder; the database says who owns them, keeps them findable
 after the folder is purged (job history), and decides when they expire.
@@ -13,9 +15,9 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import (
@@ -34,7 +36,6 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
-    select,
 )
 
 from .config import settings
@@ -51,6 +52,12 @@ users = Table(
     Column("disabled", Boolean, nullable=False, default=False),
     Column("created", Float, nullable=False),
     Column("last_login", Float),
+    Column("email_verified", Boolean, nullable=False, default=False),
+    Column("oidc_sub", String(300)),  # "issuer|subject" of a single-sign-on identity (unique index below)
+    Column("totp_secret", String(64)),  # base32; set while two-factor sign-in is being set up or on
+    Column("totp_enabled", Boolean, nullable=False, default=False),
+    Column("totp_last_step", Integer),  # the last 30-second step accepted, so a code cannot be replayed
+    Index("ix_users_oidc_sub", "oidc_sub", unique=True),
 )
 
 sessions = Table(
@@ -125,10 +132,51 @@ errors = Table(
     Column("owner", String(70), nullable=False, default=""),
 )
 
-schema_version = Table("schema_version", metadata, Column("version", Integer, primary_key=True), Column("applied", Float, nullable=False))
+tokens = Table(
+    "tokens", metadata,
+    Column("token_hash", String(64), primary_key=True),  # SHA-256 of the link's token
+    Column("user_id", String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("purpose", String(16), nullable=False),  # reset | verify
+    Column("created", Float, nullable=False),
+    Column("expires", Float, nullable=False),
+    Column("used", Float),
+)
 
-#: Schema changes after the first release, in order: (version, SQL statements). Version 1 is ``create_all``.
-MIGRATIONS: list[tuple[int, list[str]]] = []
+recovery_codes = Table(
+    "recovery_codes", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("user_id", String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("code_hash", String(64), nullable=False),
+    Column("used", Float),
+)
+
+audit = Table(
+    "audit", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("at", Float, nullable=False, index=True),
+    Column("actor", String(32), nullable=False, default=""),  # user id ("" for a guest or the system)
+    Column("actor_email", String(254), nullable=False, default=""),
+    Column("action", String(60), nullable=False, index=True),
+    Column("target", String(254), nullable=False, default=""),
+    Column("detail", Text, nullable=False, default=""),
+    Column("ip", String(64), nullable=False, default=""),
+)
+
+rate_counters = Table(
+    "rate_counters", metadata,
+    Column("key", String(200), primary_key=True),
+    Column("window", Integer, primary_key=True),
+    Column("count", Integer, nullable=False),
+)
+
+oidc_states = Table(
+    "oidc_states", metadata,
+    Column("state_hash", String(64), primary_key=True),
+    Column("nonce", String(64), nullable=False),
+    Column("verifier", String(128), nullable=False),  # PKCE code verifier
+    Column("guest", String(70), nullable=False, default=""),  # the guest whose work moves into the account
+    Column("created", Float, nullable=False),
+)
 
 _engines: dict[str, Engine] = {}
 _lock = threading.Lock()
@@ -166,18 +214,30 @@ def engine() -> Engine:
         return eng
 
 
+def alembic_config(connection: Connection | None = None):
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).with_name("migrations")))
+    cfg.attributes["connection"] = connection
+    return cfg
+
+
+#: The revision a pre-Alembic TerraX database is at (its tables match it).
+BASELINE = "0001"
+
+
 def _migrate(eng: Engine) -> None:
-    metadata.create_all(eng)
+    """Upgrades the database to the newest revision (stamping a pre-Alembic database at the baseline first)."""
+    from alembic import command
+    from sqlalchemy import inspect
+
     with eng.begin() as c:
-        done = {r[0] for r in c.execute(select(schema_version.c.version))}
-        if 1 not in done:
-            c.execute(schema_version.insert().values(version=1, applied=time.time()))
-        for version, statements in MIGRATIONS:
-            if version in done:
-                continue
-            for sql in statements:
-                c.exec_driver_sql(sql)
-            c.execute(schema_version.insert().values(version=version, applied=time.time()))
+        names = set(inspect(c).get_table_names())
+        cfg = alembic_config(c)
+        if "alembic_version" not in names and "users" in names:
+            command.stamp(cfg, BASELINE)
+        command.upgrade(cfg, "head")
 
 
 @contextmanager

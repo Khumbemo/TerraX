@@ -89,8 +89,19 @@ def normalise_email(email: str) -> str:
 # ── Users ────────────────────────────────────────────────────────────────────
 
 
+#: The stored "hash" of an account without a password: no scrypt string, so no password ever matches it.
+NO_PASSWORD = "sso-only"
+
+
 def public_user(u: dict[str, Any]) -> dict[str, Any]:
-    return {"id": u["id"], "email": u["email"], "name": u["name"], "role": u["role"], "created": u["created"], "lastLogin": u.get("last_login"), "disabled": bool(u["disabled"])}
+    return {"id": u["id"], "email": u["email"], "name": u["name"], "role": u["role"], "created": u["created"], "lastLogin": u.get("last_login"), "disabled": bool(u["disabled"]),
+            "emailVerified": bool(u.get("email_verified")), "twoFactor": bool(u.get("totp_enabled")), "singleSignOn": bool(u.get("oidc_sub")),
+            "hasPassword": has_password(u)}
+
+
+def has_password(u: dict[str, Any]) -> bool:
+    """False for an account made by single sign-on that never set a password (it can, through a reset link)."""
+    return u.get("password_hash") != NO_PASSWORD
 
 
 def get_user(user_id: str) -> dict[str, Any] | None:
@@ -103,15 +114,19 @@ def user_by_email(email: str) -> dict[str, Any] | None:
         return db.row(c.execute(select(db.users).where(db.users.c.email == email.strip().lower())).first())
 
 
-def create_user(email: str, password: str, name: str = "", role: str = "user") -> dict[str, Any]:
+def create_user(email: str, password: str | None, name: str = "", role: str = "user", verified: bool = False, oidc_sub: str | None = None) -> dict[str, Any]:
+    """A new account. password None: single sign-on only (a random, unusable password until one is set by reset)."""
     email = normalise_email(email)
-    check_new_password(password, email)
+    if password is not None:
+        check_new_password(password, email)
     if role not in ("user", "admin"):
         raise HTTPException(400, "A role is user or admin.")
     with db.connect() as c:
         if c.execute(select(db.users.c.id).where(db.users.c.email == email)).first():
             raise HTTPException(409, "An account with this e-mail already exists.")
-        u = {"id": secrets.token_hex(16), "email": email, "name": name.strip()[:120], "password_hash": hash_password(password), "role": role, "disabled": False, "created": time.time(), "last_login": None}
+        u = {"id": secrets.token_hex(16), "email": email, "name": name.strip()[:120], "password_hash": hash_password(password) if password is not None else NO_PASSWORD,
+             "role": role, "disabled": False, "created": time.time(), "last_login": None, "email_verified": verified, "oidc_sub": oidc_sub, "totp_secret": None,
+             "totp_enabled": False, "totp_last_step": None}
         c.execute(db.users.insert().values(**u))
     return u
 
@@ -138,11 +153,11 @@ def ensure_admin() -> None:
         return
     u = user_by_email(s.admin_email)
     if u is None:
-        create_user(s.admin_email, s.admin_password, "Administrator", "admin")
+        create_user(s.admin_email, s.admin_password, "Administrator", "admin", verified=True)
         return
     if not verify_password(s.admin_password, u["password_hash"]) or u["role"] != "admin" or u["disabled"]:
         with db.connect() as c:
-            c.execute(update(db.users).where(db.users.c.id == u["id"]).values(password_hash=hash_password(s.admin_password), role="admin", disabled=False))
+            c.execute(update(db.users).where(db.users.c.id == u["id"]).values(password_hash=hash_password(s.admin_password), role="admin", disabled=False, email_verified=True))
 
 
 # ── Sessions ─────────────────────────────────────────────────────────────────
@@ -182,7 +197,70 @@ def session_user(token: str) -> dict[str, Any] | None:
             return None
         if now - m["last_seen"] > 3600:
             c.execute(update(db.sessions).where(db.sessions.c.token_hash == h).values(last_seen=now, expires=now + settings().session_days * 86400))
-    return {k: m[k] for k in ("id", "email", "name", "role", "disabled", "created", "last_login", "password_hash")}
+    return {k: m[k] for k in ("id", "email", "name", "role", "disabled", "created", "last_login", "password_hash", "email_verified", "oidc_sub", "totp_secret",
+                              "totp_enabled", "totp_last_step")} | {"session_id": h[:16]}
+
+
+def session_id(token: str) -> str:
+    """A session's public id: the first 16 hex digits of its stored hash (the token stays secret)."""
+    return _digest(token)[:16]
+
+
+def list_sessions(user_id: str) -> list[dict[str, Any]]:
+    now = time.time()
+    with db.connect() as c:
+        rows = c.execute(select(db.sessions).where(db.sessions.c.user_id == user_id, db.sessions.c.expires > now).order_by(db.sessions.c.last_seen.desc())).all()
+    return [{"id": r.token_hash[:16], "created": r.created, "lastSeen": r.last_seen, "expires": r.expires, "ip": r.ip, "userAgent": r.user_agent} for r in rows]
+
+
+def end_sessions(user_id: str, sid: str | None = None, keep: str | None = None) -> int:
+    """Ends one session of a user (by public id), or all of them but `keep`; returns how many."""
+    with db.connect() as c:
+        q = delete(db.sessions).where(db.sessions.c.user_id == user_id)
+        if sid is not None:
+            q = q.where(db.sessions.c.token_hash.startswith(sid))
+        if keep is not None:
+            q = q.where(~db.sessions.c.token_hash.startswith(keep))
+        return int(c.execute(q).rowcount or 0)
+
+
+# ── One-time links (password reset, address confirmation) ───────────────────
+
+TOKEN_TTL = {"reset": 3600, "verify": 2 * 86400}
+
+
+def issue_token(user_id: str, purpose: str) -> str:
+    """A single-use token; issuing a new one cancels the user's unused ones for the same purpose."""
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with db.connect() as c:
+        c.execute(delete(db.tokens).where(db.tokens.c.user_id == user_id, db.tokens.c.purpose == purpose, db.tokens.c.used.is_(None)))
+        c.execute(db.tokens.insert().values(token_hash=_digest(token), user_id=user_id, purpose=purpose, created=now, expires=now + TOKEN_TTL[purpose], used=None))
+        c.execute(delete(db.tokens).where(db.tokens.c.expires < now - 86400))
+    return token
+
+
+def use_token(token: str, purpose: str) -> str | None:
+    """The user a live, unused token belongs to (marking it used), or None."""
+    now = time.time()
+    h = _digest(token)
+    with db.connect() as c:
+        r = c.execute(select(db.tokens).where(db.tokens.c.token_hash == h, db.tokens.c.purpose == purpose)).first()
+        if r is None or r.used is not None or r.expires < now:
+            return None
+        n = c.execute(update(db.tokens).where(db.tokens.c.token_hash == h, db.tokens.c.used.is_(None)).values(used=now)).rowcount
+    return str(r.user_id) if n else None  # n == 0: another request used it a moment earlier
+
+
+def public_base_url(request: Request) -> str:
+    """Where people open TerraX: TERRAX_PUBLIC_URL, else this request's scheme and host (forwarded ones behind trusted proxies)."""
+    s = settings()
+    if s.public_url:
+        return s.public_url
+    host = request.headers.get("host", "")
+    if s.trusted_proxies and request.headers.get("x-forwarded-host"):
+        host = request.headers["x-forwarded-host"].split(",")[0].strip()
+    return f"{'https' if is_https(request) else 'http'}://{host}"
 
 
 # ── Principals ───────────────────────────────────────────────────────────────
@@ -215,9 +293,22 @@ def client_ip(request: Request) -> str:
     n = settings().trusted_proxies
     if n:
         hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
-        if len(hops) >= n:
+        if len(hops) >= n and _is_ip(hops[-n]):
             return hops[-n]
+        # Fewer hops than configured (a request that skipped a proxy): the raw socket address, never a claimed one.
+        peer = request.scope.get("client")
+        return str(peer[0]) if peer else ""
     return request.client.host if request.client else ""
+
+
+def _is_ip(v: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(v)
+        return True
+    except ValueError:
+        return False
 
 
 def is_https(request: Request) -> bool:
@@ -271,11 +362,27 @@ def resolve(request: Request) -> tuple[Principal | None, str | None]:
     return Principal(owner=guest_owner(guest)), guest
 
 
+def verification_required() -> bool:
+    from .mailer import can_send
+
+    return settings().verify_email and can_send()
+
+
 def principal(request: Request) -> Principal:
-    """FastAPI dependency: the caller, or 401 when this server needs a sign-in."""
+    """FastAPI dependency: the caller; 401 when this server needs a sign-in, 403 while an address awaits confirmation."""
     p: Principal | None = getattr(request.state, "principal", None)
     if p is None:
         raise HTTPException(401, "Sign in to use TerraX on this server.")
+    if p.user and not p.user.get("email_verified") and verification_required():
+        raise HTTPException(403, f"Confirm your e-mail address first: open the link sent to {p.user['email']} (or send a new one from your account).")
+    return p
+
+
+def signed_in(request: Request) -> Principal:
+    """A signed-in user, confirmed or not (for the account's own settings and resending the confirmation)."""
+    p: Principal | None = getattr(request.state, "principal", None)
+    if p is None or p.is_guest:
+        raise HTTPException(401, "Sign in first.")
     return p
 
 
@@ -315,9 +422,9 @@ def own_job(p: Principal, job_id: str) -> None:
         raise KeyError(job_id)
 
 
-def claim_guest_data(guest_token: str, user_id: str) -> int:
-    """On sign-in, the uploads and jobs this browser made as a guest become the user's."""
-    g = guest_owner(guest_token)
+def claim_guest_data(guest_token: str, user_id: str, guest: str | None = None) -> int:
+    """On sign-in, the uploads and jobs this browser made as a guest (its cookie, or a guest owner id) become the user's."""
+    g = guest or guest_owner(guest_token)
     owner = f"u:{user_id}"
     keep = settings().user_retention_days
     with db.connect() as c:

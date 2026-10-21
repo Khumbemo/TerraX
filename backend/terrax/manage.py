@@ -6,6 +6,7 @@
     disable EMAIL / enable EMAIL                block or allow sign-in
     list-users                                  accounts, roles and last sign-in
     purge                                       delete expired uploads, results and old recorded errors now
+    migrate status|upgrade                      the database's schema revision, or upgrade it (also done at start-up)
     check                                       database, storage and settings at a glance
 """
 
@@ -56,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("enable").add_argument("email")
     sub.add_parser("list-users")
     sub.add_parser("purge")
+    sub.add_parser("migrate").add_argument("action", choices=["status", "upgrade"])
     sub.add_parser("check")
     a = ap.parse_args(argv)
     from fastapi import HTTPException
@@ -80,6 +82,18 @@ def main(argv: list[str] | None = None) -> int:
                 for row in conn.execute(select(db.users).order_by(db.users.c.created)):
                     last = time.strftime("%Y-%m-%d %H:%M", time.localtime(row.last_login)) if row.last_login else "never"
                     print(f"{row.email:40s} {row.role:6s} {'disabled' if row.disabled else 'active':9s} last sign-in {last}")
+        elif a.cmd == "migrate":
+            from alembic.runtime.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+
+            eng = db.engine() if a.action == "upgrade" else None  # engine() upgrades on first use
+            from sqlalchemy import create_engine
+
+            check = eng or create_engine(db.database_url())
+            with check.connect() as conn:
+                current = MigrationContext.configure(conn).get_current_revision()
+            head = ScriptDirectory.from_config(db.alembic_config()).get_current_head()
+            print(f"database revision {current or 'none'}; newest {head}{' (up to date)' if current == head else ''}")
         elif a.cmd == "purge":
             print(f"Removed {storage.purge_old()} expired folders and {purge_errors()} old error records.")
         elif a.cmd == "check":

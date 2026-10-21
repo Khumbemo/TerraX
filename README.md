@@ -159,25 +159,55 @@ For heavy workloads:
   - `TERRAX_SIGNUP=closed` stops self sign-up.
   - `TERRAX_ADMIN_EMAIL` and `TERRAX_ADMIN_PASSWORD` create the first administrator at start-up. The same variables reset that account's password.
   - `python -m terrax.manage create-user EMAIL --admin`, `set-password`, `set-role`, `disable`, `list-users`, `purge` and `check` do the same from a shell.
-  - Admins get an **Admin** tab: accounts, usage, recorded errors.
+  - Admins get an **Admin** tab: accounts, usage, the audit log, recorded errors. They can also turn off someone's two-factor sign-in (a lost phone) and mark an address as confirmed.
   - Every user can change their password or delete their account, which deletes their data.
 - **Passwords and sessions.**
   - Passwords are hashed with scrypt (N = 2¹⁵, r = 8, p = 3, one of OWASP's recommended settings).
   - Session tokens are 32 random bytes in an HttpOnly, SameSite cookie; only their SHA-256 is stored.
   - Changing a password signs the account out everywhere. Scripts can send the token as `Authorization: Bearer`.
+  - The Account tab lists the devices signed in (browser, address, last use). Each can be signed out, or all but this one.
+- **E-mail: password reset and address confirmation.** Set `TERRAX_SMTP_HOST`, `_PORT`, `_USER`, `_PASSWORD`, `_SECURITY` (`starttls`, `ssl` or `none`), `_FROM` and `TERRAX_PUBLIC_URL`. Any SMTP service works.
+  - **Reset.** "Forgot your password?" e-mails a link that works once, for one hour. Using it signs the account out everywhere. The answer is the same whether or not the address has an account. Five e-mails per hour per address.
+  - **Confirmation.** New accounts get a confirmation link that works for 48 hours. With `TERRAX_VERIFY_EMAIL=true`, an account cannot work until the address is confirmed; it can still resend the link.
+  - **Links point only at `TERRAX_PUBLIC_URL`.** Without it the server sends no mail. Links are never built from the request's Host header, which the sender controls (password-reset poisoning).
+  - Without mail, the server says so. An administrator sets a new password instead.
+- **Two-factor sign-in (TOTP, RFC 6238).** Any authenticator app works. Turn it on from the Account tab: scan the QR code, then confirm one code.
+  - Ten single-use recovery codes are shown once and stored hashed.
+  - A code is accepted for 30 seconds either side of now, and never twice.
+  - Turning it off needs the password and a code.
+- **Single sign-on (OpenID Connect).** Set `TERRAX_OIDC_ISSUER`, `TERRAX_OIDC_CLIENT_ID`, `TERRAX_OIDC_CLIENT_SECRET` and `TERRAX_OIDC_NAME` (the button label). Register `TERRAX_PUBLIC_URL/api/auth/oidc/callback` as the redirect URI. Any provider with discovery works, for example Google, Microsoft Entra ID, Okta, Auth0 or Keycloak.
+  - **Flow.** The authorization-code flow with PKCE (S256), a single-use state and a nonce.
+  - **Token checks.** The ID token comes straight from the provider's token endpoint over TLS, so its signature is not checked (OpenID Connect Core 3.1.3.7, step 6). Its issuer, audience, expiry and nonce are checked.
+  - **Accounts.** An identity is found by the provider's subject, or linked to an existing account when the provider says the e-mail is verified. Otherwise a new account is created; `TERRAX_OIDC_CREATE_ACCOUNTS=false` stops that.
+  - `TERRAX_OIDC_DOMAINS=example.org` limits which e-mail domains may sign in. Accounts made this way have no password; one can be added with a reset link.
+- **Audit log.** The Admin tab can filter the log by event and e-mail. It records:
+  - Sign-ins and failed sign-ins, with the address they came from.
+  - Changes to passwords, two-factor sign-in and sessions, and account deletions.
+  - Every administrator action.
+
+  Passwords, tokens and codes are never written. Entries are kept for `TERRAX_AUDIT_RETENTION_DAYS` (365).
 - **Cross-site requests.** Writes whose `Origin` is neither this site nor `TERRAX_CORS` are refused.
+- **Request size.** Bodies larger than `TERRAX_MAX_BODY_MB` (32) are refused with 413 before they are read. Uploads may be up to `TERRAX_MAX_UPLOAD_MB`.
+- **Signed links to pictures and tiles.** Result pictures, tiles and composites carry a signed token (HMAC-SHA-256) that expires after `TERRAX_MEDIA_URL_HOURS` (12).
+  - This lets them load where cookies are not sent, such as an API on another site (`VITE_API_BASE`) or a browser that blocks third-party cookies.
+  - Only the owner receives the links, and a link stops working once its result is deleted.
+  - The key is `TERRAX_SECRET_KEY`, or a random one kept in the storage folder. Set it when machines do not share that folder.
 - **Framed hosts.** On Hugging Face Spaces, which show the app in a frame on huggingface.co, cookies are `SameSite=None; Secure; Partitioned`. Set this with `TERRAX_COOKIE_SAMESITE=none` elsewhere.
 - **Rate limits.**
-  - Answered with HTTP 429 and `Retry-After`. Limits apply per user or guest and per client address. Redis-backed with Celery, in-process otherwise.
+  - Answered with HTTP 429 and `Retry-After`. Limits apply per user or guest and per client address.
+  - Counters are shared by every process and machine: in Redis with Celery, otherwise in the database. `TERRAX_RATE_LIMIT_STORE` (`redis`, `database` or `memory`) overrides this.
   - Analyses (`TERRAX_JOBS_PER_MINUTE`, 30) and uploads (`TERRAX_UPLOADS_PER_HOUR`, 300).
   - 10 sign-in attempts per address and per e-mail in 15 minutes.
   - Live-data and assistant requests have limits too.
 - **Storage quotas.** `TERRAX_USER_QUOTA_MB` (10,000) and `TERRAX_GUEST_QUOTA_MB` (2,000) limit what one account or guest can store.
-- **Client addresses behind proxies.** Per-address limits need the real address. In `docker-compose.yml`, nginx sets `X-Forwarded-For` to the client's address and the API trusts that one hop (`TERRAX_TRUSTED_PROXIES=1`). Behind other proxies, set the number of hops you control.
+- **Client addresses behind proxies.** Per-address limits need the real address.
+  - With `TERRAX_TRUSTED_PROXIES=N`, the API takes the Nth address from the right of `X-Forwarded-For`, the one your own proxies added. Entries a client wrote further left are ignored. Without it, the connection's own address is used.
+  - In `docker-compose.yml`, nginx replaces the header with the client's address, so 1 is right. The one-container image also sets 1, for the single proxy of Hugging Face and Render.
 - **Database.**
   - SQLite in the storage folder needs nothing and suits one machine.
   - For several machines, set `DATABASE_URL=postgresql+psycopg://…` and install `pip install 'terrax[postgres]'`. `docker-compose.yml` runs PostgreSQL itself.
-  - Tables are created on first start. Schema changes go through the numbered migrations in `db.py`.
+  - The schema is managed with Alembic (`terrax/migrations`). Every start upgrades the database to the newest revision. Databases from before Alembic are recognised and carried forward.
+  - `python -m terrax.manage migrate status` shows the revision; `migrate upgrade` applies pending ones without starting the server.
   - The hourly clean-up deletes expired files. History rows stay, marked expired.
 
 ## Monitoring
@@ -205,7 +235,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 202 tests, on SQLite or (with `DATABASE_URL`) PostgreSQL: accounts, sessions, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 231 tests, on SQLite or (with `DATABASE_URL`) PostgreSQL: accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 
@@ -227,7 +257,7 @@ The root `Dockerfile` builds a single container for hosts that run one service. 
 
 **Render.** [Deploy with the blueprint](https://render.com/deploy?repo=https://github.com/Khumbemo/TerraX) (`render.yaml`). The free plan has 512 MB of memory. It runs the sample data one analysis at a time, sleeps after 15 idle minutes and takes about a minute to wake. Large rasters need a paid plan.
 
-On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are lost when the container restarts. So is the built-in SQLite database, with its accounts, history and projects. For accounts that last, set `DATABASE_URL` to a PostgreSQL database. `render.yaml` asks for it, along with `TERRAX_AUTH=required` and the first admin's e-mail and password.
+On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are lost when the container restarts. So is the built-in SQLite database, with its accounts, history and projects. For accounts that last, set `DATABASE_URL` to a PostgreSQL database. `render.yaml` asks for it, along with `TERRAX_AUTH=required` and the first admin's e-mail and password. It also generates `TERRAX_SECRET_KEY`. For password-reset e-mail or single sign-on, add the `TERRAX_SMTP_*` or `TERRAX_OIDC_*` settings and `TERRAX_PUBLIC_URL`.
 
 To run the same container yourself:
 

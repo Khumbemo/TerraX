@@ -25,6 +25,7 @@ dependencies = [
   "httpx>=0.27",
   "google-genai>=1.0",
   "sqlalchemy>=2.0,<3",
+  "alembic>=1.13,<2",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +43,7 @@ build-backend = "setuptools.build_meta"
 include = ["terrax*"]
 
 [tool.setuptools.package-data]
-terrax = ["agents/*.json"]
+terrax = ["agents/*.json", "migrations/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

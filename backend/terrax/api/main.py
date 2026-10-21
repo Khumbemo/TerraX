@@ -34,12 +34,14 @@ from ..auth import Principal, principal
 from ..config import settings
 from ..monitoring import configure_logging, init_sentry, metrics, new_request_id, record_exception, render_metrics, request_id
 from ..tasks import job_mode, start_purge_thread, submit
+from .limits import BodyLimitMiddleware, BodyTooLarge
 
 log = logging.getLogger("terrax.api")
 app = FastAPI(title="TerraX API", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(GZipMiddleware, minimum_size=2048)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings().cors_origins), allow_methods=["*"], allow_headers=["*"], allow_credentials=True,
                    expose_headers=["X-Request-ID", "Retry-After"])
+app.add_middleware(BodyLimitMiddleware)  # added last, so it runs first: before CORS, logging and the routes
 
 _started = threading.Event()
 _start_lock = threading.Lock()
@@ -97,6 +99,9 @@ async def observe(request: Request, call_next):
         else:
             response = await call_next(request)
         status = response.status_code
+    except BodyTooLarge:  # answered with 413 by BodyLimitMiddleware; not a server error
+        request_id.reset(token)
+        raise
     except Exception as exc:  # anything a route did not handle: recorded, and answered with the request ID
         p0: Principal | None = getattr(request.state, "principal", None)
         log.exception("unhandled error on %s %s", request.method, request.url.path)
@@ -239,7 +244,7 @@ async def upload(request: Request, file: UploadFile = File(...), p: Principal = 
         Path(tmp.name).unlink(missing_ok=True)
     metrics.count("uploads")
     metrics.count("upload_bytes", size)
-    return f.public()
+    return _with_token(f.public())
 
 
 @app.get("/api/samples")
@@ -258,7 +263,7 @@ def use_sample(req: SampleRequest, request: Request, p: Principal = Depends(prin
     path = _samples_dir() / name
     if name not in _all_samples() or not path.is_file():
         raise HTTPException(404, f"There is no sample called {name}.")
-    return storage.save_file(name, path, sample=True, owner=p.owner).public()
+    return _with_token(storage.save_file(name, path, sample=True, owner=p.owner).public())
 
 
 @app.get("/api/files")
@@ -275,7 +280,14 @@ def my_files(p: Principal = Depends(principal), limit: int = Query(100, ge=1, le
 @app.get("/api/files/{file_id}")
 def file_info(file_id: str, p: Principal = Depends(principal)) -> dict:
     auth.own_file(p, file_id)
-    return storage.get_file(file_id).public()
+    return _with_token(storage.get_file(file_id).public())
+
+
+def _with_token(d: dict) -> dict:
+    """A file's description with a signed token for its picture endpoints (composites), for <img> without cookies."""
+    from ..signing import sign
+
+    return d | {"token": sign("file", d["id"])}
 
 
 @app.delete("/api/files/{file_id}", status_code=204)
@@ -330,11 +342,23 @@ def _file_ids(inputs: dict[str, Any]) -> list[str]:
 
 
 def _status_with_result(jid: str) -> dict:
+    from ..signing import sign_urls
+
     st = storage.job_status(jid)
     st.pop("trace", None)
     if st["state"] == "done":
-        st["result"] = storage.job_result(jid)
+        st["result"] = sign_urls(storage.job_result(jid), jid)  # pictures and tiles load without cookies too (signed, expiring)
     return st
+
+
+def _media_access(request: Request, kind: str, ident: str, t: str | None) -> None:
+    """A valid signed link (from the owner's result), or the owner (or an admin) by session; else 404."""
+    from ..signing import check
+
+    if t is not None and check(kind, ident, t):
+        return
+    p = principal(request)
+    (auth.own_job if kind == "job" else auth.own_file)(p, ident)
 
 
 @app.get("/api/jobs")
@@ -368,20 +392,24 @@ def delete_job(job_id: str, p: Principal = Depends(principal)) -> Response:
 
 
 @app.get("/api/jobs/{job_id}/artifacts/{name}")
-def artifact(job_id: str, name: str, p: Principal = Depends(principal)) -> FileResponse:
-    auth.own_job(p, job_id)
+def artifact(job_id: str, name: str, request: Request, t: str | None = Query(None, max_length=80)) -> FileResponse:
+    _media_access(request, "job", job_id, t)
+    with db.connect() as c:  # a signed link stops working once the result has been deleted or has expired
+        r = c.execute(select(db.jobs.c.purged).where(db.jobs.c.id == job_id)).first()
+    if r is None or r.purged:
+        raise KeyError(job_id)
     path = storage.artifact_path(job_id, name)
     media = mimetypes.guess_type(path.name)[0] or ("application/geo+json" if path.suffix == ".geojson" else "application/octet-stream")
     return FileResponse(path, media_type=media, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/jobs/{job_id}/tiles/{name}/{z}/{x}/{y}.png")
-def tile(job_id: str, name: str, z: int, x: int, y: int, p: Principal = Depends(principal)) -> Response:
+def tile(job_id: str, name: str, z: int, x: int, y: int, request: Request, t: str | None = Query(None, max_length=80)) -> Response:
     """A 256 × 256 Web Mercator tile of a full-resolution result layer (204 when it holds no data)."""
     from ..processing.maptiles import render_tile
     from ..processing.render import png_bytes
 
-    auth.own_job(p, job_id)
+    _media_access(request, "job", job_id, t)
     path = storage.artifact_path(job_id, f"tiles_{name}.tif")
     rgba = render_tile(path, z, x, y)
     headers = {"Cache-Control": "private, max-age=86400"}
@@ -403,6 +431,8 @@ def include_routers() -> None:
             continue
         # The built-in world maps are public reference data; everything else needs a principal (401 when signed out on a required-auth server).
         app.include_router(m.router, dependencies=[] if mod in ("maps", "accounts") else [Depends(principal)])
+        if hasattr(m, "media"):  # pictures that also open by a signed link; the route checks the link or the owner itself
+            app.include_router(m.media)
 
 
 include_routers()

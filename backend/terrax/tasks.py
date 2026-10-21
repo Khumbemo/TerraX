@@ -86,7 +86,12 @@ def run_job_task(job_id: str) -> dict:
 
 @celery_app.task(name="terrax.purge")
 def purge_task() -> int:
+    from .audit import purge as purge_audit
+    from .ratelimit import purge_counters
+
     purge_errors()
+    purge_counters()
+    purge_audit()
     return storage.purge_old()
 
 
@@ -130,7 +135,12 @@ def start_purge_thread(every_s: float = 3600.0) -> None:
     def loop() -> None:
         while True:
             try:
+                from .audit import purge as purge_audit
+                from .ratelimit import purge_counters
+
                 purge_errors()
+                purge_counters()
+                purge_audit()
                 n = storage.purge_old()
                 if n:
                     log.info("purged %d old upload/job folders", n)

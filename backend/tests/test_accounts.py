@@ -59,7 +59,9 @@ def test_a_guest_cannot_reach_another_guests_files_jobs_or_results(app):
     assert b.get(f"/api/files/{fid}").status_code == 404
     assert b.get(f"/api/files/{fid}/content").status_code == 404
     assert b.get(f"/api/jobs/{job['id']}").status_code == 404
-    assert b.get(art).status_code == 404
+    bare = art.split("?")[0]
+    assert b.get(bare).status_code == 404
+    assert b.get(f"{bare}?t=1.bad").status_code == 404  # a forged or foreign token counts as no token
     assert b.post("/api/jobs", json={"tool": "terrain", "inputs": {"dem": fid}}).status_code == 404
     assert b.get(f"/api/rasters/{fid}/pixel", params={"col": 1, "row": 1, "width": 10, "height": 10}).status_code == 404
     assert b.delete(f"/api/files/{fid}").status_code == 404 and b.delete(f"/api/jobs/{job['id']}").status_code == 404
@@ -418,3 +420,69 @@ def test_cookies_for_an_app_shown_in_another_sites_frame(app, monkeypatch):
     monkeypatch.setenv("TERRAX_COOKIE_SAMESITE", "none")
     framed = new_client(app).get("/api/auth/me").headers["set-cookie"].lower()
     assert "samesite=none" in framed and "secure" in framed and "partitioned" in framed  # third-party frames (Hugging Face Spaces) keep the cookie
+
+
+# ── Request size limits ──────────────────────────────────────────────────────
+
+
+def test_large_bodies_are_refused_before_they_are_read(app, monkeypatch):
+    monkeypatch.setenv("TERRAX_MAX_BODY_MB", "1")
+    monkeypatch.setenv("TERRAX_MAX_UPLOAD_MB", "2")
+    c = new_client(app)
+    signup(c, uniq("big"))
+    big = {"name": "huge", "data": {"x": "a" * (1024 * 1024 + 10)}}
+    r = c.post("/api/projects", json=big)  # declared Content-Length over 1 MB
+    assert r.status_code == 413 and "1 MB" in r.json()["detail"]
+
+    def chunks():  # no Content-Length: counted while it streams
+        yield b'{"name": "huge", "data": {"x": "'
+        for _ in range(40):
+            yield b"a" * 65536
+        yield b'"}}'
+
+    r = c.post("/api/projects", content=chunks(), headers={"Content-Type": "application/json"})
+    assert r.status_code == 413
+    assert c.post("/api/projects", json={"name": "small", "data": {"x": 1}}).status_code == 201
+    # Uploads have their own, larger limit: 1.5 MB passes, 3 MB does not.
+    assert c.post("/api/files", files={"file": ("ok.bin", b"x" * 1_500_000)}).status_code == 201
+    assert c.post("/api/files", files={"file": ("big.bin", b"x" * 3_200_000)}).status_code == 413
+    assert c.get("/api/health").status_code == 200
+
+
+def test_client_address_behind_one_trusted_proxy(monkeypatch):
+    from starlette.requests import Request
+
+    from terrax import auth
+
+    def req(xff: str | None, peer: str = "10.0.0.5") -> Request:
+        headers = [(b"x-forwarded-for", xff.encode())] if xff is not None else []
+        return Request({"type": "http", "headers": headers, "client": (peer, 1234), "path": "/", "method": "GET", "query_string": b""})
+
+    monkeypatch.setenv("TERRAX_TRUSTED_PROXIES", "1")
+    assert auth.client_ip(req("203.0.113.9")) == "203.0.113.9"
+    # A client that writes its own X-Forwarded-For gets its real address (the one the proxy appended), not the claim.
+    assert auth.client_ip(req("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
+    assert auth.client_ip(req("not-an-ip")) == "10.0.0.5" and auth.client_ip(req(None)) == "10.0.0.5"
+    monkeypatch.setenv("TERRAX_TRUSTED_PROXIES", "0")
+    assert auth.client_ip(req("1.2.3.4")) == "10.0.0.5"  # no proxy trusted: the header is ignored
+
+
+def test_rate_limit_counters_are_shared_through_the_database(monkeypatch):
+    from fastapi import HTTPException
+
+    from terrax import ratelimit
+
+    ratelimit.reset()
+    monkeypatch.setenv("TERRAX_RATE_LIMITS", "true")
+    monkeypatch.setenv("TERRAX_JOBS_PER_MINUTE", "3")
+    assert ratelimit.store() == "database"  # no Redis in tests (eager jobs)
+    key = uniq("shared")
+    for _ in range(3):
+        ratelimit.check("jobs", key)
+        ratelimit._memory.reset()  # another API process would have its own memory: the count still holds
+    with pytest.raises(HTTPException) as e:
+        ratelimit.check("jobs", key)
+    assert e.value.status_code == 429
+    monkeypatch.setenv("TERRAX_RATE_LIMIT_STORE", "memory")
+    ratelimit.check("jobs", key)  # this process alone has seen none of them
+    ratelimit.reset()

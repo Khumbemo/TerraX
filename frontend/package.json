@@ -17,6 +17,7 @@
     "jspdf": "^4.2.1",
     "maplibre-gl": "^6.11.2",
     "pmtiles": "^4.5.0",
+    "qrcode-generator": "2.0.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-markdown": "^10.1.0",

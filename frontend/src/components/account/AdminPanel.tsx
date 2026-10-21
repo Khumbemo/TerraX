@@ -28,6 +28,16 @@ interface Stats {
   errorsLastDay: number;
 }
 
+interface AuditEntry {
+  id: number;
+  at: number;
+  actor: string;
+  action: string;
+  target: string;
+  detail: string;
+  ip: string;
+}
+
 const mb = (b: number) => `${(b / 1024 / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} MB`;
 const when = (t: number) => new Date(t * 1000).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' });
 
@@ -40,6 +50,8 @@ export default function AdminPanel() {
   const [source, setSource] = useState('');
   const [openError, setOpenError] = useState<number | null>(null);
   const [newUser, setNewUser] = useState({ email: '', password: '', role: 'user' });
+  const [audit, setAudit] = useState<AuditEntry[] | null>(null);
+  const [auditFilter, setAuditFilter] = useState({ action: '', q: '' });
   const fail = useCallback((err: unknown) => notify(err instanceof Error ? err.message : 'That did not work.', 'error'), [notify]);
 
   const load = useCallback(() => {
@@ -49,13 +61,19 @@ export default function AdminPanel() {
   const loadErrors = useCallback(() => {
     request<{ errors: RecordedError[] }>(`/api/admin/errors?limit=200${source ? `&source=${source}` : ''}`).then(r => setErrors(r.errors), fail);
   }, [source, fail]);
+  const loadAudit = useCallback(() => {
+    const q = new URLSearchParams({ limit: '200', ...(auditFilter.action ? { action: auditFilter.action } : {}), ...(auditFilter.q.trim() ? { q: auditFilter.q.trim() } : {}) });
+    request<{ entries: AuditEntry[] }>(`/api/admin/audit?${q}`).then(r => setAudit(r.entries), fail);
+  }, [auditFilter, fail]);
   useEffect(load, [load]);
   useEffect(loadErrors, [loadErrors]);
+  useEffect(loadAudit, [loadAudit]);
 
   const patch = async (u: AdminUser, body: Record<string, unknown>) => {
     try {
       await request(`/api/admin/users/${u.id}`, { method: 'PATCH', json: body });
       load();
+      loadAudit();
     } catch (err) {
       fail(err);
     }
@@ -137,6 +155,9 @@ export default function AdminPanel() {
                     <div className="admin-email">
                       {u.email}
                       {u.disabled ? ' (disabled)' : ''}
+                      {u.twoFactor ? ' · 2FA' : ''}
+                      {u.singleSignOn ? ' · SSO' : ''}
+                      {!u.emailVerified ? ' · unconfirmed' : ''}
                     </div>
                     <div className="admin-actions">
                       <button type="button" className="btn btn-small" onClick={() => patch(u, { disabled: !u.disabled })}>
@@ -145,6 +166,20 @@ export default function AdminPanel() {
                       <button type="button" className="btn btn-small" onClick={() => resetPassword(u)}>
                         Password…
                       </button>
+                      {u.twoFactor && (
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={() => window.confirm(`Turn off two-factor sign-in for ${u.email}? Do this only after checking it is really them (they lost their phone and recovery codes).`) && patch(u, { twoFactor: false })}
+                        >
+                          2FA off
+                        </button>
+                      )}
+                      {!u.emailVerified && (
+                        <button type="button" className="btn btn-small" onClick={() => patch(u, { emailVerified: true })}>
+                          Confirm address
+                        </button>
+                      )}
                       <button type="button" className="btn btn-small btn-danger" onClick={() => remove(u)}>
                         Delete
                       </button>
@@ -159,6 +194,57 @@ export default function AdminPanel() {
                   <td>{u.lastLogin ? when(u.lastLogin) : 'never'}</td>
                   <td className="num">{u.jobs}</td>
                   <td className="num">{mb(u.usedBytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h3>Audit log</h3>
+      <div className="param-row">
+        <label className="param">
+          <span>Events</span>
+          <select id="admin-audit-action" value={auditFilter.action} onChange={e => setAuditFilter({ ...auditFilter, action: e.target.value })}>
+            <option value="">all</option>
+            <option value="auth.">sign-ins and account security</option>
+            <option value="auth.login_failed">failed sign-ins</option>
+            <option value="admin.">administrator actions</option>
+          </select>
+        </label>
+        <label className="param grow">
+          <span>E-mail contains</span>
+          <input id="admin-audit-q" type="search" value={auditFilter.q} onChange={e => setAuditFilter({ ...auditFilter, q: e.target.value })} />
+        </label>
+        <button type="button" className="btn btn-small" onClick={loadAudit}>
+          Refresh
+        </button>
+      </div>
+      <p className="field-hint">Sign-ins (and failed ones), password, two-factor and session changes, and every administrator action, kept for 365 days (TERRAX_AUDIT_RETENTION_DAYS). Passwords and codes are never recorded.</p>
+      {audit && !audit.length && <p className="empty-note">No matching entries.</p>}
+      {audit && audit.length > 0 && (
+        <div className="tabular-view">
+          <table id="admin-audit">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Event</th>
+                <th>By</th>
+                <th>Account</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {audit.map(a => (
+                <tr key={a.id} className={a.action.endsWith('_failed') ? 'muted' : undefined}>
+                  <td>{when(a.at)}</td>
+                  <td>{a.action}</td>
+                  <td>
+                    {a.actor || '—'}
+                    {a.ip ? ` (${a.ip})` : ''}
+                  </td>
+                  <td>{a.target}</td>
+                  <td className="audit-detail">{a.detail}</td>
                 </tr>
               ))}
             </tbody>

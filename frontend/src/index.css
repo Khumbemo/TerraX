@@ -2666,3 +2666,41 @@ details[open] > summary {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.btn-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.btn-link:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.qr-code {
+  display: block;
+  margin: 8px 0;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.recovery-codes {
+  margin: 8px 0;
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  user-select: all;
+}
+.session-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.audit-detail {
+  max-width: 260px;
+  overflow-wrap: anywhere;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+}
