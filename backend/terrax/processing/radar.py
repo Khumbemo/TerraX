@@ -32,27 +32,35 @@ CHANGE = {1: {"label": "Backscatter decrease", "color": [239, 68, 68]}, 2: {"lab
 
 
 class HistStats:
-    """Streaming statistics: exact n, mean, SD (float64 sums), min and max; quartiles from fixed bins of `width`.
+    """Streaming statistics: exact n, mean, SD (float64 sums), min and max, and exact quartiles in two passes.
 
-    Each quartile is the centre of the bin holding its order statistic, so it is within width / 2 of the exact
-    value (0.005 dB for the 0.01 dB bins used here), using a few kilobytes instead of a copy of every pixel.
+    The first pass counts values into fixed bins of `width`; that locates the bin holding each order statistic the
+    quartiles need (type 7, as numpy's default). A second pass over the same values (`collect`) keeps only the
+    values in those bins, and their sorted ranks give the exact order statistics. Memory is a few kilobytes plus
+    the values of at most six bins, instead of a copy of every pixel. Without the second pass (or when the bins
+    would hold more than `max_collect` values) each quartile is its bin's centre, within width / 2 of the exact one.
     """
 
-    def __init__(self, lo: float, hi: float, width: float) -> None:
+    def __init__(self, lo: float, hi: float, width: float, max_collect: int = 50_000_000) -> None:
         import threading
 
         self.lo, self.width = lo, width
         self.bins = np.zeros(round((hi - lo) / width) + 2, dtype=np.int64)  # first and last bins catch values outside
         self.n, self.s, self.ss = 0, 0.0, 0.0
         self.min, self.max = np.inf, -np.inf
+        self.max_collect = max_collect
         self._lock = threading.Lock()
+        self._wanted: np.ndarray | None = None
+        self._kept: dict[int, list[np.ndarray]] = {}
+
+    def _bin(self, v: np.ndarray) -> np.ndarray:
+        return np.clip(np.floor((v.astype(np.float64) - self.lo) / self.width).astype(np.int64) + 1, 0, self.bins.size - 1)
 
     def add(self, v: np.ndarray) -> None:
         v = v[np.isfinite(v)]
         if not v.size:
             return
-        idx = np.clip(np.floor((v.astype(np.float64) - self.lo) / self.width).astype(np.int64) + 1, 0, self.bins.size - 1)
-        counts = np.bincount(idx, minlength=self.bins.size)
+        counts = np.bincount(self._bin(v), minlength=self.bins.size)
         x = v.astype(np.float64)
         with self._lock:
             self.bins += counts
@@ -61,18 +69,67 @@ class HistStats:
             self.ss += float((x * x).sum())
             self.min, self.max = min(self.min, float(v.min())), max(self.max, float(v.max()))
 
+    def _ranks(self) -> list[int]:
+        return sorted({k for p in (0.25, 0.5, 0.75) for k in (int(np.floor((self.n - 1) * p)), int(np.ceil((self.n - 1) * p)))})
+
+    def _bin_of_rank(self, k: int) -> int:
+        """Bin holding the k-th smallest value (0-based)."""
+        return int(np.searchsorted(np.cumsum(self.bins), k + 1))
+
+    def wants_second_pass(self) -> bool:
+        """After the first pass: whether `collect` should see the values again, and which bins it keeps."""
+        if not self.n:
+            return False
+        wanted = np.unique([self._bin_of_rank(k) for k in self._ranks()])
+        if int(self.bins[wanted].sum()) > self.max_collect:
+            return False
+        self._wanted = wanted
+        self._kept = {int(i): [] for i in wanted}
+        return True
+
+    def collect(self, v: np.ndarray) -> None:
+        if self._wanted is None:
+            return
+        v = v[np.isfinite(v)]
+        idx = self._bin(v)
+        hit = np.isin(idx, self._wanted)
+        if not hit.any():
+            return
+        v, idx = v[hit], idx[hit]
+        with self._lock:
+            for i in np.unique(idx).tolist():
+                self._kept[i].append(v[idx == i])
+
+    def exact(self) -> bool:
+        """True when the second pass saw every value of the wanted bins (the passes read the same values)."""
+        return self._wanted is not None and all(sum(a.size for a in self._kept[int(i)]) == int(self.bins[i]) for i in self._wanted)
+
     def quantile(self, p: float) -> float:
+        """Type 7 quantile: interpolated between the order statistics at ranks ⌊(n−1)p⌋ and ⌈(n−1)p⌉."""
         rank = (self.n - 1) * p
-        i = int(np.searchsorted(np.cumsum(self.bins), rank + 1))
-        mid = self.lo + (i - 0.5) * self.width
-        return float(min(max(mid, self.min), self.max))
+        if self.exact():
+            cum = np.concatenate([[0], np.cumsum(self.bins)])
+            sorted_bins = {i: np.sort(np.concatenate(parts)).astype(np.float64) for i, parts in self._kept.items()}
+
+            def order(k: int) -> float:
+                i = self._bin_of_rank(k)
+                return float(sorted_bins[i][k - int(cum[i])])
+        else:
+
+            def order(k: int) -> float:  # the bin's centre, clamped to the data's range
+                mid = self.lo + (self._bin_of_rank(k) - 0.5) * self.width
+                return float(min(max(mid, self.min), self.max))
+
+        lo, hi = int(np.floor(rank)), int(np.ceil(rank))
+        return order(lo) + (rank - lo) * (order(hi) - order(lo))
 
     def dict(self) -> dict | None:
         if not self.n:
             return None
         mean = self.s / self.n
         sd = float(np.sqrt(max(0.0, (self.ss - self.n * mean * mean) / (self.n - 1)))) if self.n > 1 else 0.0
-        return {"n": self.n, "mean": mean, "sd": sd, "min": self.min, "max": self.max, "q1": self.quantile(0.25), "median": self.quantile(0.5), "q3": self.quantile(0.75)}
+        return {"n": self.n, "mean": mean, "sd": sd, "min": self.min, "max": self.max, "q1": self.quantile(0.25), "median": self.quantile(0.5), "q3": self.quantile(0.75),
+                "exactQuartiles": self.exact()}
 
 
 def detect_scale(r: Raster, band: int) -> str:
@@ -139,7 +196,8 @@ def analyze_radar(images: list[Raster], vv: int, vh: int, boundary=None, size: i
     bufs = [{"vv": db(), "vh": db(), "ratio": db(), "rvi": HistStats(0.0, 4.0, 0.0005)} for _ in images]
     ratio_buf = db() if two else None
 
-    def work(st: Strip):
+    def filtered(st: Strip):
+        """Lee-filtered VV and VH (linear) of each image on the strip's rows, and the strip's boundary mask."""
         e0, e1 = max(0, st.r0 - halo), min(h, st.r1 + halo)
         m = plan.mask(e0, e1)
         filt = []
@@ -150,32 +208,47 @@ def analyze_radar(images: list[Raster], vv: int, vh: int, boundary=None, size: i
                 for a in lin:
                     a[~m] = np.nan
             filt.append([lee_filter(a, size, enl)[st.r0 - e0 : st.r1 - e0] for a in lin])
-        inside = int(m[st.r0 - e0 : st.r1 - e0].sum()) if m is not None else 0
-        out: dict = {"inside": inside, "views": []}
+        return filt, (m[st.r0 - e0 : st.r1 - e0] if m is not None else None)
+
+    def log_ratio(filt) -> np.ndarray:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return 10.0 * np.log10(filt[1][1] / filt[0][1])  # VH log ratio, after / before
+
+    def feed(filt, sink: str) -> None:
+        """Every statistic's values for one strip, to HistStats.add (first pass) or .collect (second pass)."""
         for i, (f_vv, f_vh) in enumerate(filt):
             ok = np.isfinite(f_vv) & np.isfinite(f_vh)
-            bufs[i]["vv"].add(_db(f_vv[ok]))
-            bufs[i]["vh"].add(_db(f_vh[ok]))
-            bufs[i]["ratio"].add(_db(f_vh[ok] / f_vv[ok]))
-            bufs[i]["rvi"].add((4 * f_vh[ok] / (f_vv[ok] + f_vh[ok])).astype(np.float32))
+            for key, v in (("vv", _db(f_vv[ok])), ("vh", _db(f_vh[ok])), ("ratio", _db(f_vh[ok] / f_vv[ok])), ("rvi", (4 * f_vh[ok] / (f_vv[ok] + f_vh[ok])).astype(np.float32))):
+                getattr(bufs[i][key], sink)(v)
+        if two and ratio_buf is not None:
+            d = log_ratio(filt)
+            getattr(ratio_buf, sink)(d[np.isfinite(d)].astype(np.float32))
+
+    def work(st: Strip):
+        filt, m = filtered(st)
+        inside = int(m.sum()) if m is not None else 0
+        out: dict = {"inside": inside, "views": []}
+        feed(filt, "add")
         sel = np.flatnonzero((np.arange(st.r0, st.r1) % k) == 0)
         last = filt[-1]
         out["views"] = [(st.r0 + int(j), _db(last[0][j, ::k]), _db(last[1][j, ::k])) for j in sel]
-        if two and change is not None and ratio_buf is not None:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                d = 10.0 * np.log10(filt[1][1] / filt[0][1])  # VH log ratio, after / before
+        if two and change is not None:
+            d = log_ratio(filt)
             ok = np.isfinite(d)
             c = np.zeros(d.shape, dtype=np.uint8)
             c[ok] = 2
             c[ok & (d <= -threshold_db)] = 1
             c[ok & (d >= threshold_db)] = 3
             change[st.rows] = c
-            ratio_buf.add(d[ok].astype(np.float32))
         return out
 
     parts = plan.map(work)
     inside = sum(p["inside"] for p in parts)
     plan.check_overlap(inside)
+    # Second pass for exact quartiles: the same strips filtered again, keeping only the values in the bins that hold them.
+    stats = [b for d in bufs for b in d.values()] + ([ratio_buf] if ratio_buf is not None else [])
+    if any([b.wants_second_pass() for b in stats]):  # a list, so every buffer prepares
+        plan.map(lambda st: feed(filtered(st)[0], "collect"))
     rows = sorted((row for p in parts for row in p["views"]), key=lambda x: x[0])
     view_vv = np.vstack([r[1] for r in rows]) if rows else np.zeros((0, 0), np.float32)
     view_vh = np.vstack([r[2] for r in rows]) if rows else np.zeros((0, 0), np.float32)
@@ -195,6 +268,8 @@ def analyze_radar(images: list[Raster], vv: int, vh: int, boundary=None, size: i
         "Inputs were read as " + ", ".join(f"{d['name']}: {'dB' if d['scale'] == 'db' else 'linear power'}" for d in dates) + (" (detected from the values)." if scale == "auto" else "."),
         "RVI = 4 σ⁰VH / (σ⁰VV + σ⁰VH), a dual-polarisation vegetation index: higher where volume scattering from canopies is strong.",
     ]
+    if not all(b.exact() for b in stats if b.n):
+        notes.append("Some quartiles are bin centres (within 0.005 dB, or 0.00025 for RVI, of the exact value): the values around them were too many to keep for an exact selection.")
     if two:
         notes.append(f"Change: VH log ratio 10·log₁₀(after / before); ≤ −{fmt(threshold_db, 3)} dB is a decrease (the usual sign of clearing), ≥ +{fmt(threshold_db, 3)} dB an increase. "
                      "Soil moisture, rain, flooding and crop growth also move backscatter; compare images from the same season and relative orbit, and check flagged areas on optical imagery.")

@@ -612,17 +612,31 @@ def test_lee_filter_reduces_speckle_and_keeps_the_mean():
     assert fs[:, 140:146].mean() == pytest.approx(0.05, rel=0.05) and fs[:, 154:160].mean() == pytest.approx(0.2, rel=0.05)
 
 
-def test_hist_stats_quartiles_within_half_a_bin():
+def test_hist_stats_quartiles_exact_after_the_second_pass():
     from terrax.processing.radar import HistStats
 
-    v = np.random.default_rng(4).normal(-12, 3, 200_001).astype(np.float32)
-    h = HistStats(-60, 40, 0.01)
-    for part in np.array_split(v, 7):
-        h.add(part)
-    d = h.dict()
-    assert d is not None and d["n"] == v.size and d["mean"] == pytest.approx(float(v.astype(np.float64).mean()), abs=1e-9)
-    for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
-        assert abs(d[key] - float(np.quantile(v, p))) <= 0.005 + 1e-6
+    rng = np.random.default_rng(4)
+    for v in (rng.normal(-12, 3, 200_001).astype(np.float32), rng.normal(-12, 3, 10).astype(np.float32), np.full(1000, -7.5, np.float32),
+              np.r_[rng.normal(-12, 3, 5000), [-80.0, 55.0]].astype(np.float32)):  # values beyond the bins too
+        h = HistStats(-60, 40, 0.01)
+        parts = np.array_split(v, 7)
+        for part in parts:
+            h.add(part)
+        approx_d = h.dict()
+        assert approx_d is not None and not approx_d["exactQuartiles"]
+        for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+            assert abs(approx_d[key] - float(np.quantile(v.astype(np.float64), p))) <= 0.005 + 1e-6
+        assert h.wants_second_pass()
+        for part in parts[::-1]:  # any order
+            h.collect(part)
+        d = h.dict()
+        assert d is not None and d["exactQuartiles"] and d["n"] == v.size and d["mean"] == pytest.approx(float(v.astype(np.float64).mean()), abs=1e-9)
+        for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+            assert d[key] == pytest.approx(float(np.quantile(v.astype(np.float64), p)), abs=1e-12)
+    small = HistStats(-60, 40, 0.01, max_collect=10)
+    small.add(np.full(100, -3.0, np.float32))
+    sd = small.dict()
+    assert not small.wants_second_pass() and sd is not None and sd["exactQuartiles"] is False
 
 
 @pytest.mark.parametrize("db", [True, False])
@@ -646,6 +660,16 @@ def test_radar_change_finds_the_clearing_and_strips_equal_whole_grid(tmp_path, m
     vh = res["dates"][0]["vh"]
     assert vh["median"] == pytest.approx(-13 - 0.4, abs=0.6)  # filtered speckle: the dB median sits a little below the linear mean
     assert "Lee (1980)" in radar.radar_markdown(res)
+    # Exact quartiles: the same in strips as on the whole grid, and equal to numpy's on every filtered pixel.
+    r0 = Raster(paths[0])
+    (a,) = r0.read_rows([1], 0, r0.gh)
+    ref = radar._db(radar.lee_filter(radar.to_linear(a, res["dates"][0]["scale"]), 5))
+    ref = ref[np.isfinite(ref)].astype(np.float64)
+    for d in (whole, res):
+        assert d["dates"][0]["vh"]["exactQuartiles"] and d["change"]["logRatio"]["exactQuartiles"]
+        for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+            assert d["dates"][0]["vh"][key] == pytest.approx(float(np.quantile(ref, p)), abs=1e-12)
+            assert d["change"]["logRatio"][key] == whole["change"]["logRatio"][key]
 
 
 def _forest_cloud(path, unit=1.0, crs="EPSG:32646", seed=8):
