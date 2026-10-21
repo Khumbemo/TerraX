@@ -241,6 +241,8 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 CI (`.github/workflows/ci.yml`) runs all three, then builds and starts the Docker Compose stack and the one-container image.
 
+`TERRAX_LIVE=1 pytest tests/test_live.py` searches, reads and analyses real Sentinel-1 scenes (Planetary Computer) and Sentinel-2 scenes (Earth Search). It checks that the radar backscatter values are physically plausible. The **Live data** workflow (`.github/workflows/live.yml`) runs it weekly, by hand, and on pull requests that change that code. It is kept out of CI because it depends on outside services.
+
 ## Hosting
 
 TerraX needs its Python server, so a static host such as GitHub Pages or Netlify cannot run it. The older browser-only build, which runs every analysis in the browser and is kept as a claude.ai artifact, is described in `deploy/browser-preview/`.
