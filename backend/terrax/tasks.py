@@ -17,9 +17,11 @@ from functools import lru_cache
 
 from celery import Celery
 from celery.exceptions import SoftTimeLimitExceeded
+from celery.signals import worker_process_init
 
 from . import storage
 from .config import settings
+from .monitoring import configure_logging, init_sentry, purge_errors, record_exception
 
 log = logging.getLogger("terrax.jobs")
 
@@ -56,7 +58,8 @@ def run_job(job_id: str) -> dict:
             raise ToolError(f"Unknown tool “{req['tool']}”.")
         result = runner(ToolContext(job_id), req.get("inputs") or {}, req.get("params") or {})
         storage.write_json(storage.job_dir(job_id) / "result.json", result)
-        return storage.update_job(job_id, state="done", progress=1.0, message="Done", seconds=round(time.time() - started, 2))
+        name = result.get("name") if isinstance(result, dict) else None
+        return storage.update_job(job_id, state="done", progress=1.0, message="Done", seconds=round(time.time() - started, 2), name=str(name or "")[:300])
     except ToolError as err:
         return storage.update_job(job_id, state="error", message=str(err), error=str(err))
     except ValueError as err:  # data problems raised by the processing modules
@@ -70,7 +73,8 @@ def run_job(job_id: str) -> dict:
                "or lower TERRAX_MAX_PIXELS / TERRAX_TILE_THREADS, or run the workers on a machine with more memory.")
         return storage.update_job(job_id, state="error", message=msg, error=msg)
     except Exception as err:  # record any failure so the UI stops waiting
-        log.exception("job %s failed", job_id)
+        log.exception("job %s failed", job_id, extra={"job_id": job_id, "tool": req.get("tool")})
+        record_exception("worker", err, path=f"job:{req.get('tool')}:{job_id}", owner=str(req.get("owner") or ""))
         msg = f"The analysis failed unexpectedly ({type(err).__name__}: {err})."
         return storage.update_job(job_id, state="error", message=msg, error=msg, trace=traceback.format_exc()[-4000:])
 
@@ -82,7 +86,14 @@ def run_job_task(job_id: str) -> dict:
 
 @celery_app.task(name="terrax.purge")
 def purge_task() -> int:
+    purge_errors()
     return storage.purge_old()
+
+
+@worker_process_init.connect
+def _worker_start(**_kwargs) -> None:
+    configure_logging()
+    init_sentry("worker")
 
 
 @lru_cache(maxsize=1)
@@ -119,6 +130,7 @@ def start_purge_thread(every_s: float = 3600.0) -> None:
     def loop() -> None:
         while True:
             try:
+                purge_errors()
                 n = storage.purge_old()
                 if n:
                     log.info("purged %d old upload/job folders", n)

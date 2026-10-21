@@ -25,7 +25,7 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         out = Path(tmp) / f"{storage.safe_name(item.id)}.tif"
         notes = read_s2_window(item, [float(v) for v in bbox], out)
         ctx.progress(0.9, "Storing the scene")
-        f = storage.save_file(out.name, out)
+        f = storage.save_file(out.name, out, owner=ctx.owner)
     return {"file": f.public(), "notes": notes}
 
 
@@ -52,5 +52,5 @@ def run_s1(ctx: ToolContext, inputs: dict, params: dict) -> dict:
             notes.append(f"The first image is from relative orbit {int(orbit)} and this one from {item.relative_orbit}: the viewing geometry differs, "
                          "which changes backscatter on its own. Prefer scenes from the same relative orbit for change.")
         ctx.progress(0.9, "Storing the scene")
-        f = storage.save_file(out.name, out)
+        f = storage.save_file(out.name, out, owner=ctx.owner)
     return {"file": f.public(), "notes": notes}

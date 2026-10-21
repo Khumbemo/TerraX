@@ -17,8 +17,10 @@ from typing import Any, Literal
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import auth
 from ..agents import assistant, gemini
 from ..agents.prompts import DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT, REPORT_PROMPT
+from ..auth import Principal
 from ..config import settings
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -75,20 +77,21 @@ class ChatRequest(BaseModel):
     useAi: bool = True
 
 
-def _table_for(results: Results | None):
-    if not results or not results.fileId:
+def _table_for(results: Results | None, p: Principal | None):
+    if not results or not results.fileId or p is None:
         return None
     from .. import storage
     from ..processing.table import read_table
 
     try:
+        auth.own_file(p, results.fileId)
         f = storage.get_file(results.fileId)
     except KeyError:
         return None
     return read_table(f.path, f.name) if f.kind == "table" else None
 
 
-def _offline(req: ChatRequest, note: str = "") -> dict[str, Any]:
+def _offline(req: ChatRequest, note: str = "", p: Principal | None = None) -> dict[str, Any]:
     ctx = assistant.Context(
         target_lat=req.target.lat,
         target_lon=req.target.lon,
@@ -97,7 +100,7 @@ def _offline(req: ChatRequest, note: str = "") -> dict[str, Any]:
         now=req.now or datetime.now(UTC),
         tz_offset_min=req.tzOffsetMinutes,
         results=req.results.model_dump() if req.results else None,
-        table=_table_for(req.results) if req.agent == "results" else None,
+        table=_table_for(req.results, p) if req.agent == "results" else None,
     )
     r, state = assistant.reply(req.question, ctx, req.agent, req.state)
     return {"text": note + r["text"], "suggestions": r["suggestions"], "sources": [], "state": state, "engine": "built-in"}
@@ -107,9 +110,9 @@ def _offline(req: ChatRequest, note: str = "") -> dict[str, Any]:
 def chat(req: ChatRequest, request: Request, x_gemini_key: str | None = Header(default=None)) -> dict[str, Any]:
     key = _key(x_gemini_key)
     if not req.useAi or not key:
-        return _offline(req)
+        return _offline(req, p=request.state.principal)
     if _rate_limited(request.client.host if request.client else "unknown"):
-        return _offline(req, "_Too many AI requests in the last minute, so this is the built-in answer._\n\n")
+        return _offline(req, "_Too many AI requests in the last minute, so this is the built-in answer._\n\n", p=request.state.principal)
     if req.agent == "results":
         r = req.results
         context = f"Tool: {r.toolName}\n\n{r.extraContext or r.markdown}" if r else "No results yet."
@@ -123,7 +126,7 @@ def chat(req: ChatRequest, request: Request, x_gemini_key: str | None = Header(d
     try:
         res = gemini.generate(key, gemini.GenerateRequest(turns=turns, system_instruction=system, use_search=True, model=gemini.pick_model(req.model, settings().gemini_model), temperature=0.4))
     except gemini.GeminiError as err:
-        return _offline(req, f"_The AI request failed ({err}), so this is the built-in answer._\n\n")
+        return _offline(req, f"_The AI request failed ({err}), so this is the built-in answer._\n\n", p=request.state.principal)
     return {"text": res.text or "No answer was returned.", "sources": res.sources, "suggestions": [], "state": req.state, "engine": "gemini", "model": res.model}
 
 

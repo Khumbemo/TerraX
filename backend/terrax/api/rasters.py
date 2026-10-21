@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .. import storage
+from .. import auth, ratelimit, storage
+from ..auth import Principal, principal
 from ..config import settings
 from ..processing.render import PREVIEW_MAX_SIDE, composite_rgba, png_bytes
 from ..processing.rio import Raster, qa_masked
@@ -24,7 +25,8 @@ def _raster(file_id: str, max_pixels: int | None = None) -> Raster:
 
 @router.get("/api/rasters/{file_id}/composite.png")
 def composite(file_id: str, bands: str = Query(..., description="three 0-based band indices, e.g. 2,1,0"), lo: float = 2, hi: float = 98,
-              qaBand: int | None = None, qaKind: str | None = None) -> Response:
+              qaBand: int | None = None, qaKind: str | None = None, p: Principal = Depends(principal)) -> Response:
+    auth.own_file(p, file_id)
     r = _raster(file_id)
     try:
         idx = [int(b) for b in bands.split(",")]
@@ -45,8 +47,11 @@ def composite(file_id: str, bands: str = Query(..., description="three 0-based b
 
 
 @router.get("/api/rasters/{file_id}/pixel")
-def pixel(file_id: str, col: float, row: float, width: int, height: int, qaBand: int | None = None, qaKind: str | None = None) -> dict:
+def pixel(file_id: str, col: float, row: float, width: int, height: int, request: Request, qaBand: int | None = None, qaKind: str | None = None,
+          p: Principal = Depends(principal)) -> dict:
     """Values of every band at a point given in preview-grid coordinates (width × height), read from the full-resolution file."""
+    ratelimit.check("interactive", p.owner, auth.client_ip(request))
+    auth.own_file(p, file_id)
     r = _raster(file_id)
     W, H = r.meta.width, r.meta.height
     gc = int(min(W - 1, max(0, col / width * W)))
@@ -72,7 +77,7 @@ class OutletRequest(BaseModel):
 
 
 @router.post("/api/terrain/{job_id}/watershed")
-def watershed(job_id: str, req: OutletRequest) -> dict:
+def watershed(job_id: str, req: OutletRequest, request: Request, p: Principal = Depends(principal)) -> dict:
     """Watershed draining to the clicked cell (snapped to the strongest flow nearby) of a hydrology job."""
     from ..processing.patches import patches_to_geojson
     from ..processing.terrain import snap_outlet
@@ -80,6 +85,8 @@ def watershed(job_id: str, req: OutletRequest) -> dict:
     from ..tools.common import display_grid
     from ..tools.terrain import flow_png
 
+    ratelimit.check("interactive", p.owner, auth.client_ip(request))
+    auth.own_job(p, job_id)
     st = storage.job_status(job_id)
     res = storage.job_result(job_id)
     if st["tool"] != "hydrology" or not res:

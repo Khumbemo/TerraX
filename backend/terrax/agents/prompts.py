@@ -17,7 +17,7 @@ Tools:
 - Space & aerial photos: JPG/PNG/WebP images → vegetation cover from Excess Green with an Otsu threshold, VARI and colour statistics (no georeferencing); EXIF camera, capture time and GPS position shown on the map; comparison of green cover with a second photo.
 Every tool has sample data (the forest, terrain, satellite, survey and photo samples are synthetic). Reports can be saved in the Reports view and downloaded as Markdown or PDF. The dataset assistant answers questions about the current results; OS Guide answers questions about TerraX.
 Settings: Gemini API key (stored in this browser and sent with each AI request through the TerraX server to Google) and model; target location for the telemetry panel (default Kohima, 25.674° N, 94.108° E). The Guide tab has an Earth Engine export manual.
-Privacy: uploads and results are kept on the TerraX server for a limited time (72 hours by default) and then deleted. Only when AI is used are the computed results (and for tables a sample of up to 150 rows) sent to Google's Gemini API."""
+Privacy: uploads and results are visible only to the person who made them (and the server's administrators); a guest's are kept for 72 hours by default, an account's for 30 days, then deleted (job history and server-side projects stay for accounts). With TERRAX_AUTH=required the server needs a sign-in. Only when AI is used are the computed results (and for tables a sample of up to 150 rows) sent to Google's Gemini API."""
 
 GUIDE_SYSTEM_PROMPT = f"""You are the TerraX OS Guide. Help users use the TerraX app and plan geospatial work.
 Use this description of the app as the source of truth about its features; do not invent features it does not have:

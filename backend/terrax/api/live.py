@@ -11,10 +11,11 @@ import time
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from .. import storage
+from .. import auth, ratelimit, storage
+from ..auth import Principal, principal
 from ..services import kp as kp_service
 from ..services import live
 from ..services.solar import solar_report
@@ -74,8 +75,9 @@ class WeatherRequest(BaseModel):
 
 
 @router.post("/weather", status_code=201)
-def weather(req: WeatherRequest) -> dict[str, Any]:
+def weather(req: WeatherRequest, request: Request, p: Principal = Depends(principal)) -> dict[str, Any]:
     """Fetches a daily series and stores it as a CSV upload, ready for the table tool."""
+    ratelimit.check("live", p.owner, auth.client_ip(request))
     try:
         if req.source == "open-meteo":
             csv, note = live.open_meteo_to_csv(live.fetch_json(live.open_meteo_url(req.lat, req.lon, req.start, req.end, req.vars)))
@@ -86,7 +88,7 @@ def weather(req: WeatherRequest) -> dict[str, Any]:
     except ValueError as err:
         raise HTTPException(400, str(err)) from err
     name = f"{label}_{req.lat:.3f}_{req.lon:.3f}_{req.start}_{req.end}.csv"
-    f = storage.save_file(name, csv.encode("utf-8"))
+    f = storage.save_file(name, csv.encode("utf-8"), owner=p.owner)
     return {"file": f.public(), "note": note}
 
 
@@ -99,7 +101,8 @@ class SearchRequest(BaseModel):
 
 
 @router.post("/sentinel/search")
-def sentinel_search(req: SearchRequest) -> dict[str, Any]:
+def sentinel_search(req: SearchRequest, request: Request, p: Principal = Depends(principal)) -> dict[str, Any]:
+    ratelimit.check("live", p.owner, auth.client_ip(request))
     try:
         body = live.stac_search_body(req.bbox, req.start, req.end, req.maxCloud, req.limit)
         items = live.parse_stac_items(live.fetch_json(f"{live.EARTH_SEARCH}/search", method="POST", body=body))
@@ -117,7 +120,8 @@ class S1SearchRequest(BaseModel):
 
 
 @router.post("/sentinel1/search")
-def sentinel1_search(req: S1SearchRequest) -> dict[str, Any]:
+def sentinel1_search(req: S1SearchRequest, request: Request, p: Principal = Depends(principal)) -> dict[str, Any]:
+    ratelimit.check("live", p.owner, auth.client_ip(request))
     try:
         body = live.s1_search_body(req.bbox, req.start, req.end, req.orbit, req.limit)
         items = live.parse_s1_items(live.fetch_json(f"{live.PC_STAC}/search", method="POST", body=body))

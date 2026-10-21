@@ -889,7 +889,7 @@
     "privacy|private|is my data|where .* stored|\\bsafe\\b|who can see"
    ],
    "phraseBoost": 5,
-   "answer": "Files you add are uploaded to **the TerraX server you are using**, which runs the analysis and keeps uploads and results for a limited time (72 hours by default, set by `TERRAX_RETENTION_HOURS`), then deletes them. Saved reports and settings live in this browser’s local storage. Only when AI is turned on and you use an assistant or “Add AI interpretation” are the computed results (and for tables a sample of up to 150 rows) sent to Google’s Gemini API.",
+   "answer": "Files you add are uploaded to **the TerraX server you are using**, which runs the analysis; only you (and the server’s administrators) can see your uploads and results. As a guest they are kept for 72 hours by default (`TERRAX_RETENTION_HOURS`); signed in, for 30 days (`TERRAX_USER_RETENTION_DAYS`), and your history and projects stay on the server. Saved reports and settings also live in this browser’s local storage. Only when AI is turned on and you use an assistant or “Add AI interpretation” are the computed results (and for tables a sample of up to 150 rows) sent to Google’s Gemini API.",
    "suggestions": [
     "How do I set up AI?"
    ]

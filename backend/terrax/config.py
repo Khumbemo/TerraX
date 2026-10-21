@@ -51,8 +51,51 @@ class Settings:
     worker_max_memory_mb: int = field(default_factory=lambda: int(os.environ.get("TERRAX_WORKER_MAX_MEMORY_MB", "0")))
     #: Largest accepted upload, bytes.
     max_upload: int = field(default_factory=lambda: int(os.environ.get("TERRAX_MAX_UPLOAD_MB", "500")) * 1024 * 1024)
-    #: Delete uploads and jobs older than this many hours (0 keeps them).
+    #: Delete guests' uploads and jobs older than this many hours (0 keeps them).
     retention_hours: int = field(default_factory=lambda: int(os.environ.get("TERRAX_RETENTION_HOURS", "72")))
+    #: Keep signed-in users' uploads and results this many days (0 keeps them until deleted). Job history outlives them.
+    user_retention_days: int = field(default_factory=lambda: int(os.environ.get("TERRAX_USER_RETENTION_DAYS", "30")))
+
+    # ── Accounts, access and limits ──
+    #: SQLAlchemy URL of the database; empty uses SQLite in the storage folder (storage/terrax.db).
+    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))
+    #: "off" (no accounts: each browser only sees its own uploads and jobs), "optional" (guests as with "off", or sign in
+    #: to keep history and projects) or "required" (sign in for everything; use this on a public server).
+    auth_mode: str = field(default_factory=lambda: os.environ.get("TERRAX_AUTH", "optional").strip().lower())
+    #: Who may create an account: "open" (anyone) or "closed" (only an admin, from the admin panel or the CLI).
+    signup: str = field(default_factory=lambda: os.environ.get("TERRAX_SIGNUP", "open").strip().lower())
+    #: An admin account created (or reset to this password) at start-up, so a fresh server can be signed in to.
+    admin_email: str = field(default_factory=lambda: os.environ.get("TERRAX_ADMIN_EMAIL", "").strip().lower())
+    admin_password: str = field(default_factory=lambda: os.environ.get("TERRAX_ADMIN_PASSWORD", ""))
+    #: How long a sign-in lasts without use, days.
+    session_days: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_SESSION_DAYS", "30"))))
+    #: Session cookies only over HTTPS: "auto" (when the request arrived over HTTPS, also behind a proxy), "true", "false".
+    cookie_secure: str = field(default_factory=lambda: os.environ.get("TERRAX_COOKIE_SECURE", "auto").strip().lower())
+    #: SameSite for the session and guest cookies: "lax", or "none" when the app is shown inside another site's frame;
+    #: "none" also makes them Secure and Partitioned (CHIPS), so it needs HTTPS. Default: "none" on Hugging Face Spaces
+    #: (which set SPACE_ID and show the app in a frame on huggingface.co), else "lax".
+    cookie_samesite: str = field(default_factory=lambda: os.environ.get("TERRAX_COOKIE_SAMESITE", "none" if os.environ.get("SPACE_ID") else "lax").strip().lower())
+    #: Proxies in front of the API whose X-Forwarded-For / X-Forwarded-Proto to trust (0: use the socket address).
+    trusted_proxies: int = field(default_factory=lambda: max(0, int(os.environ.get("TERRAX_TRUSTED_PROXIES", "0"))))
+    #: Request limits per user or guest (and per client address); false switches them off (tests, a private server).
+    rate_limits: bool = field(default_factory=lambda: _bool("TERRAX_RATE_LIMITS", True))
+    jobs_per_minute: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_JOBS_PER_MINUTE", "30"))))
+    uploads_per_hour: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_UPLOADS_PER_HOUR", "300"))))
+    #: Storage each signed-in user / each guest may hold at once, MB (0: no limit).
+    user_quota_mb: int = field(default_factory=lambda: max(0, int(os.environ.get("TERRAX_USER_QUOTA_MB", "10000"))))
+    guest_quota_mb: int = field(default_factory=lambda: max(0, int(os.environ.get("TERRAX_GUEST_QUOTA_MB", "2000"))))
+
+    # ── Monitoring ──
+    #: "text" (readable) or "json" (one JSON object per line, for log collectors).
+    log_format: str = field(default_factory=lambda: os.environ.get("TERRAX_LOG_FORMAT", "text").strip().lower())
+    log_level: str = field(default_factory=lambda: os.environ.get("TERRAX_LOG_LEVEL", "INFO").strip().upper())
+    #: Bearer token for /api/metrics (Prometheus); without it only admins can read the metrics.
+    metrics_token: str = field(default_factory=lambda: os.environ.get("TERRAX_METRICS_TOKEN", ""))
+    #: Sentry (or a Sentry-compatible service such as GlitchTip) DSN for error tracking; needs ``pip install 'terrax[sentry]'``.
+    sentry_dsn: str = field(default_factory=lambda: os.environ.get("SENTRY_DSN", ""))
+    sentry_environment: str = field(default_factory=lambda: os.environ.get("SENTRY_ENVIRONMENT", "production"))
+    #: Keep recorded errors this many days.
+    error_retention_days: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_ERROR_RETENTION_DAYS", "30"))))
 
 
 def settings() -> Settings:

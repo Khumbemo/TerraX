@@ -14,6 +14,7 @@ def _env():
     tmp = tempfile.mkdtemp(prefix="terrax-test-")
     os.environ["TERRAX_STORAGE"] = tmp
     os.environ["TERRAX_EAGER"] = "true"
+    os.environ["TERRAX_RATE_LIMITS"] = "false"  # tests run many jobs a minute; test_accounts checks the limits on their own
     os.environ.setdefault("GEMINI_API_KEY", "")
     yield
     shutil.rmtree(tmp, ignore_errors=True)
