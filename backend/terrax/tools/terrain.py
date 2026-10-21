@@ -114,7 +114,8 @@ def hydrology_markdown(f: dict, valid_km2: float, wetness: dict | None = None) -
             f"- Topographic wetness index ln(a / tan β): median {fmt(w['median'], 3)} (quartiles {fmt(w['q1'], 3)}–{fmt(w['q3'], 3)}, range {fmt(w['min'], 3)} to {fmt(w['max'], 3)}).",
             "- Wetness method: D∞ flow (Tarboton 1997) splits each cell's flow between the two cells of its steepest triangular facet, so it follows divergent "
             "and planar slopes that D8 cannot. a is the upslope area per metre of contour across the flow (a plane gives its exact upslope length), tan β the steepest "
-            "facet slope, floored at 0.001 on filled flats (Beven & Kirkby 1979; Sørensen et al. 2006). Streams, Strahler orders and watersheds still use D8.",
+            "facet slope, floored at 0.001 on filled flats (Beven & Kirkby 1979; Sørensen et al. 2006). Streams and Strahler orders use D8, as in TauDEM, because D∞ "
+            "spreads flow and gives no single channel line; clicked watersheds add the D∞ upslope dependence (the share of each cell's flow reaching the outlet).",
         ]
     return "\n".join(lines)
 
@@ -153,10 +154,14 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     ctx.progress(0.3, "Filling depressions and routing flow")
     f = flow_routing(t["_dem"], geo, km2 * 1e6, dinf=method == "dinf")
     wetness = None
+    dinf_grids: dict = {}
     if f["dinf"] is not None:
         from ..processing.stats import summarize_large
 
-        twi = f.pop("dinf")["twi"]
+        extra = f.pop("dinf")
+        twi = extra["twi"]
+        dinf_grids = {"facet": extra["facet"], "share": extra["share"]}  # for D∞ watersheds on click
+        del extra
         summary = summarize_large(twi[np.isfinite(twi)])
         view = display_grid(twi)
         lo, hi = (float(v) for v in np.nanpercentile(view, [2, 98])) if np.isfinite(view).any() else (0.0, 1.0)
@@ -173,7 +178,8 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         downloads.append(ctx.download("Export streams (GeoJSON)", name, ctx.json(name, streams), "application/geo+json"))
     # Kept for watershed clicks; accumulation as float32 is ample for finding the outlet, and the hillshade only feeds the image.
     shade = display_grid(t["_hillshade"])
-    save_npz(ctx.dir / "flow.npz", {"dir": f["dir"], "acc": f["acc"].astype(np.float32), "order": f["order"], "dem": t["_dem"], "slope": t["_slope"], "shade": shade, "cell": geo.cell_area})
+    save_npz(ctx.dir / "flow.npz", {"dir": f["dir"], "acc": f["acc"].astype(np.float32), "order": f["order"], "dem": t["_dem"], "slope": t["_slope"], "shade": shade, "cell": geo.cell_area,
+                                    **dinf_grids})
     flow_png(ctx.dir, "flow.png", t["_dem"], shade, f["acc"], f["order"])
     flow_url = ctx.url("flow.png")
     stats = {k: f[k] for k in ("width", "height", "thresholdM2", "maxOrder", "lengthByOrder", "raisedCells", "maxRaise")}

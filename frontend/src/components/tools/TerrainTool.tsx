@@ -74,6 +74,8 @@ interface Basin {
   layer: string;
   geojson: FeatureCollection | null;
   markdown: string;
+  /** With D∞ flow: the area whose flow reaches the outlet (Σ cell area × share) and the cells sending at least half. */
+  dinf?: { contributingM2: number; majorityM2: number; partialCells: number; geojson: FeatureCollection | null };
 }
 
 const jobIdOf = (artifactUrl: string) => artifactUrl.split('/')[3];
@@ -292,6 +294,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                 {flow.wetness?.summary && <Stat label="Median wetness index" value={fmt(flow.wetness.summary.median, 3)} />}
                 {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt(((basin.areaM2 / 1e4) * ACRES_PER_HA) / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
                 {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
+                {basin?.dinf && <Stat label="D∞ area reaching the outlet" value={units === 'imperial' ? `${fmt(((basin.dinf.contributingM2 / 1e4) * ACRES_PER_HA) / 640, 4)} mi²` : `${fmt(basin.dinf.contributingM2 / 1e6, 4)} km²`} />}
               </div>
             )}
             {flow && <Notes items={flow.notes ?? []} />}
@@ -314,6 +317,11 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
               {basin?.geojson && (
                 <button type="button" className="btn btn-small" onClick={() => downloadText(JSON.stringify(basin.geojson), `${base}_watershed.geojson`, 'application/geo+json')}>
                   Export watershed
+                </button>
+              )}
+              {basin?.dinf?.geojson && (
+                <button type="button" className="btn btn-small" onClick={() => downloadText(JSON.stringify(basin.dinf!.geojson), `${base}_watershed_dinf.geojson`, 'application/geo+json')}>
+                  Export D∞ watershed (≥ 50 % of flow)
                 </button>
               )}
               <Downloads idPrefix="terrain-streams" items={flow?.downloads} ids={['terrain-export-streams']} />

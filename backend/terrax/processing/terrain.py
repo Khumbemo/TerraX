@@ -309,13 +309,17 @@ TAN_FLOOR = 0.001  # slope floor for the wetness index: filled flats keep only a
 def _dinf(filled, dx, dy, area_r, order):
     """D∞ flow (Tarboton 1997): steepest of eight triangular facets, split between its two cells by angle.
 
-    Returns upslope area (m²), specific catchment area (m² per m of contour across the flow) and tan β of
-    the steepest facet. `order` lists cells by descending filled elevation, so donors come before receivers.
+    Returns upslope area (m²), specific catchment area (m² per m of contour across the flow), tan β of the
+    steepest facet, and each cell's facet (−1 for none) with the share p2 of its flow sent to the facet's diagonal
+    cell (the rest goes to its cardinal cell). `order` lists cells by descending filled elevation, so donors come
+    before receivers.
     """
     h, w = filled.shape
     acc = np.zeros((h, w), dtype=np.float64)
     tanb = np.zeros((h, w), dtype=np.float32)
     width = np.ones((h, w), dtype=np.float32)
+    facet = np.full((h, w), -1, dtype=np.int8)
+    share = np.zeros((h, w), dtype=np.float32)
     for r in range(h):
         for c in range(w):
             if not np.isnan(filled[r, c]):
@@ -353,6 +357,8 @@ def _dinf(filled, dx, dy, area_r, order):
         d2 = dy[r] if _F_R1[k] == 0 else dx[r]
         width[r, c] = d2 * math.cos(best_r)  # cell width across the flow
         p2 = best_r / best_rmax
+        facet[r, c] = k
+        share[r, c] = p2
         a = acc[r, c]
         if p2 < 1.0:
             acc[r + _F_R1[k], c + _F_C1[k]] += a * (1.0 - p2)
@@ -362,7 +368,71 @@ def _dinf(filled, dx, dy, area_r, order):
     for r in range(h):
         for c in range(w):
             sca[r, c] = np.nan if np.isnan(filled[r, c]) else acc[r, c] / width[r, c]
-    return acc, sca, tanb
+    return acc, sca, tanb, facet, share
+
+
+@njit(cache=True)
+def dinf_dependence(facet: np.ndarray, share: np.ndarray, orow: int, ocol: int) -> np.ndarray:
+    """D∞ upslope dependence on one outlet cell (TauDEM DinfUpDependence; Tarboton 1997): the fraction of each
+    cell's flow that reaches the outlet, 1 at the outlet and 0 outside its upslope area.
+
+    The cells upslope of the outlet are found first; then, receivers before donors (Kahn's order on the flow
+    graph, which descends strictly), each cell takes the shares of its two receivers' dependence. Σ area ×
+    dependence equals the D∞ upslope area at the outlet.
+    """
+    h, w = facet.shape
+    up = np.zeros((h, w), dtype=np.uint8)
+    up[orow, ocol] = 1
+    stack = [(orow, ocol)]
+    while len(stack) > 0:  # every cell that sends any flow into the set
+        r, c = stack.pop()
+        for d in range(8):
+            rr, cc = r + DR[d], c + DC[d]
+            if rr < 0 or cc < 0 or rr >= h or cc >= w or up[rr, cc]:
+                continue
+            k = facet[rr, cc]
+            if k < 0:
+                continue
+            p2 = share[rr, cc]
+            if (p2 < 1.0 and rr + _F_R1[k] == r and cc + _F_C1[k] == c) or (p2 > 0.0 and rr + _F_R2[k] == r and cc + _F_C2[k] == c):
+                up[rr, cc] = 1
+                stack.append((rr, cc))
+    # receivers inside the set still to be finished, per cell
+    pending = np.zeros((h, w), dtype=np.uint8)
+    for r in range(h):
+        for c in range(w):
+            if up[r, c] and not (r == orow and c == ocol):
+                k = facet[r, c]
+                p2 = share[r, c]
+                if p2 < 1.0 and up[r + _F_R1[k], c + _F_C1[k]]:
+                    pending[r, c] += 1
+                if p2 > 0.0 and up[r + _F_R2[k], c + _F_C2[k]]:
+                    pending[r, c] += 1
+    dep = np.zeros((h, w), dtype=np.float32)
+    acc = np.zeros((h, w), dtype=np.float64)  # dependence gathered from the receivers so far
+    acc[orow, ocol] = 1.0
+    ready = [(orow, ocol)]
+    while len(ready) > 0:
+        r, c = ready.pop()
+        dep[r, c] = acc[r, c]
+        for d in range(8):
+            rr, cc = r + DR[d], c + DC[d]
+            if rr < 0 or cc < 0 or rr >= h or cc >= w or not up[rr, cc] or (rr == orow and cc == ocol):
+                continue
+            k = facet[rr, cc]
+            p2 = share[rr, cc]
+            got = False
+            if p2 < 1.0 and rr + _F_R1[k] == r and cc + _F_C1[k] == c:
+                acc[rr, cc] += (1.0 - p2) * acc[r, c]
+                got = True
+            if p2 > 0.0 and rr + _F_R2[k] == r and cc + _F_C2[k] == c:
+                acc[rr, cc] += p2 * acc[r, c]
+                got = True
+            if got:
+                pending[rr, cc] -= 1
+                if pending[rr, cc] == 0:
+                    ready.append((rr, cc))
+    return dep
 
 
 def dinf_flow(filled: np.ndarray, geo: Ground) -> dict:
@@ -370,12 +440,12 @@ def dinf_flow(filled: np.ndarray, geo: Ground) -> dict:
     flat = np.where(np.isnan(filled), -np.inf, filled).ravel()
     order = np.argsort(-flat, kind="stable")
     order = order.astype(np.int32 if order.size < 2**31 else np.int64)
-    acc, sca, tanb = _dinf(np.ascontiguousarray(filled, dtype=np.float64), geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), order)
+    acc, sca, tanb, facet, share = _dinf(np.ascontiguousarray(filled, dtype=np.float64), geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), order)
     del order
     with np.errstate(invalid="ignore", divide="ignore"):
         twi = np.log(sca / np.maximum(tanb, TAN_FLOOR)).astype(np.float32)
     twi[np.isnan(filled)] = np.nan
-    return {"acc": acc, "sca": sca, "twi": twi, "tanb": tanb}
+    return {"acc": acc, "sca": sca, "twi": twi, "tanb": tanb, "facet": facet, "share": share}
 
 
 def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float, dinf: bool = False) -> dict:

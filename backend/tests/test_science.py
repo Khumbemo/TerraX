@@ -484,6 +484,48 @@ def test_dinf_specific_catchment_area_on_a_cone_and_planes():
         assert d["acc"][outlets].sum() == pytest.approx(n * n, rel=1e-9), deg
 
 
+def test_dinf_dependence_matches_brute_force_and_the_outlet_area():
+    """Upslope dependence: Σ area × share equals the D∞ area at the outlet, and each cell's share equals a unit of
+    flow pushed down the facet graph by brute force (Tarboton 1997; TauDEM DinfUpDependence)."""
+    from terrax.processing.rio import Ground
+    from terrax.processing.terrain import _F_C1, _F_C2, _F_R1, _F_R2, dinf_dependence, dinf_flow, fill_depressions
+
+    rng = np.random.default_rng(5)
+    n = 40
+    yy, xx = np.mgrid[0:n, 0:n].astype(float)
+    dem = 0.3 * xx + 0.2 * yy + 2 * np.sin(xx / 5) * np.cos(yy / 7) + rng.normal(0, 0.3, (n, n))
+    dem[5:8, 30:33] = np.nan
+    area = rng.uniform(0.9, 1.1, n)
+    g = Ground(area, np.sqrt(area), np.sqrt(area), "")
+    filled = fill_depressions(dem)[0]
+    d = dinf_flow(filled, g)
+    facet, share = d["facet"], d["share"]
+    for orow, ocol in ((n // 2, n // 2), (3, 3), (n - 2, 1)):
+        dep = dinf_dependence(facet, share, orow, ocol)
+        assert dep[orow, ocol] == 1 and dep.min() >= 0 and dep.max() <= 1 + 1e-6
+        assert float((dep.astype(np.float64) * area[:, None]).sum()) == pytest.approx(d["acc"][orow, ocol], rel=1e-6)
+        order = np.argsort(-np.where(np.isnan(filled), -np.inf, filled), axis=None, kind="stable")
+        for start in rng.choice(n * n, 60, replace=False):
+            mass = np.zeros(n * n)
+            mass[start] = 1.0
+            reached = 0.0
+            for idx in order:  # push the unit down, highest cells first
+                m = mass[idx]
+                if m == 0:
+                    continue
+                r, c = divmod(int(idx), n)
+                if (r, c) == (orow, ocol):
+                    reached += m
+                    continue
+                k = facet[r, c]
+                if k < 0:
+                    continue
+                p2 = float(share[r, c])
+                mass[(r + _F_R1[k]) * n + c + _F_C1[k]] += m * (1 - p2)
+                mass[(r + _F_R2[k]) * n + c + _F_C2[k]] += m * p2
+            assert dep.ravel()[start] == pytest.approx(reached, abs=1e-6)
+
+
 def _three_class_scene(tmp_path, n=240, seed=3):
     """A 4-band UTM scene: water (west), forest (centre), bare soil (east), with noise; and its true class map."""
     import rasterio

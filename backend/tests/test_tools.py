@@ -87,6 +87,15 @@ def test_terrain_hydrology_watershed_contours(client):
     assert w["q1"] < w["median"] < w["q3"] and client.get(d["wetness"]["layer"]).status_code == 200
     assert "Topographic wetness index" in d["markdown"] and h["wetness"] is None
     assert "D8 or D∞" in run_err(client, "hydrology", {"dem": dem}, {"method": "mfd"})
+    # A watershed click on the D∞ run adds the upslope dependence; the D8 basin itself is unchanged.
+    click = {"col": h["flow"]["width"] // 2, "row": h["flow"]["height"] - 5}
+    wd = client.post(f"/api/terrain/{d['layer'].split('/')[3]}/watershed", json=click).json()
+    assert wd["areaM2"] == ws["areaM2"] and "dinf" not in ws
+    dd = wd["dinf"]
+    # On this smooth surface D8 gathers flow into single-cell lines (46,800 m² at the outlet) where D∞ spreads it
+    # across the slope (23,460 m², its own upslope area at that cell: the identity is checked in test_science).
+    assert dd["contributingM2"] == pytest.approx(23460, rel=1e-3) and 0 < dd["majorityM2"] <= ws["areaM2"] and dd["geojson"]["features"]
+    assert "D∞ (Tarboton 1997)" in wd["markdown"]
 
 
 def test_landcover(client):

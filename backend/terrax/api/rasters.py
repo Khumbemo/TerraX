@@ -107,8 +107,24 @@ def watershed(job_id: str, req: OutletRequest) -> dict:
 
     mean_z = float(np.nanmean(z)) if np.isfinite(z).any() else None
     mean_s = float(np.nanmean(s)) if np.isfinite(s).any() else None
-    return {
+    out_d: dict = {
         "outlet": [int(outlet[1]), int(outlet[0])], "cells": cells, "areaM2": area, "meanElevation": mean_z, "meanSlope": mean_s,
         "markdown": watershed_line(area, mean_z, mean_s),
         "layer": f"/api/jobs/{job_id}/artifacts/{name}", "geojson": fc,
     }
+    if "facet" in d:  # a D∞ run: the share of each cell's flow that reaches the outlet
+        from ..processing.terrain import dinf_dependence
+
+        dep = dinf_dependence(d["facet"], d["share"], int(outlet[0]), int(outlet[1]))
+        contributing = float((dep.astype(np.float64) * cell[:, None]).sum())
+        major = dep >= 0.5
+        major_m2 = float(major.sum(axis=1) @ cell)
+        partial = int(((dep > 0) & (dep < 1)).sum())
+        mfc = None
+        if r.gw == w and r.gh == h and major.any():
+            m = patches_to_geojson(major.astype(np.int32), 1, np.array([0.0, major_m2]), r, lambda _i, a: {"name": "D∞ watershed (≥ 50 % of flow)", "area_ha": round(a / 100) / 100})
+            mfc = m["fc"] if m else None
+        out_d["dinf"] = {"contributingM2": contributing, "majorityM2": major_m2, "partialCells": partial, "geojson": mfc}
+        out_d["markdown"] += (f" D∞ (Tarboton 1997): {contributing / 1e6:.4g} km² of flow reaches the outlet (Σ cell area × share of its flow), "
+                              f"and {major_m2 / 1e6:.4g} km² sends at least half its flow there; {partial:,} cells split their flow between this outlet and others.")
+    return out_d
