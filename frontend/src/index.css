@@ -2649,3 +2649,20 @@ details[open] > summary {
     grid-row: 2;
   }
 }
+.admin-panel .tabular-view {
+  overflow-x: auto;
+}
+.admin-panel table {
+  width: 100%;
+}
+.admin-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.admin-email {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

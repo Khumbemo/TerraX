@@ -123,18 +123,33 @@ export default function AdminPanel() {
           <table id="admin-users">
             <thead>
               <tr>
-                <th>E-mail</th>
+                <th>Account</th>
                 <th>Role</th>
                 <th>Last sign-in</th>
                 <th className="num">Analyses</th>
                 <th className="num">Stored</th>
-                <th />
               </tr>
             </thead>
             <tbody>
               {users.map(u => (
                 <tr key={u.id} className={u.disabled ? 'muted' : undefined}>
-                  <td>{u.email}{u.disabled ? ' (disabled)' : ''}</td>
+                  <td className="admin-user">
+                    <div className="admin-email">
+                      {u.email}
+                      {u.disabled ? ' (disabled)' : ''}
+                    </div>
+                    <div className="admin-actions">
+                      <button type="button" className="btn btn-small" onClick={() => patch(u, { disabled: !u.disabled })}>
+                        {u.disabled ? 'Enable' : 'Disable'}
+                      </button>
+                      <button type="button" className="btn btn-small" onClick={() => resetPassword(u)}>
+                        Password…
+                      </button>
+                      <button type="button" className="btn btn-small btn-danger" onClick={() => remove(u)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                   <td>
                     <select value={u.role} aria-label={`Role of ${u.email}`} onChange={e => patch(u, { role: e.target.value })}>
                       <option value="user">user</option>
@@ -144,17 +159,6 @@ export default function AdminPanel() {
                   <td>{u.lastLogin ? when(u.lastLogin) : 'never'}</td>
                   <td className="num">{u.jobs}</td>
                   <td className="num">{mb(u.usedBytes)}</td>
-                  <td className="button-row">
-                    <button type="button" className="btn btn-small" onClick={() => patch(u, { disabled: !u.disabled })}>
-                      {u.disabled ? 'Enable' : 'Disable'}
-                    </button>
-                    <button type="button" className="btn btn-small" onClick={() => resetPassword(u)}>
-                      Password…
-                    </button>
-                    <button type="button" className="btn btn-small btn-danger" onClick={() => remove(u)}>
-                      Delete
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>
