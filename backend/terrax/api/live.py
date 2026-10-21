@@ -106,3 +106,21 @@ def sentinel_search(req: SearchRequest) -> dict[str, Any]:
     except ValueError as err:
         raise HTTPException(400, str(err)) from err
     return {"items": [i.public() for i in items]}
+
+
+class S1SearchRequest(BaseModel):
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    start: str
+    end: str
+    orbit: str | None = None
+    limit: int = Field(12, ge=1, le=50)
+
+
+@router.post("/sentinel1/search")
+def sentinel1_search(req: S1SearchRequest) -> dict[str, Any]:
+    try:
+        body = live.s1_search_body(req.bbox, req.start, req.end, req.orbit, req.limit)
+        items = live.parse_s1_items(live.fetch_json(f"{live.PC_STAC}/search", method="POST", body=body))
+    except ValueError as err:
+        raise HTTPException(400, str(err)) from err
+    return {"items": [i.public() for i in items]}

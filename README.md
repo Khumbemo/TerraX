@@ -25,7 +25,7 @@ The browser uploads a file once and gets an id. To analyse it, the browser start
 | **Weather & climate** | CSV, TSV or XLSX series; Open-Meteo ERA5 or NASA POWER fetched by the server | Mann–Kendall and Theil–Sen, seasonal cycle, Seasonal Kendall, anomalies, SPI-1/3/6/12, IMD rainfall classes |
 | **Satellite imagery** | Multiband GeoTIFF; Sentinel-2 L2A windows from Earth Search; several dated images | Composites, NDVI, EVI, SAVI, NDWI, NDMI, NBR, NDBI, SCL/QA_PIXEL cloud masks, pixel inspector, multi-date trend |
 | **Land cover** | Multiband GeoTIFF (+ training shapes) | k-means (scikit-learn, k-means++) clusters ordered by NDVI, or a random forest trained on labelled polygons or points and cross-validated by shape; a stratified validation sample and accuracy and area estimates with 95 % CIs (Olofsson et al. 2014) |
-| **Radar (Sentinel-1)** | VV/VH backscatter GeoTIFFs (dB or linear), one date or two from the same relative orbit | Lee (1980) speckle filter in linear power, VV, VH, VH/VV and dual-pol RVI; VH log-ratio change map (±3 dB) with areas and a GeoTIFF export |
+| **Radar (Sentinel-1)** | VV/VH backscatter GeoTIFFs (dB or linear), one date or two from the same relative orbit; or search Sentinel-1 RTC (γ⁰, 10 m) on the Microsoft Planetary Computer and read the window over the area | Lee (1980) speckle filter in linear power, VV, VH, VH/VV and dual-pol RVI; VH log-ratio change map (±3 dB) with areas and a GeoTIFF export |
 | **Canopy height** | LAS/LAZ point cloud (ground classified), DSM + DTM, or a CHM GeoTIFF | Canopy height model (first returns minus TIN-filled ground), cover at 2 m and the FAO 5 m height, height classes, tree tops by local maxima with Popescu & Wynne (2004) crown windows; CHM GeoTIFF and tree-top GeoJSON |
 | **Terrain** | DEM GeoTIFF | Slope and aspect (Horn 1981), hillshade, hypsometric integral, Priority-Flood + D8 flow, Strahler streams, watersheds, contours; optional D∞ flow (Tarboton 1997) with the topographic wetness index |
 | **Space & aerial photos** | JPG, PNG, WebP | Vegetation cover (ExG + Otsu), VARI, EXIF position on the map, comparison of two photos |
@@ -126,7 +126,7 @@ Measured on 4 cores, against the previous whole-grid code at full resolution:
 
 Results were identical in each case. A 100 MP DEM takes about 200 s and 6.3 GB for hydrology.
 
-Radar runs in strips like the optical tools, with halo rows for the speckle filter and streaming statistics (quartiles from 0.01 dB bins, within 0.005 dB). Canopy height reads point clouds in chunks of 5 million points onto a grid of at most 100 million cells, and keeps the CHM in memory for tree tops (rasters use `TERRAX_DEM_PIXELS`).
+Radar runs in strips like the optical tools, with halo rows for the speckle filter and streaming statistics (exact quartiles: 0.01 dB bins locate them, and a second pass keeps only those bins' values). Canopy height reads point clouds in chunks of 5 million points onto a grid of at most 100 million cells, and keeps the CHM in memory for tree tops (rasters use `TERRAX_DEM_PIXELS`).
 
 Terrain and hydrology have their own budget, `TERRAX_DEM_PIXELS` (default 25 MP, for example 5,000 × 5,000), because depression filling and flow routing need the whole DEM at once, about 100 bytes per pixel at peak. Slope, aspect and hillshade run in strips with a one-row halo. On the map, hydrology draws the highest stream orders that fit 250,000 vertices; the flow layer shows every channel cell, and the streams export holds every line.
 

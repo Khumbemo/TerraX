@@ -219,3 +219,44 @@ def test_canopy_from_point_cloud_and_rasters(client, tmp_path):
     again = run(client, "canopy", {"chm": fid}, {"threshold": 2, "minTree": 5})
     assert again["canopy"]["trees"]["count"] == 25 and again["canopy"]["cover"] == pytest.approx(c["cover"], abs=1e-9)
     assert "point cloud, a canopy height model" in run_err(client, "canopy", {}, {})
+
+
+def test_sentinel1_search_load_and_radar_change(client, monkeypatch, tmp_path):
+    """Search (mocked catalogue), read two dates through the sentinel1 tool (local files), then radar change on them."""
+    import numpy as np
+    import rasterio
+    from rasterio.transform import from_origin
+
+    from terrax.services import live
+
+    E0, N0 = 600000, 2850000
+    rng = np.random.default_rng(2)
+
+    def mk(name, vh_level, clear):
+        p = tmp_path / f"{name}.tif"
+        vh = rng.gamma(4.4, vh_level / 4.4, (200, 200)).astype(np.float32)  # speckle, ENL 4.4
+        if clear:
+            vh[50:100, 50:100] *= 0.2  # a 7 dB drop
+        with rasterio.open(p, "w", driver="GTiff", width=200, height=200, count=1, dtype="float32", crs="EPSG:32646", transform=from_origin(E0, N0, 10, 10)) as d:
+            d.write(vh * 5 if name.startswith("vv") else vh, 1)
+        return str(p)
+
+    href = "https://sentinel1euwestrtc.blob.core.windows.net/rtc/{}.tiff"
+    feats = [{"id": f"S1A_{d}", "properties": {"datetime": f"{d}T23:41:00Z", "sat:orbit_state": "descending", "sat:relative_orbit": 77, "proj:epsg": 32646},
+              "assets": {"vv": {"href": href.format(f"vv{d}")}, "vh": {"href": href.format(f"vh{d}")}}} for d in ("2024-01-03", "2024-03-03")]
+    local = {href.format(f"{b}{d}"): mk(f"{b}{d}", 0.03, d == "2024-03-03") for d in ("2024-01-03", "2024-03-03") for b in ("vv", "vh")}
+    calls = []
+    monkeypatch.setattr(live, "fetch_json", lambda url, **kw: calls.append(url) or ({"token": "sig=x"} if "sas" in url else {"features": feats}))
+    monkeypatch.setattr(live, "_sign", lambda h, token: local[h])
+    found = client.post("/api/live/sentinel1/search", json={"bbox": [94.0, 25.7, 94.02, 25.72], "start": "2024-01-01", "end": "2024-03-31", "orbit": "descending"}).json()["items"]
+    assert [i["id"] for i in found] == ["S1A_2024-01-03", "S1A_2024-03-03"] and calls[0].endswith("/api/stac/v1/search")
+    from pyproj import Transformer
+
+    (w, e), (s, n) = Transformer.from_crs(32646, 4326, always_xy=True).transform([E0 + 100, E0 + 1900], [N0 - 1900, N0 - 100])
+    first = run(client, "sentinel1", {}, {"item": found[0], "bbox": [w, s, e, n]})
+    second = run(client, "sentinel1", {"match": first["file"]["id"]}, {"item": found[1], "bbox": [w, s, e, n], "matchOrbit": 77})
+    assert first["file"]["meta"]["bandNames"] == ["VV", "VH"] and any("first image's grid" in x for x in second["notes"])
+    res = run(client, "radar", {"before": first["file"]["id"], "after": second["file"]["id"]}, {"vv": 0, "vh": 1})
+    assert res["radar"]["dates"][0]["scale"] == "linear" and res["radar"]["change"]["ha"]["1"] == pytest.approx(25, rel=0.2)  # 50 × 50 px at 10 m
+    other = run_err(client, "sentinel1", {}, {"item": {**found[0], "assets": {"vv": {"href": "https://evil.example.com/a.tif"}, "vh": {"href": "https://evil.example.com/b.tif"}}}, "bbox": [w, s, e, n]})
+    assert "Planetary Computer's storage" in other

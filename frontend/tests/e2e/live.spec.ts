@@ -100,3 +100,49 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
   await expect(page.locator('.report-card')).toContainText('Quality mask from band 5');
   expect(errors).toEqual([]);
 });
+
+test('radar: two searched Sentinel-1 dates give a change map', async ({ page, request }) => {
+  const errors = await start(page);
+  // Two VV/VH windows as the server writes them (γ⁰, linear power), the second with a 7 dB VH drop over 50 × 50 px.
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-s1-'));
+  const paths = ['a', 'b'].map(n => join(dir, `S1A_${n}.tif`));
+  execFileSync('python3', ['-c', `
+import numpy as np, rasterio
+from rasterio.transform import from_origin
+rng = np.random.default_rng(3)
+for k, path in enumerate(${JSON.stringify(paths)}):
+    vh = rng.gamma(4.4, 0.03 / 4.4, (200, 200)).astype(np.float32)
+    if k:
+        vh[50:100, 50:100] *= 0.2
+    with rasterio.open(path, 'w', driver='GTiff', width=200, height=200, count=2, dtype='float32', crs='EPSG:32646', transform=from_origin(609000, 2842000, 10, 10), nodata=float('nan')) as d:
+        d.write(vh * 5, 1); d.write(vh, 2); d.set_band_description(1, 'VV'); d.set_band_description(2, 'VH')
+`]);
+  const files = [await upload(request, 'S1A_a.tif', readFileSync(paths[0]), 'image/tiff'), await upload(request, 'S1A_b.tif', readFileSync(paths[1]), 'image/tiff')];
+  const items = ['2024-03-03', '2024-01-03'].map(d => ({ id: `S1A_IW_${d}`, datetime: `${d}T23:41:00Z`, orbitState: 'descending', relativeOrbit: 77, platform: 'SENTINEL-1A', epsg: 32646, assets: {} }));
+  await page.route('**/api/live/sentinel1/search', async route => {
+    expect(JSON.parse(route.request().postData() ?? '{}').orbit).toBe('descending');
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items }) });
+  });
+  const loads: { inputs: Record<string, string> }[] = [];
+  await page.route('**/api/jobs', async route => {
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    if (route.request().method() !== 'POST' || body.tool !== 'sentinel1') return route.fallback();
+    loads.push(body);
+    const file = body.inputs.match ? files[1] : files[0];
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: '0'.repeat(32), tool: 'sentinel1', state: 'done', progress: 1, message: 'Done', result: { file, notes: ['Sentinel-1 RTC scene from the Microsoft Planetary Computer.'] } }) });
+  });
+  await openTool(page, 'Radar (Sentinel-1)');
+  await page.locator('summary', { hasText: 'Search Sentinel-1 scenes' }).click();
+  await page.selectOption('#s1-orbit', 'descending');
+  await page.click('#s1-search');
+  await page.locator('tr', { hasText: 'S1A_IW_2024-01-03' }).locator('button').click();
+  await expect(page.locator('tr', { hasText: 'S1A_IW_2024-03-03' }).locator('button')).toHaveText('Load as second date');
+  await page.locator('tr', { hasText: 'S1A_IW_2024-03-03' }).locator('button').click();
+  await expect(page.locator('#radar-run')).toHaveText('Analyse change');
+  expect(loads[0].inputs.match).toBeUndefined();
+  expect(loads[1].inputs.match).toBe(files[0].id);
+  await page.click('#radar-run');
+  // 50 × 50 px at 10 m = 25 ha decrease.
+  await expect(page.locator('.stat', { hasText: 'VH decrease' })).toContainText(/2[3-7]\.\d+ ha/);
+  expect(errors).toEqual([]);
+});
