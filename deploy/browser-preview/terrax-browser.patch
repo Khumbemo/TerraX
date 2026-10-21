@@ -219,6 +219,78 @@ index 8ea3d0c..6ad1f23 100644
                            <li key={n}>{n}</li>
                          ))}
                        </ul>
+diff --git a/src/components/MapPanel.tsx b/src/components/MapPanel.tsx
+index d468cd6..b5883c4 100644
+--- a/src/components/MapPanel.tsx
++++ b/src/components/MapPanel.tsx
+@@ -10,6 +10,7 @@ import 'leaflet/dist/leaflet.css';
+ import type { LatLngBounds } from '../lib/geo';
+ import { usePrefs } from '../lib/prefs';
+ import type { MapImage } from '../lib/tools/registry';
++import { renderTile } from '../lib/overlay';
+ import type { Boundary } from '../lib/zonal';
+ 
+ /** Polygon drawing/editing: vertices as [lat, lon]. */
+@@ -37,6 +38,50 @@ interface Basemap {
+   borders: MultiLineString;
+ }
+ 
++/**
++ * Full-resolution tiles of a result grid, drawn in this tab (lib/overlay renderTile) and shown from `minZoom`, where
++ * the 1,024 px picture runs out of detail; Leaflet scales them beyond `maxNativeZoom`.
++ */
++function GridTiles({ tiles, opacity }: { tiles: NonNullable<MapImage['tiles']>; opacity: number }) {
++  const map = useMap();
++  useEffect(() => {
++    const Layer = L.GridLayer.extend({
++      createTile(coords: L.Coords) {
++        const canvas = document.createElement('canvas');
++        canvas.width = canvas.height = 256;
++        canvas.dataset.result = 'tile';
++        const rgba = renderTile(tiles.id, coords.z, coords.x, coords.y);
++        if (rgba) canvas.getContext('2d')?.putImageData(new ImageData(rgba, 256, 256), 0, 0);
++        return canvas;
++      },
++    }) as unknown as new (options: L.GridLayerOptions) => L.GridLayer;
++    const layer = new Layer({ minZoom: tiles.minZoom, maxNativeZoom: tiles.maxNativeZoom, maxZoom: 24, opacity, className: 'pixelated-overlay', zIndex: 300 });
++    layer.addTo(map);
++    return () => void layer.remove();
++  }, [map, tiles, opacity]);
++  return null;
++}
++
++/** The map's zoom, kept in step. */
++function useZoom(): number {
++  const map = useMap();
++  const [zoom, setZoom] = useState(() => map.getZoom());
++  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
++  return zoom;
++}
++
++/** The result picture, handing over to its full-resolution tiles (when it has them) once zoomed in far enough. */
++function ResultImage({ image, opacity }: { image: MapImage; opacity: number }) {
++  const zoom = useZoom();
++  const tiled = image.tiles && zoom >= image.tiles.minZoom;
++  return (
++    <>
++      {!tiled && <ImageOverlay key={image.url.length + image.label} url={image.url} bounds={image.bounds} opacity={opacity} className="pixelated-overlay" />}
++      {image.tiles && <GridTiles tiles={image.tiles} opacity={opacity} />}
++    </>
++  );
++}
++
+ // Natural Earth 1:50m countries (public domain), bundled and loaded on
+ // demand. It sits under the online tiles, so the map is still readable
+ // offline, in sandboxed previews, or whenever the tile server fails.
+@@ -230,7 +275,7 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
+         {mapSettings.overlays.map((o, i) => (
+           <MapLayer key={`ov-${o.id}`} def={mapDef(o.id)} settings={mapSettings} opacity={o.opacity} zIndex={10 + i} dark={!light} onStatus={report(o.id)} />
+         ))}
+-        {image && vis.image && <ImageOverlay key={image.url.length + image.label} url={image.url} bounds={image.bounds} opacity={vis.opacity} className="pixelated-overlay" />}
++        {image && vis.image && <ResultImage image={image} opacity={vis.opacity} />}
+         {boundary && vis.boundary && (
+           <GeoJSON key={`b-${layerKey(boundary.geojson)}`} data={boundary.geojson} style={{ color: '#f5b83d', weight: 2, dashArray: '6 4', fill: false }} interactive={false} />
+         )}
 diff --git a/src/components/RasterPanel.tsx b/src/components/RasterPanel.tsx
 index a25ecb1..c2c22a2 100644
 --- a/src/components/RasterPanel.tsx
@@ -233,10 +305,62 @@ index a25ecb1..c2c22a2 100644
            ))}
          </ul>
 diff --git a/src/components/SettingsModal.tsx b/src/components/SettingsModal.tsx
-index 9ec3ced..0c004d7 100644
+index 9ec3ced..50ee035 100644
 --- a/src/components/SettingsModal.tsx
 +++ b/src/components/SettingsModal.tsx
-@@ -294,7 +294,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
+@@ -8,6 +8,7 @@ import type { Units } from '../lib/units';
+ import type { Lang } from '../lib/i18n';
+ import GEEGuidance from './GEEGuidance';
+ import MapSettingsTab from './MapSettingsTab';
++import { ANALYSIS_MEGAPIXELS, analysisPixelLimit, setAnalysisMegapixels } from '../lib/rasterio';
+ 
+ export interface Target {
+   lat: number;
+@@ -45,6 +46,7 @@ const AI_MODE_TEXT: Record<AiMode, string> = {
+ export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose, onStartTour }: Props) {
+   const notify = useToast();
+   const prefs = usePrefs();
++  const [resolution, setResolution] = useState(() => analysisPixelLimit() / 1e6);
+   const [tab, setTab] = useState<Tab>(initialTab);
+   const [mode, setMode] = useState<AiMode | null>(null);
+   const [keyInput, setKeyInput] = useState('');
+@@ -188,6 +190,24 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
+                         <option value="imperial">{prefs.t('prefs.imperial')}</option>
+                       </select>
+                     </label>
++                    <label className="inline-select" title="Rasters with more pixels are resampled to this size for analysis. Higher costs memory and time.">
++                      <span>Analysis resolution</span>
++                      <select
++                        id="pref-resolution"
++                        value={String(resolution)}
++                        onChange={e => {
++                          const mp = Number(e.target.value);
++                          setAnalysisMegapixels(mp);
++                          setResolution(mp);
++                        }}
++                      >
++                        {ANALYSIS_MEGAPIXELS.map(mp => (
++                          <option key={mp} value={mp}>
++                            {mp} MP{mp === 4 ? ' (fast)' : mp === 36 ? ' (desktop, 8 GB+)' : ''}
++                          </option>
++                        ))}
++                      </select>
++                    </label>
+                     <label className="inline-select">
+                       <span>{prefs.t('prefs.language')}</span>
+                       <select id="pref-lang" value={prefs.lang} onChange={e => prefs.setLang(e.target.value as Lang)}>
+@@ -202,6 +222,10 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
+                     )}
+                   </div>
+                   <p className="field-hint">{prefs.t('prefs.unitsNote')}</p>
++                  <p className="field-hint">
++                    Analysis resolution applies to files opened after the change. Everything runs in this browser tab: a 36 MP grid needs about 150 MB for each band read (land cover with four
++                    bands, about 0.6 GB), so use it on a desktop; pictures wider than 1,024 px are drawn on the map as full-resolution tiles when zoomed in.
++                  </p>
+                   <p className="field-hint">{prefs.t('prefs.bgNote')}</p>
+                 </section>
+                 <section>
+@@ -294,7 +318,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                  </p>
                  <h4>Land survey</h4>
                  <p>
@@ -260,10 +384,10 @@ index 37bdcdf..5e8f84b 100644
            </ul>
 diff --git a/src/components/tools/CanopyTool.tsx b/src/components/tools/CanopyTool.tsx
 new file mode 100644
-index 0000000..0257dae
+index 0000000..ebdfa14
 --- /dev/null
 +++ b/src/components/tools/CanopyTool.tsx
-@@ -0,0 +1,283 @@
+@@ -0,0 +1,286 @@
 +import { useState } from 'react';
 +import type { Feature, FeatureCollection, Point } from 'geojson';
 +import { downloadText } from '../../lib/download';
@@ -332,6 +456,7 @@ index 0000000..0257dae
 +      const notes: string[] = [];
 +      let toLonLat: ((col: number, row: number) => [number, number]) | null = null;
 +      let bounds: ReturnType<typeof bboxToLatLng> = null;
++      let gridMeta: GeoMeta | null = null; // places the full-resolution map tiles
 +      if (src === 'cloud') {
 +        const f = fs.cloud;
 +        if (!f) throw new Error('Add a LAS or LAZ point cloud first.');
@@ -348,6 +473,7 @@ index 0000000..0257dae
 +        if (un) {
 +          toLonLat = (c, r) => un(g.x0 + (c + 0.5) * g.cellUnits, g.y1 - (r + 0.5) * g.cellUnits);
 +          bounds = bboxToLatLng(bbox, g.epsg);
++          gridMeta = { ...meta, bbox };
 +        } else if (g.epsg) notes.push(`EPSG:${g.epsg} cannot be placed on the map in the browser version (supported: WGS84, Web Mercator, WGS84 UTM); the measurements are unaffected.`);
 +      } else {
 +        const open = async (f: File | undefined, what: string) => {
@@ -385,6 +511,7 @@ index 0000000..0257dae
 +          toLonLat = (c, r) => un(bb[0] + (c + 0.5) * cw, bb[3] - (r + 0.5) * ch);
 +        }
 +        bounds = ref.meta.latLngBounds;
++        gridMeta = ref.meta;
 +      }
 +      const res = analyzeCanopy(chm, w, h, cellArea, cellM, thr, mt);
 +      notes.push(
@@ -405,7 +532,7 @@ index 0000000..0257dae
 +        tool: 'canopy',
 +        name,
 +        markdown: canopyMarkdown(name, sourceText, res, notes),
-+        map: { bounds, geojson: tallest, image: bounds ? mapImage(chmRgba(chm, hi), w, h, bounds, 'Canopy height', []) : null },
++        map: { bounds, geojson: tallest, image: bounds ? mapImage(chmRgba(chm, hi), w, h, bounds, 'Canopy height', [], gridMeta) : null },
 +      });
 +    } catch (err) {
 +      fail(err instanceof Error ? err.message : 'The canopy analysis failed.');
@@ -561,9 +688,18 @@ index 9f9f658..b29a292 100644
              ))}
            </ul>
 diff --git a/src/components/tools/ForestLossTool.tsx b/src/components/tools/ForestLossTool.tsx
-index 3012fba..3cdec4b 100644
+index 3012fba..bce8b7d 100644
 --- a/src/components/tools/ForestLossTool.tsx
 +++ b/src/components/tools/ForestLossTool.tsx
+@@ -156,7 +156,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
+         markdown: forestMarkdown(r, names.map((n, i) => `${i === 0 ? MODE_TEXT[m].a : MODE_TEXT[m].b.replace(' (optional)', '')}: ${n}`)),
+         map: {
+           bounds: sa.raster.meta.latLngBounds,
+-          image: mapImage(rgba, r.width, r.height, sa.raster.meta.latLngBounds, m === 'burn' ? 'Burn severity' : 'Forest change', classes.map(c => ({ color: `rgb(${c.color.join(',')})`, label: c.label }))),
++          image: mapImage(rgba, r.width, r.height, sa.raster.meta.latLngBounds, m === 'burn' ? 'Burn severity' : 'Forest change', classes.map(c => ({ color: `rgb(${c.color.join(',')})`, label: c.label })), sa.raster.meta),
+         },
+       });
+     } catch (err) {
 @@ -352,7 +352,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
            )}
  
@@ -574,7 +710,7 @@ index 3012fba..3cdec4b 100644
              ))}
            </ul>
 diff --git a/src/components/tools/LandCoverTool.tsx b/src/components/tools/LandCoverTool.tsx
-index 17f7b95..8858311 100644
+index 17f7b95..2c4e57f 100644
 --- a/src/components/tools/LandCoverTool.tsx
 +++ b/src/components/tools/LandCoverTool.tsx
 @@ -6,7 +6,12 @@ import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
@@ -690,7 +826,7 @@ index 17f7b95..8858311 100644
        map: {
          bounds: raster.meta.latLngBounds,
 -        image: mapImage(image, result.width, result.height, raster.meta.latLngBounds, 'Land-cover clusters', result.stats.map((c, i) => ({ color: PALETTE[c.id - 1], label: labels[i] || `Class ${c.id}` }))),
-+        image: mapImage(image, result.width, result.height, raster.meta.latLngBounds, result.method === 'rf' ? 'Land-cover classes' : 'Land-cover clusters', result.stats.map((c, i) => ({ color: PALETTE[c.id - 1], label: labels[i] || `Class ${c.id}` }))),
++        image: mapImage(image, result.width, result.height, raster.meta.latLngBounds, result.method === 'rf' ? 'Land-cover classes' : 'Land-cover clusters', result.stats.map((c, i) => ({ color: PALETTE[c.id - 1], label: labels[i] || `Class ${c.id}` })), raster.meta),
        },
      });
      // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -965,7 +1101,7 @@ index 5e875cf..083a9cf 100644
            </ul>
 diff --git a/src/components/tools/RadarTool.tsx b/src/components/tools/RadarTool.tsx
 new file mode 100644
-index 0000000..3a9b46f
+index 0000000..5258eca
 --- /dev/null
 +++ b/src/components/tools/RadarTool.tsx
 @@ -0,0 +1,224 @@
@@ -1062,7 +1198,7 @@ index 0000000..3a9b46f
 +        markdown: radarMarkdown(r, areas, notes),
 +        map: {
 +          bounds: a.meta.latLngBounds,
-+          image: mapImage(rgba, r.width, r.height, a.meta.latLngBounds, r.change ? 'Backscatter change (VH)' : 'Sentinel-1 false colour', r.change ? CHANGE_CLASSES.filter(c => c.id !== 2).map(c => ({ color: `rgb(${c.color.join(',')})`, label: c.label })) : []),
++          image: mapImage(rgba, r.width, r.height, a.meta.latLngBounds, r.change ? 'Backscatter change (VH)' : 'Sentinel-1 false colour', r.change ? CHANGE_CLASSES.filter(c => c.id !== 2).map(c => ({ color: `rgb(${c.color.join(',')})`, label: c.label })) : [], a.meta),
 +        },
 +      });
 +    } catch (err) {
@@ -1207,7 +1343,7 @@ index ebf399e..dcbe20e 100644
              ))}
            </ul>
 diff --git a/src/components/tools/TerrainTool.tsx b/src/components/tools/TerrainTool.tsx
-index 1963e1f..43c0c2d 100644
+index 1963e1f..0b199c3 100644
 --- a/src/components/tools/TerrainTool.tsx
 +++ b/src/components/tools/TerrainTool.tsx
 @@ -3,7 +3,7 @@ import { downloadText, safeFilename } from '../../lib/download';
@@ -1215,7 +1351,7 @@ index 1963e1f..43c0c2d 100644
  import { groundGeometry } from '../../lib/rasterio';
  import { flowRoutingAsync } from '../../lib/compute';
 -import { contoursGeoJson, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
-+import { contoursGeoJson, mapStreams, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
++import { contoursGeoJson, dinfDependence, mapStreams, niceInterval, snapOutlet, streamLines, watershed, type FlowResult } from '../../lib/tools/hydrology';
  import { makeBoundary } from '../../lib/vector';
  import { viridis } from '../../lib/colormap';
  import { mapImage } from '../../lib/overlay';
@@ -1246,7 +1382,16 @@ index 1963e1f..43c0c2d 100644
  
  interface Basin {
    outlet: number;
-@@ -55,7 +73,9 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -35,6 +53,8 @@ interface Basin {
+   areaM2: number;
+   meanElevation: number;
+   meanSlope: number;
++  /** With D∞: area whose flow reaches the outlet (Σ cell area × share), cells sending at least half, and the share grid. */
++  dinf?: { contributingM2: number; majorityM2: number; partialCells: number; dep: Float32Array };
+ }
+ 
+ function hexRgb(hex: string): [number, number, number] {
+@@ -55,7 +75,9 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
    const [result, setResult] = useState<TerrainResult | null>(null);
    const [layer, setLayer] = useState<Layer>('hillshade');
    const [thresholdKm2, setThresholdKm2] = useState('0.5');
@@ -1256,7 +1401,7 @@ index 1963e1f..43c0c2d 100644
    const [basin, setBasin] = useState<Basin | null>(null);
    const [interval, setInterval_] = useState('');
    const [showContours, setShowContours] = useState(false);
-@@ -77,7 +97,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -77,12 +99,12 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
        setBasin(null);
        setShowContours(false);
        setInterval_(String(niceInterval(t.relief)));
@@ -1265,7 +1410,20 @@ index 1963e1f..43c0c2d 100644
        publish({
          tool: 'terrain',
          name,
-@@ -125,6 +145,12 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+         markdown: terrainMarkdown(t, r.meta) + (r.meta.warnings.length ? `\n\n## Data quality\n\n${r.meta.warnings.map(w => `- ${w}`).join('\n')}` : ''),
+-        map: { bounds: r.meta.latLngBounds, image: mapImage(slopeRgba(t), t.width, t.height, r.meta.latLngBounds, 'Slope classes', SLOPE_CLASSES.map(c => ({ color: c.color, label: c.label }))) },
++        map: { bounds: r.meta.latLngBounds, image: mapImage(slopeRgba(t), t.width, t.height, r.meta.latLngBounds, 'Slope classes', SLOPE_CLASSES.map(c => ({ color: c.color, label: c.label })), r.meta) },
+       });
+     } catch (err) {
+       notify(err instanceof Error ? err.message : `Could not read ${file instanceof File ? file.name : file.meta.filename}.`, 'error');
+@@ -122,9 +144,19 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+       `- Depression filling raised ${f.raisedCells.toLocaleString()} cells by more than 1 mm (largest ${fmt(f.maxRaise, 3)} m).`,
+     ];
+     if (b) lines.push(`- Watershed: ${fmt(b.areaM2 / 1e6, 4)} km² (${fmt(b.areaM2 / 1e4, 4)} ha), mean elevation ${fmt(b.meanElevation)} m, mean slope ${fmt(b.meanSlope, 3)}°.`);
++    if (b?.dinf)
++      lines.push(
++        `- D∞ (Tarboton 1997): ${fmt(b.dinf.contributingM2 / 1e6, 4)} km² of flow reaches the outlet (Σ cell area × share of its flow), and ${fmt(b.dinf.majorityM2 / 1e6, 4)} km² sends at least half its flow there; ${b.dinf.partialCells.toLocaleString()} cells split their flow between this outlet and others (upslope dependence, as TauDEM’s DinfUpDependence).`,
++      );
      lines.push(
        '- Method: Priority-Flood depression filling with an ε gradient (Barnes et al. 2014), D8 steepest-descent flow (O’Callaghan & Mark 1984), Strahler (1957) stream order. The threshold sets where channels start and is a choice, not a measurement; D8 cannot split flow, so it draws parallel lines on planar slopes.',
      );
@@ -1273,12 +1431,12 @@ index 1963e1f..43c0c2d 100644
 +    if (w)
 +      lines.push(
 +        `- Topographic wetness index ln(a / tan β): median ${fmt(w.median, 3)} (quartiles ${fmt(w.q1, 3)}–${fmt(w.q3, 3)}, range ${fmt(w.min, 3)} to ${fmt(w.max, 3)}).`,
-+        '- Wetness method: D∞ flow (Tarboton 1997) splits each cell’s flow between the two cells of its steepest triangular facet, so it follows divergent and planar slopes that D8 cannot. a is the upslope area per metre of contour across the flow (a plane gives its exact upslope length), tan β the steepest facet slope, floored at 0.001 on filled flats (Beven & Kirkby 1979; Sørensen et al. 2006). Streams, Strahler orders and watersheds still use D8.',
++        '- Wetness method: D∞ flow (Tarboton 1997) splits each cell’s flow between the two cells of its steepest triangular facet, so it follows divergent and planar slopes that D8 cannot. a is the upslope area per metre of contour across the flow (a plane gives its exact upslope length), tan β the steepest facet slope, floored at 0.001 on filled flats (Beven & Kirkby 1979; Sørensen et al. 2006). Streams and Strahler orders use D8, as in TauDEM, because D∞ spreads flow and gives no single channel line; clicked watersheds add the D∞ upslope dependence.',
 +      );
      return lines.join('\n');
    };
  
-@@ -133,8 +159,10 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -133,8 +165,10 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
      const base = baseOutput.current;
      if (!base || !raster || !result) return;
      const contours = showContours ? contoursGeoJson(demGrid(result), raster.meta, Number(interval)) : null;
@@ -1291,7 +1449,7 @@ index 1963e1f..43c0c2d 100644
      onOutput({
        ...base,
        markdown: base.markdown + hydroMarkdown(flow, basin),
-@@ -156,7 +184,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -156,7 +190,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
      }
      setFlowBusy(true);
      try {
@@ -1300,7 +1458,38 @@ index 1963e1f..43c0c2d 100644
        setBasin(null);
        setLayer('flow');
      } catch (err) {
-@@ -197,6 +225,8 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -185,18 +219,35 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+         sN++;
+       }
+     }
+-    setBasin({ outlet, mask, cells, areaM2: area, meanElevation: zSum / zN, meanSlope: sN ? sSum / sN : NaN });
++    let dinf: Basin['dinf'];
++    if (flow.dinfFacet && flow.dinfShare) {
++      const dep = dinfDependence(flow.dinfFacet, flow.dinfShare, flow.width, flow.height, outlet);
++      let contributingM2 = 0, majorityM2 = 0, partialCells = 0;
++      for (let k = 0; k < dep.length; k++) {
++        if (!dep[k]) continue;
++        const a = geo.cellArea(Math.floor(k / result.width));
++        contributingM2 += a * dep[k];
++        if (dep[k] >= 0.5) majorityM2 += a;
++        if (dep[k] < 1) partialCells++;
++      }
++      dinf = { contributingM2, majorityM2, partialCells, dep };
++    }
++    setBasin({ outlet, mask, cells, areaM2: area, meanElevation: zSum / zN, meanSlope: sN ? sSum / sN : NaN, dinf });
+   };
+ 
+-  const basinPolygon = () => {
++  const basinPolygon = (dinfMajority = false) => {
+     if (!basin || !raster || !result) return null;
+-    const labels = { labels: Int32Array.from(basin.mask), count: 1 };
++    const mask = dinfMajority && basin.dinf ? Int32Array.from(basin.dinf.dep, v => (v >= 0.5 ? 1 : 0)) : Int32Array.from(basin.mask);
++    const labels = { labels: mask, count: 1 };
+     const stats = patchAreas(labels, result.width, row => geo?.cellArea(row) ?? 1);
+-    return patchesToGeoJson(labels, stats, raster.meta, result, (_id, a) => ({ name: 'Watershed', area_ha: Math.round(a / 100) / 100 }))?.fc ?? null;
++    const name = dinfMajority ? 'D∞ watershed (≥ 50 % of flow)' : 'Watershed';
++    return patchesToGeoJson(labels, stats, raster.meta, result, (_id, a) => ({ name, area_ha: Math.round(a / 100) / 100 }))?.fc ?? null;
+   };
  
    const base = raster ? safeFilename(raster.meta.filename) : 'dem';
  
@@ -1309,7 +1498,7 @@ index 1963e1f..43c0c2d 100644
    const image = useMemo(() => {
      if (!result) return null;
      if (layer === 'flow' && flow) {
-@@ -219,11 +249,15 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -219,11 +270,15 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
        if (basin) out.set([255, 255, 255, 255], basin.outlet * 4);
        return out;
      }
@@ -1326,7 +1515,7 @@ index 1963e1f..43c0c2d 100644
  
    const lastBoundary = useRef(boundary);
    useEffect(() => {
-@@ -272,15 +306,25 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -272,15 +327,25 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
            </div>
  
            <div className="view-toggles" role="tablist">
@@ -1354,7 +1543,7 @@ index 1963e1f..43c0c2d 100644
              {layer === 'elevation' && (
                <figcaption className="legend-labels">
                  <span>{fmt(result.elevation.min)} m</span>
-@@ -297,6 +341,13 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -297,6 +362,13 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                  <span>Channel threshold (km²)</span>
                  <input id="terrain-threshold" type="number" step="0.1" min="0.01" value={thresholdKm2} onChange={e => setThresholdKm2(e.target.value)} />
                </label>
@@ -1368,13 +1557,14 @@ index 1963e1f..43c0c2d 100644
                <button type="button" id="terrain-flow" className="btn" onClick={computeFlow} disabled={flowBusy}>
                  {flowBusy ? 'Routing flow…' : flow ? 'Recompute flow' : 'Compute flow & streams'}
                </button>
-@@ -312,10 +363,16 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -312,10 +384,17 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
                <div className="stat-grid">
                  <Stat label="Highest stream order" value={String(flow.maxOrder)} />
                  <Stat label="Channel length" value={`${fmt(flow.lengthByOrder.reduce((a, b) => a + b, 0) / 1000, 4)} km`} />
 +                {wet && <Stat label="Median wetness index" value={fmt(wet.median, 3)} />}
                  {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt((basin.areaM2 / 1e4) * ACRES_PER_HA / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
                  {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
++                {basin?.dinf && <Stat label="D∞ area reaching the outlet" value={units === 'imperial' ? `${fmt((basin.dinf.contributingM2 / 1e4) * ACRES_PER_HA / 640, 4)} mi²` : `${fmt(basin.dinf.contributingM2 / 1e6, 4)} km²`} />}
                </div>
              )}
 +            {flow && streamNote && (
@@ -1385,7 +1575,19 @@ index 1963e1f..43c0c2d 100644
              <div className="button-row">
                {basin && onBoundary && (
                  <button
-@@ -393,7 +450,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -341,6 +420,11 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+                   Export watershed
+                 </button>
+               )}
++              {basin?.dinf && (
++                <button type="button" className="btn btn-small" onClick={() => { const fc = basinPolygon(true); if (fc) downloadText(JSON.stringify(fc), `${base}_watershed_dinf.geojson`, 'application/geo+json'); }}>
++                  Export D∞ watershed (≥ 50 % of flow)
++                </button>
++              )}
+               {flow && raster && (
+                 <button type="button" className="btn btn-small" onClick={() => { const fc = streamLines(flow, raster.meta); if (fc) downloadText(JSON.stringify(fc), `${base}_streams.geojson`, 'application/geo+json'); else notify('Streams need a WGS84, Web Mercator or UTM DEM.', 'error'); }}>
+                   Export streams
+@@ -393,7 +477,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
            </div>
  
            <ul className="hint-list">
@@ -1580,6 +1782,112 @@ index 59ab690..061626a 100644
  - Map: Settings → Map (or the map's Layers button) picks one base map and any number of overlays with opacity: offline Natural Earth outlines; CARTO Dark/Positron/Voyager; OpenStreetMap; OpenFreeMap Liberty/Positron/Bright (vector, no key); Protomaps from a .pmtiles file or URL; OpenTopoMap; Esri World Topographic and World Imagery; Stadia (Alidade, Outdoors, Stamen Toner/Terrain/Watercolor; account or key); MapTiler (key); EOX Sentinel-2 cloudless 2016 (CC BY) and 2020 (non-commercial); NASA GIBS MODIS Terra and VIIRS daily true colour with a date picker, Black Marble 2016 and Earth at Night 2012; CARTO place labels; custom XYZ tiles and custom WMS (e.g. ISRO Bhuvan). The Layers panel also toggles the basemap, result overlay (with opacity and legend), features and analysis boundary.
  - Residential plot: property boundary (analysis boundary or a GeoJSON/KML/GPX/shapefile) plus images of the plot from different years: GeoTIFFs are resampled onto a UTM grid around the plot; same-view JPG/PNG screenshots work after tracing the plot on the latest image (with an optional ground width for scale). Relative radiometric normalisation (iterative linear fit on pseudo-invariant pixels), change magnitude from standardised residuals with a robust threshold, patches joined across small gaps, and classification into: crossing the boundary (possible encroachment; area inside and depth), thin strips along the line (likely misalignment), along the inside edge, elsewhere inside, outside. Swipe viewer, timeline against the current image, GeoJSON export. It is a screening aid, not proof of ownership or encroachment.
  - Weather & climate: CSV/TSV/XLSX time series or climate GeoTIFFs. Detects rainfall, temperature, humidity, soil moisture, evapotranspiration and solar radiation; Mann–Kendall trend with Theil–Sen slope, seasonal cycle, Seasonal Kendall test and monthly anomalies (records of two years or more), Standardized Precipitation Index at 1/3/6/12 months (precipitation, 10+ years; 30+ recommended), value classes (IMD rainfall categories, soil-moisture ranges) and daily rainfall indices (rainy days ≥ 2.5 mm, heaviest day, longest dry spell).
+diff --git a/src/lib/overlay.ts b/src/lib/overlay.ts
+index d94a0f0..d32ce36 100644
+--- a/src/lib/overlay.ts
++++ b/src/lib/overlay.ts
+@@ -1,4 +1,8 @@
+-// Turns an RGBA pixel buffer into a PNG data URL for a map overlay.
++// Map overlays: an RGBA pixel buffer as a PNG data URL (at most 1,024 px a side), and, for larger grids,
++// full-resolution Web Mercator tiles drawn in this tab from the grid itself.
++import type { GeoMeta } from './rasterio';
++import { projector } from './zonal';
++
+ export function rgbaToDataUrl(rgba: Uint8ClampedArray, width: number, height: number): string | null {
+   if (typeof document === 'undefined') return null;
+   const c = document.createElement('canvas');
+@@ -29,9 +33,88 @@ export function shrinkRgba(rgba: Uint8ClampedArray, width: number, height: numbe
+   return { rgba: out, width: w, height: h };
+ }
+ 
+-export function mapImage(rgba: Uint8ClampedArray, width: number, height: number, bounds: [[number, number], [number, number]] | null, label: string, legend: { color: string; label: string }[]) {
++/** Longest side of the overview picture; grids beyond it also get tiles. */
++export const PICTURE_SIDE = 1024;
++
++interface TileGrid {
++  rgba: Uint8ClampedArray;
++  width: number;
++  height: number;
++  /** WGS84 longitude/latitude → fractional grid (col, row), or null outside the CRS. */
++  toGrid: (lon: number, lat: number) => [number, number] | null;
++}
++
++// The grids behind the most recent overlays (each holds its full RGBA, so only a few are kept).
++const tileGrids = new Map<number, TileGrid>();
++let nextTileId = 1;
++
++/** Smallest Web Mercator zoom whose 256 px tile pixels are no larger than `cellM` metres at latitude `lat`. */
++export function nativeZoom(cellM: number, lat: number): number {
++  const ground = (2 * Math.PI * 6378137) / 256 * Math.cos((lat * Math.PI) / 180);
++  return Math.max(0, Math.min(24, Math.ceil(Math.log2(ground / Math.max(cellM, 1e-6)))));
++}
++
++export function registerTileGrid(g: TileGrid): number {
++  const id = nextTileId++;
++  tileGrids.set(id, g);
++  while (tileGrids.size > 3) tileGrids.delete(tileGrids.keys().next().value!);
++  return id;
++}
++
++/**
++ * RGBA of Web Mercator tile z/x/y (256 × 256) from a registered grid, nearest cell for each pixel centre; null when
++ * the grid is gone or the tile holds no data.
++ */
++export function renderTile(id: number, z: number, x: number, y: number): Uint8ClampedArray | null {
++  const g = tileGrids.get(id);
++  if (!g) return null;
++  const out = new Uint8ClampedArray(256 * 256 * 4);
++  const world = 256 * 2 ** z;
++  let any = false;
++  for (let py = 0; py < 256; py++) {
++    const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (y * 256 + py + 0.5)) / world))) * 180) / Math.PI;
++    for (let px = 0; px < 256; px++) {
++      const lon = ((x * 256 + px + 0.5) / world) * 360 - 180;
++      const p = g.toGrid(lon, lat);
++      if (!p) continue;
++      const c = Math.floor(p[0]), r = Math.floor(p[1]);
++      if (c < 0 || r < 0 || c >= g.width || r >= g.height) continue;
++      const k = (r * g.width + c) * 4;
++      if (!g.rgba[k + 3]) continue;
++      out.set(g.rgba.subarray(k, k + 4), (py * 256 + px) * 4);
++      any = true;
++    }
++  }
++  return any ? out : null;
++}
++
++/** lon/lat → fractional grid position: through the file's CRS when known, else linear in the WGS84 bounds. */
++export function gridMapping(width: number, height: number, bounds: [[number, number], [number, number]], meta?: GeoMeta | null): TileGrid['toGrid'] {
++  const fwd = meta?.bbox ? projector(meta) : null;
++  if (fwd && meta?.bbox) {
++    const [x0, y0, x1, y1] = meta.bbox;
++    return (lon, lat) => {
++      const [x, y] = fwd(lon, lat);
++      return Number.isFinite(x) && Number.isFinite(y) ? [((x - x0) / (x1 - x0)) * width, ((y1 - y) / (y1 - y0)) * height] : null;
++    };
++  }
++  const [[s, w], [n, e]] = bounds;
++  return (lon, lat) => [((lon - w) / (e - w)) * width, ((n - lat) / (n - s)) * height];
++}
++
++export function mapImage(
++  rgba: Uint8ClampedArray, width: number, height: number, bounds: [[number, number], [number, number]] | null, label: string, legend: { color: string; label: string }[],
++  meta?: GeoMeta | null,
++) {
+   if (!bounds) return null;
+-  const small = shrinkRgba(rgba, width, height);
++  const small = shrinkRgba(rgba, width, height, PICTURE_SIDE);
+   const url = rgbaToDataUrl(small.rgba, small.width, small.height);
+-  return url ? { url, bounds, label, legend } : null;
++  if (!url) return null;
++  if (Math.max(width, height) <= PICTURE_SIDE) return { url, bounds, label, legend };
++  const [[s, w], [n, e]] = bounds;
++  const lat = (s + n) / 2;
++  const cellM = ((e - w) * 111_320 * Math.cos((lat * Math.PI) / 180)) / width;
++  const k = Math.max(width, height) / PICTURE_SIDE;
++  const id = registerTileGrid({ rgba, width, height, toGrid: gridMapping(width, height, bounds, meta) });
++  return { url, bounds, label, legend, tiles: { id, minZoom: nativeZoom(cellM * k, lat), maxNativeZoom: nativeZoom(cellM, lat) } };
+ }
 diff --git a/src/lib/patches.ts b/src/lib/patches.ts
 index 3d7642e..f840f82 100644
 --- a/src/lib/patches.ts
@@ -1601,24 +1909,35 @@ index 3d7642e..f840f82 100644
  }
  
 diff --git a/src/lib/rasterio.ts b/src/lib/rasterio.ts
-index 46febc4..a0c7967 100644
+index 46febc4..ee81053 100644
 --- a/src/lib/rasterio.ts
 +++ b/src/lib/rasterio.ts
-@@ -2,9 +2,13 @@
+@@ -2,9 +2,22 @@
  // common grid (no-data → NaN), and ground geometry (pixel area and spacing
  // in metres) so areas and slopes are computed in real units.
  import { bboxToLatLng, type LatLngBounds } from './geo';
 +import geodesic from 'geographiclib-geodesic';
 +import { crsFromGeoKeys, crsInverse, type CustomCrs } from './crs';
++import { getJSON, setJSON } from './storage';
  
- /** Pixel budget for analysis grids; larger rasters are resampled to this size. */
- export const ANALYSIS_PIXEL_LIMIT = 4_000_000;
+-/** Pixel budget for analysis grids; larger rasters are resampled to this size. */
+-export const ANALYSIS_PIXEL_LIMIT = 4_000_000;
++/** Analysis resolutions a viewer can choose (megapixels). A grid costs about 4 bytes a cell for each band read, plus the tool's own layers. */
++export const ANALYSIS_MEGAPIXELS = [4, 16, 36] as const;
++/** Pixel budget for analysis grids (the chosen resolution, 4 MP by default); larger rasters are resampled to this size. */
++export function analysisPixelLimit(): number {
++  const mp = getJSON<number>('analysis_mp', 4);
++  return ((ANALYSIS_MEGAPIXELS as readonly number[]).includes(mp) ? mp : 4) * 1e6;
++}
++export function setAnalysisMegapixels(mp: number): void {
++  setJSON('analysis_mp', mp);
++}
 +/** Pixel budget for a full-resolution window (readWindow); larger windows keep every step-th pixel. */
 +export const WINDOW_PIXEL_LIMIT = 16_000_000;
  
  /** Mean radius of the WGS84 authalic sphere (equal-area), metres. */
  const R_AUTHALIC = 6371007.1809;
-@@ -40,6 +44,10 @@ export interface GeoMeta {
+@@ -40,6 +53,10 @@ export interface GeoMeta {
    /** Native pixel size in CRS units. */
    pixelSize: [number, number] | null;
    warnings: string[];
@@ -1629,7 +1948,7 @@ index 46febc4..a0c7967 100644
  }
  
  export interface Grid {
-@@ -51,10 +59,22 @@ export interface Grid {
+@@ -51,10 +68,22 @@ export interface Grid {
    resampleFactor: number;
  }
  
@@ -1645,14 +1964,15 @@ index 46febc4..a0c7967 100644
 +
  export interface OpenRaster {
    meta: GeoMeta;
-   /** Reads bands (0-based) onto one analysis grid of at most ANALYSIS_PIXEL_LIMIT cells. */
+-  /** Reads bands (0-based) onto one analysis grid of at most ANALYSIS_PIXEL_LIMIT cells. */
++  /** Reads bands (0-based) onto one analysis grid of at most analysisPixelLimit() cells. */
    readBands: (indices: number[]) => Promise<Grid[]>;
 +  /** Reads file pixels [row0, row1) × [col0, col1) (clipped) at full resolution; every step-th pixel beyond maxPixels. */
 +  readWindow?: (indices: number[], col0: number, row0: number, col1: number, row1: number, maxPixels?: number) => Promise<RasterWindow>;
  }
  
  function readEpsg(geoKeys: Record<string, unknown> | null): { epsg: number | null; geographic: boolean; userDefined: boolean } {
-@@ -92,11 +112,14 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+@@ -92,11 +121,14 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
    } catch {
      warnings.push('The file has no georeferencing, so it cannot be placed on the map or measured in real units.');
    }
@@ -1669,9 +1989,17 @@ index 46febc4..a0c7967 100644
      if (!latLngBounds) {
        warnings.push(
          userDefined
-@@ -112,10 +135,26 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+@@ -107,15 +139,32 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+   }
+ 
+   const total = width * height;
+-  const scale = total > ANALYSIS_PIXEL_LIMIT ? Math.sqrt(ANALYSIS_PIXEL_LIMIT / total) : 1;
++  const limit = analysisPixelLimit();
++  const scale = total > limit ? Math.sqrt(limit / total) : 1;
+   const gw = Math.max(1, Math.round(width * scale));
    const gh = Math.max(1, Math.round(height * scale));
-   if (scale < 1) warnings.push(`The ${width}×${height} raster was resampled to ${gw}×${gh} (nearest neighbour) for analysis.`);
+-  if (scale < 1) warnings.push(`The ${width}×${height} raster was resampled to ${gw}×${gh} (nearest neighbour) for analysis.`);
++  if (scale < 1) warnings.push(`The ${width}×${height} raster was resampled to ${gw}×${gh} (nearest neighbour) for analysis; a higher analysis resolution can be chosen in Settings.`);
  
 -  const meta: GeoMeta = { filename: file.name, sizeBytes: file.size, width, height, bands, noData, bbox, epsg, geographic: geographic || epsg === 4326, latLngBounds, pixelSize, warnings };
 +  const bandNames: string[] = [];
@@ -1686,19 +2014,19 @@ index 46febc4..a0c7967 100644
 +    bandNames.push(name);
 +  }
 +  const meta: GeoMeta = { filename: file.name, sizeBytes: file.size, width, height, bands, noData, bbox, epsg, geographic: geographic || epsg === 4326, latLngBounds, pixelSize, warnings, bandNames, crs };
-+
+ 
+-  const readBands = async (indices: number[]): Promise<Grid[]> => {
 +  const checkBands = (indices: number[]) => {
-+    for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
+     for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
 +  };
 +  const clean = (v: number) => (Number.isFinite(v) && (noData === null || v !== noData) ? v : NaN);
- 
-   const readBands = async (indices: number[]): Promise<Grid[]> => {
--    for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
++
++  const readBands = async (indices: number[]): Promise<Grid[]> => {
 +    checkBands(indices);
      const rasters = (await image.readRasters({ samples: indices, width: gw, height: gh, resampleMethod: 'nearest', interleave: false })) as unknown as ArrayLike<number>[];
      return rasters.map(band => {
        const data = new Float32Array(gw * gh);
-@@ -127,7 +166,30 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+@@ -127,7 +176,30 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
      });
    };
  
@@ -1730,7 +2058,7 @@ index 46febc4..a0c7967 100644
  }
  
  /** True when two rasters share a grid closely enough for pixel-by-pixel comparison. */
-@@ -138,6 +200,26 @@ export function sameGrid(a: GeoMeta, b: GeoMeta): boolean {
+@@ -138,6 +210,26 @@ export function sameGrid(a: GeoMeta, b: GeoMeta): boolean {
    return a.bbox.every((v, i) => Math.abs(v - b.bbox![i]) <= tol) && a.epsg === b.epsg;
  }
  
@@ -1757,7 +2085,7 @@ index 46febc4..a0c7967 100644
  function isUtm(epsg: number | null): boolean {
    return epsg !== null && ((epsg >= 32601 && epsg <= 32660) || (epsg >= 32701 && epsg <= 32760));
  }
-@@ -181,5 +263,41 @@ export function groundGeometry(meta: GeoMeta, grid: Pick<Grid, 'width' | 'height
+@@ -181,5 +273,41 @@ export function groundGeometry(meta: GeoMeta, grid: Pick<Grid, 'width' | 'height
        note: `Pixel sizes are in metres (EPSG:${meta.epsg}); UTM scale error is below 0.1 % within a zone.`,
      };
    }
@@ -2460,7 +2788,7 @@ index 5ac3737..2cd82cb 100644
      layers.push({ label: img.label, date: img.date, rgb: out });
    }
 diff --git a/src/lib/tools/hydrology.ts b/src/lib/tools/hydrology.ts
-index 646dc93..c6cb0c9 100644
+index 646dc93..316399b 100644
 --- a/src/lib/tools/hydrology.ts
 +++ b/src/lib/tools/hydrology.ts
 @@ -5,6 +5,9 @@
@@ -2473,12 +2801,16 @@ index 646dc93..c6cb0c9 100644
  //  • Contours: marching squares on cell centres, chained into lines.
  import type { Feature, FeatureCollection, LineString } from 'geojson';
  import { unprojector } from '../patches';
-@@ -118,6 +121,66 @@ export interface FlowResult {
+@@ -118,6 +121,134 @@ export interface FlowResult {
    lengthByOrder: number[];
    raisedCells: number;
    maxRaise: number;
 +  /** D∞ results when requested: topographic wetness index ln(a / tan β) per cell (NaN for no-data). */
 +  wetness?: Float32Array;
++  /** With D∞: each cell's facet and diagonal share (for watershed dependence) and the D∞ upslope area. */
++  dinfFacet?: Int8Array;
++  dinfShare?: Float32Array;
++  dinfAcc?: Float64Array;
 +}
 +
 +// D∞ facets (Tarboton 1997, Table 1): cardinal neighbour e1, diagonal e2.
@@ -2492,9 +2824,11 @@ index 646dc93..c6cb0c9 100644
 + * upslope length) and tan β of the steepest facet, on a depression-filled DEM. Cells go in descending elevation,
 + * so every donor is processed before its receivers.
 + */
-+export function dinfFlow(filled: Float64Array, w: number, h: number, geo: Spacing): { acc: Float64Array; sca: Float32Array; tanb: Float32Array; twi: Float32Array } {
++export function dinfFlow(filled: Float64Array, w: number, h: number, geo: Spacing): { acc: Float64Array; sca: Float32Array; tanb: Float32Array; twi: Float32Array; facet: Int8Array; share: Float32Array } {
 +  const n = w * h;
 +  const acc = new Float64Array(n), tanb = new Float32Array(n), width = new Float32Array(n).fill(1);
++  // Each cell's facet (−1 for none) and the share p2 of its flow sent to the facet's diagonal cell.
++  const facet = new Int8Array(n).fill(-1), share = new Float32Array(n);
 +  const order: number[] = [];
 +  for (let k = 0; k < n; k++) {
 +    if (Number.isNaN(filled[k])) continue;
@@ -2524,6 +2858,8 @@ index 646dc93..c6cb0c9 100644
 +    tanb[k] = bestS;
 +    width[k] = (F_R1[bestK] === 0 ? sp.dy : sp.dx) * Math.cos(bestR);
 +    const p2 = bestR / bestMax, a = acc[k];
++    facet[k] = bestK;
++    share[k] = p2;
 +    if (p2 < 1) acc[(r + F_R1[bestK]) * w + c + F_C1[bestK]] += a * (1 - p2);
 +    if (p2 > 0) acc[(r + F_R2[bestK]) * w + c + F_C2[bestK]] += a * p2;
 +  }
@@ -2536,11 +2872,71 @@ index 646dc93..c6cb0c9 100644
 +    sca[k] = acc[k] / width[k];
 +    twi[k] = Math.log(sca[k] / Math.max(tanb[k], TAN_FLOOR));
 +  }
-+  return { acc, sca, tanb, twi };
++  return { acc, sca, tanb, twi, facet, share };
++}
++
++/**
++ * D∞ upslope dependence on one outlet cell (TauDEM DinfUpDependence; Tarboton 1997): the fraction of each cell's
++ * flow that reaches the outlet, 1 at the outlet and 0 outside its upslope area. Cells upslope of the outlet are found
++ * first; then, receivers before donors (Kahn's order on the flow graph, which descends strictly), each cell takes
++ * the shares of its receivers' dependence. Σ area × dependence equals the D∞ upslope area at the outlet.
++ */
++export function dinfDependence(facet: Int8Array, share: Float32Array, w: number, h: number, outlet: number): Float32Array {
++  const n = w * h;
++  const sendsTo = (m: number, k: number): number => {
++    // The share of cell m's flow that goes straight to cell k (0 when none).
++    const f = facet[m];
++    if (f < 0) return 0;
++    const r = Math.floor(m / w), c = m - r * w, p2 = share[m];
++    let s = 0;
++    if (p2 < 1 && (r + F_R1[f]) * w + c + F_C1[f] === k) s += 1 - p2;
++    if (p2 > 0 && (r + F_R2[f]) * w + c + F_C2[f] === k) s += p2;
++    return s;
++  };
++  const up = new Uint8Array(n);
++  up[outlet] = 1;
++  const stack = [outlet];
++  while (stack.length) {
++    const k = stack.pop()!;
++    const r = Math.floor(k / w), c = k - r * w;
++    for (let d = 0; d < 8; d++) {
++      const rr = r + DR[d], cc = c + DC[d];
++      if (rr < 0 || cc < 0 || rr >= h || cc >= w) continue;
++      const m = rr * w + cc;
++      if (!up[m] && sendsTo(m, k) > 0) (up[m] = 1), stack.push(m);
++    }
++  }
++  const pending = new Uint8Array(n);
++  for (let m = 0; m < n; m++) {
++    if (!up[m] || m === outlet) continue;
++    const f = facet[m], r = Math.floor(m / w), c = m - r * w, p2 = share[m];
++    if (p2 < 1 && up[(r + F_R1[f]) * w + c + F_C1[f]]) pending[m]++;
++    if (p2 > 0 && up[(r + F_R2[f]) * w + c + F_C2[f]]) pending[m]++;
++  }
++  const dep = new Float32Array(n), got = new Float64Array(n);
++  got[outlet] = 1;
++  const ready = [outlet];
++  while (ready.length) {
++    const k = ready.pop()!;
++    dep[k] = got[k];
++    const r = Math.floor(k / w), c = k - r * w;
++    for (let d = 0; d < 8; d++) {
++      const rr = r + DR[d], cc = c + DC[d];
++      if (rr < 0 || cc < 0 || rr >= h || cc >= w) continue;
++      const m = rr * w + cc;
++      if (!up[m] || m === outlet) continue;
++      const s = sendsTo(m, k);
++      if (s > 0) {
++        got[m] += s * got[k];
++        if (--pending[m] === 0) ready.push(m);
++      }
++    }
++  }
++  return dep;
  }
  
  export interface Spacing {
-@@ -130,7 +193,7 @@ function stepLength(d: number, sp: { dx: number; dy: number }): number {
+@@ -130,7 +261,7 @@ function stepLength(d: number, sp: { dx: number; dy: number }): number {
    return dr && dc ? Math.hypot(sp.dx, sp.dy) : dr ? sp.dy : sp.dx;
  }
  
@@ -2549,17 +2945,17 @@ index 646dc93..c6cb0c9 100644
    const { width: w, height: h, data: z } = dem;
    const { filled, raisedCells, maxRaise } = fillDepressions(z, w, h);
    const n = w * h;
-@@ -195,7 +258,8 @@ export function flowRouting(dem: Grid, geo: Spacing, thresholdM2: number): FlowR
+@@ -195,7 +326,8 @@ export function flowRouting(dem: Grid, geo: Spacing, thresholdM2: number): FlowR
    // A junction on the last cell before the grid edge has no channel length
    // of its own; report the highest order that forms an actual channel.
    while (maxOrder > 0 && lengthByOrder[maxOrder] === 0) lengthByOrder.pop(), maxOrder--;
 -  return { width: w, height: h, dir, acc, order, thresholdM2, maxOrder, lengthByOrder, raisedCells, maxRaise };
-+  const wetness = dinf ? dinfFlow(filled, w, h, geo).twi : undefined;
-+  return { width: w, height: h, dir, acc, order, thresholdM2, maxOrder, lengthByOrder, raisedCells, maxRaise, wetness };
++  const inf = dinf ? dinfFlow(filled, w, h, geo) : undefined;
++  return { width: w, height: h, dir, acc, order, thresholdM2, maxOrder, lengthByOrder, raisedCells, maxRaise, wetness: inf?.twi, dinfFacet: inf?.facet, dinfShare: inf?.share, dinfAcc: inf?.acc };
  }
  
  /** Snaps a clicked cell to the highest-accumulation cell within `radius` cells. */
-@@ -286,6 +350,33 @@ export function streamLines(f: FlowResult, meta: GeoMeta): FeatureCollection<Lin
+@@ -286,6 +418,33 @@ export function streamLines(f: FlowResult, meta: GeoMeta): FeatureCollection<Lin
    return { type: 'FeatureCollection', features };
  }
  
@@ -2593,6 +2989,184 @@ index 646dc93..c6cb0c9 100644
  /** A "nice" contour interval giving about `target` levels over the relief. */
  export function niceInterval(relief: number, target = 10): number {
    if (!(relief > 0)) return 1;
+@@ -296,84 +455,101 @@ export function niceInterval(relief: number, target = 10): number {
+ }
+ 
+ /**
+- * Contour lines by marching squares on cell centres. Returns lines in grid
+- * coordinates (col, row) per level.
++ * Contour lines by marching squares on cell centres, saddles resolved by the centre value. Segments are joined through
++ * the grid edges they share (horizontal edge r,c→r,c+1 = 2(rW+c), vertical r,c→r+1,c = 2(rW+c)+1), so lines never
++ * branch; `tol` > 0 simplifies them by Douglas & Peucker (1973), in cells. Returns lines in grid coordinates (col, row).
+  */
+-export function contourGrid(z: ArrayLike<number>, w: number, h: number, levels: number[]): { level: number; lines: [number, number][][] }[] {
+-  const out: { level: number; lines: [number, number][][] }[] = [];
+-  for (const lv of levels) {
+-    const segs: [[number, number], [number, number]][] = [];
+-    for (let r = 0; r < h - 1; r++) {
+-      for (let c = 0; c < w - 1; c++) {
+-        const a = z[r * w + c], b = z[r * w + c + 1], cc = z[(r + 1) * w + c + 1], d = z[(r + 1) * w + c];
+-        if (Number.isNaN(a) || Number.isNaN(b) || Number.isNaN(cc) || Number.isNaN(d)) continue;
+-        const idx = (a >= lv ? 8 : 0) | (b >= lv ? 4 : 0) | (cc >= lv ? 2 : 0) | (d >= lv ? 1 : 0);
+-        if (idx === 0 || idx === 15) continue;
+-        const x0 = c + 0.5, y0 = r + 0.5;
+-        const lerp = (v1: number, v2: number) => (lv - v1) / (v2 - v1);
+-        const top: [number, number] = [x0 + lerp(a, b), y0];
+-        const right: [number, number] = [x0 + 1, y0 + lerp(b, cc)];
+-        const bottom: [number, number] = [x0 + lerp(d, cc), y0 + 1];
+-        const left: [number, number] = [x0, y0 + lerp(a, d)];
+-        const centreHigh = (a + b + cc + d) / 4 >= lv;
+-        switch (idx) {
+-          case 1: case 14: segs.push([left, bottom]); break;
+-          case 2: case 13: segs.push([bottom, right]); break;
+-          case 3: case 12: segs.push([left, right]); break;
+-          case 4: case 11: segs.push([top, right]); break;
+-          case 6: case 9: segs.push([top, bottom]); break;
+-          case 7: case 8: segs.push([left, top]); break;
+-          case 5: // a, c low; b, d high (saddle)
+-            if (centreHigh) segs.push([left, top], [bottom, right]);
+-            else segs.push([top, right], [left, bottom]);
+-            break;
+-          case 10: // a, c high; b, d low (saddle)
+-            if (centreHigh) segs.push([top, right], [left, bottom]);
+-            else segs.push([left, top], [bottom, right]);
+-            break;
+-        }
+-      }
+-    }
+-    out.push({ level: lv, lines: chain(segs) });
+-  }
+-  return out;
++export function contourGrid(z: ArrayLike<number>, w: number, h: number, levels: number[], tol = 0): { level: number; lines: [number, number][][] }[] {
++  return levels.map(level => ({ level, lines: levelLines(z, w, h, level, tol) }));
+ }
+ 
+-function chain(segs: [[number, number], [number, number]][]): [number, number][][] {
+-  const key = (p: [number, number]) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`;
+-  const ends = new Map<string, number[]>();
+-  segs.forEach(([p, q], i) => {
+-    for (const e of [key(p), key(q)]) {
+-      const l = ends.get(e);
+-      if (l) l.push(i);
+-      else ends.set(e, [i]);
++// Edges of a cell: 0 top (a–b), 1 right (b–c), 2 bottom (d–c), 3 left (a–d). The segment pairs per case.
++const CASE_EDGES: Record<number, [number, number]> = { 1: [3, 2], 14: [3, 2], 2: [2, 1], 13: [2, 1], 3: [3, 1], 12: [3, 1], 4: [0, 1], 11: [0, 1], 6: [0, 2], 9: [0, 2], 7: [3, 0], 8: [3, 0] };
++
++function levelLines(z: ArrayLike<number>, w: number, h: number, lv: number, tol: number): [number, number][][] {
++  const xy: number[] = [], ed: number[] = [];
++  const point = (e: number, r: number, c: number, a: number, b: number, cc: number, d: number) => {
++    const x0 = c + 0.5, y0 = r + 0.5;
++    if (e === 0) xy.push(x0 + (lv - a) / (b - a), y0), ed.push(2 * (r * w + c));
++    else if (e === 1) xy.push(x0 + 1, y0 + (lv - b) / (cc - b)), ed.push(2 * (r * w + c + 1) + 1);
++    else if (e === 2) xy.push(x0 + (lv - d) / (cc - d), y0 + 1), ed.push(2 * ((r + 1) * w + c));
++    else xy.push(x0, y0 + (lv - a) / (d - a)), ed.push(2 * (r * w + c) + 1);
++  };
++  for (let r = 0; r < h - 1; r++) {
++    for (let c = 0; c < w - 1; c++) {
++      const a = z[r * w + c], b = z[r * w + c + 1], cc = z[(r + 1) * w + c + 1], d = z[(r + 1) * w + c];
++      if (Number.isNaN(a) || Number.isNaN(b) || Number.isNaN(cc) || Number.isNaN(d)) continue;
++      const k = (a >= lv ? 8 : 0) | (b >= lv ? 4 : 0) | (cc >= lv ? 2 : 0) | (d >= lv ? 1 : 0);
++      if (k === 0 || k === 15) continue;
++      let pairs: [number, number][];
++      if (k === 5 || k === 10) {
++        const high = (a + b + cc + d) / 4 >= lv;
++        pairs = (k === 5) === high ? [[3, 0], [2, 1]] : [[0, 1], [3, 2]];
++      } else pairs = [CASE_EDGES[k]];
++      for (const [e1, e2] of pairs) point(e1, r, c, a, b, cc, d), point(e2, r, c, a, b, cc, d);
+     }
+-  });
+-  const used = new Uint8Array(segs.length);
++  }
++  const n = ed.length / 2;
++  // Endpoint slot (2·segment + end) → the other segment's slot on the same edge.
++  const order = Array.from({ length: 2 * n }, (_, i) => i).sort((p, q) => ed[p] - ed[q]);
++  const partner = new Int32Array(2 * n).fill(-1);
++  for (let i = 0; i + 1 < order.length; i++) if (ed[order[i]] === ed[order[i + 1]]) (partner[order[i]] = order[i + 1]), (partner[order[i + 1]] = order[i]);
++  const used = new Uint8Array(n);
+   const lines: [number, number][][] = [];
+-  const extend = (line: [number, number][], atEnd: boolean) => {
++  const walk = (s0: number, end: number) => {
++    const line: [number, number][] = [[xy[4 * s0 + 2 * end], xy[4 * s0 + 2 * end + 1]]];
++    let s = s0;
+     for (;;) {
+-      const tip = atEnd ? line[line.length - 1] : line[0];
+-      const next = (ends.get(key(tip)) ?? []).find(i => !used[i]);
+-      if (next === undefined) return;
+-      used[next] = 1;
+-      const [p, q] = segs[next];
+-      const other = key(p) === key(tip) ? q : p;
+-      if (atEnd) line.push(other);
+-      else line.unshift(other);
++      used[s] = 1;
++      const out = 1 - end;
++      line.push([xy[4 * s + 2 * out], xy[4 * s + 2 * out + 1]]);
++      const q = partner[2 * s + out];
++      if (q < 0 || used[q >> 1]) break;
++      (s = q >> 1), (end = q & 1);
+     }
++    lines.push(tol > 0 ? simplify(line, tol) : line);
+   };
+-  for (let i = 0; i < segs.length; i++) {
+-    if (used[i]) continue;
+-    used[i] = 1;
+-    const line: [number, number][] = [segs[i][0], segs[i][1]];
+-    extend(line, true);
+-    extend(line, false);
+-    lines.push(line);
+-  }
++  for (let s = 0; s < n; s++) if (!used[s] && (partner[2 * s] < 0 || partner[2 * s + 1] < 0)) walk(s, partner[2 * s] < 0 ? 0 : 1); // open lines from a free end
++  for (let s = 0; s < n; s++) if (!used[s]) walk(s, 0); // then closed rings
+   return lines;
+ }
+ 
++/** Douglas–Peucker (1973): keeps the vertices more than `tol` from the chord of their span; a ring is split at its farthest vertex first. */
++export function simplify(line: [number, number][], tol: number): [number, number][] {
++  const n = line.length;
++  if (n < 3) return line;
++  const keep = new Uint8Array(n);
++  keep[0] = keep[n - 1] = 1;
++  const t2 = tol * tol;
++  const stack: [number, number][] = [];
++  const ring = line[0][0] === line[n - 1][0] && line[0][1] === line[n - 1][1];
++  if (ring) {
++    let far = 1, fd = -1;
++    for (let i = 1; i < n - 1; i++) {
++      const d = (line[i][0] - line[0][0]) ** 2 + (line[i][1] - line[0][1]) ** 2;
++      if (d > fd) (far = i), (fd = d);
++    }
++    keep[far] = 1;
++    stack.push([0, far], [far, n - 1]);
++  } else stack.push([0, n - 1]);
++  while (stack.length) {
++    const [a, b] = stack.pop()!;
++    if (b - a < 2) continue;
++    const [ax, ay] = line[a], dx = line[b][0] - ax, dy = line[b][1] - ay, L2 = dx * dx + dy * dy;
++    let far = -1, fd = t2;
++    for (let i = a + 1; i < b; i++) {
++      const px = line[i][0] - ax, py = line[i][1] - ay, cr = px * dy - py * dx;
++      const d = L2 > 0 ? (cr * cr) / L2 : px * px + py * py;
++      if (d > fd) (far = i), (fd = d);
++    }
++    if (far >= 0) (keep[far] = 1), stack.push([a, far], [far, b]);
++  }
++  return line.filter((_, i) => keep[i]);
++}
++
++/** Douglas–Peucker tolerance for exported contours, in cells: a quarter cell is below what a DEM can place. */
++export const CONTOUR_TOLERANCE = 0.25;
++
+ /** Contours as WGS84 GeoJSON lines with an `elevation` property. */
+ export function contoursGeoJson(dem: Grid, meta: GeoMeta, interval: number, maxLevels = 60): { fc: FeatureCollection<LineString>; levels: number } | null {
+   const ll = gridToLonLat(meta, dem.width, dem.height);
+@@ -389,7 +565,7 @@ export function contoursGeoJson(dem: Grid, meta: GeoMeta, interval: number, maxL
+   const levels: number[] = [];
+   for (let v = Math.ceil(min / interval) * interval; v <= max && levels.length < maxLevels; v += interval) levels.push(Math.round(v * 1e6) / 1e6);
+   const features: Feature<LineString>[] = [];
+-  for (const { level, lines } of contourGrid(dem.data, dem.width, dem.height, levels)) {
++  for (const { level, lines } of contourGrid(dem.data, dem.width, dem.height, levels, CONTOUR_TOLERANCE)) {
+     for (const line of lines) if (line.length >= 2) features.push({ type: 'Feature', properties: { elevation: level }, geometry: { type: 'LineString', coordinates: line.map(p => ll(p[0], p[1])) } });
+   }
+   return { fc: { type: 'FeatureCollection', features }, levels: levels.length };
 diff --git a/src/lib/tools/landcover.ts b/src/lib/tools/landcover.ts
 index 73cb8bd..bb65e22 100644
 --- a/src/lib/tools/landcover.ts
@@ -3178,7 +3752,7 @@ index 0000000..9ca0ab6
 +  return { pred: predictForest(forest, j.Q, j.Q.length / d), folds, confusion };
 +}
 diff --git a/src/lib/tools/registry.ts b/src/lib/tools/registry.ts
-index 1ece22e..5b0d990 100644
+index 1ece22e..ac6bfd3 100644
 --- a/src/lib/tools/registry.ts
 +++ b/src/lib/tools/registry.ts
 @@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
@@ -3227,6 +3801,13 @@ index 1ece22e..5b0d990 100644
      formats: 'DEM GeoTIFF (SRTM, ASTER, Copernicus)',
      mark: 'Te',
    },
+@@ -125,4 +143,6 @@ export interface MapImage {
+   bounds: LatLngBounds;
+   label: string;
+   legend: { color: string; label: string }[];
++  /** Full-resolution tiles of a picture wider than 1,024 px (drawn in this tab from the grid it came from), from `minZoom`; `maxNativeZoom` matches its cells. */
++  tiles?: { id: number; minZoom: number; maxNativeZoom: number };
+ }
 diff --git a/src/lib/tools/survey.ts b/src/lib/tools/survey.ts
 index 365425d..a2558d1 100644
 --- a/src/lib/tools/survey.ts
@@ -3818,6 +4399,57 @@ index 0000000..9f2894b
 +  await expect(page.locator('.report-card')).toContainText('Accuracy and area (stratified sample)');
 +  expect(errors).toEqual([]);
 +});
+diff --git a/tests/e2e/tiles.spec.ts b/tests/e2e/tiles.spec.ts
+new file mode 100644
+index 0000000..5fa186a
+--- /dev/null
++++ b/tests/e2e/tiles.spec.ts
+@@ -0,0 +1,45 @@
++import { execFileSync } from 'node:child_process';
++import { mkdtempSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { expect, test } from '@playwright/test';
++import { openTool, start } from './helpers';
++
++// A 1,500 × 1,200 NDVI pair (30 m, UTM 46N) is wider than the 1,024 px map picture, so zooming in switches the
++// map to full-resolution tiles drawn in the tab from the class grid.
++test('forest change wider than the picture is drawn as full-resolution tiles when zoomed in', async ({ page }) => {
++  const errors = await start(page);
++  const dir = mkdtempSync(join(tmpdir(), 'terrax-tiles-'));
++  const paths = ['a', 'b'].map(n => join(dir, `ndvi_${n}.tif`));
++  execFileSync('python3', ['-c', `
++import numpy as np, rasterio
++from rasterio.transform import from_origin
++for k, path in enumerate(${JSON.stringify(paths)}):
++    v = np.full((1200, 1500), 0.8, np.float32)
++    if k:
++        v[400:800, 500:1100] = 0.2  # a 12 km × 12 km clearing
++    with rasterio.open(path, 'w', driver='GTiff', width=1500, height=1200, count=1, dtype='float32', crs='EPSG:32646', transform=from_origin(600000, 2860000, 30, 30)) as d:
++        d.write(v, 1)
++`]);
++  await openTool(page, 'Forest loss');
++  await page.setInputFiles('#forest-a', { name: 'ndvi_a.tif', mimeType: 'image/tiff', buffer: readFileSync(paths[0]) });
++  await page.setInputFiles('#forest-b', { name: 'ndvi_b.tif', mimeType: 'image/tiff', buffer: readFileSync(paths[1]) });
++  await page.click('button:has-text("Estimate forest loss")');
++  await expect(page.locator('.stat', { hasText: 'Forest loss' })).toContainText('ha');
++  await expect(page.locator('.leaflet-overlay-pane img.pixelated-overlay')).toBeAttached();
++  for (let i = 0; i < 4; i++) await page.click('.leaflet-control-zoom-in'), await page.waitForTimeout(400);
++  // Painted tiles: some tile canvas holds opaque pixels of the class map; the picture has handed over.
++  await expect
++    .poll(() =>
++      page.evaluate(() =>
++        [...document.querySelectorAll<HTMLCanvasElement>('canvas[data-result="tile"]')].some(c => {
++          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
++          for (let i = 3; i < d.length; i += 4) if (d[i]) return true;
++          return false;
++        }),
++      ),
++    )
++    .toBe(true);
++  await expect(page.locator('.leaflet-overlay-pane img.pixelated-overlay')).toHaveCount(0);
++  expect(errors).toEqual([]);
++});
 diff --git a/tests/encroachment.test.ts b/tests/encroachment.test.ts
 index 20ff148..7234fb1 100644
 --- a/tests/encroachment.test.ts
@@ -3862,10 +4494,10 @@ index 20ff148..7234fb1 100644
 +  for (let i = 0; i < thin.height; i++) for (let j = 0; j < thin.width; j++) assert.equal(thin.data[0][i * thin.width + j], full.data[0][i * 4 * full.width + j * 4]);
 +});
 diff --git a/tests/hydrology.test.ts b/tests/hydrology.test.ts
-index 79048b8..8d969d2 100644
+index 79048b8..89d16f2 100644
 --- a/tests/hydrology.test.ts
 +++ b/tests/hydrology.test.ts
-@@ -66,3 +66,56 @@ test('contours: a plane gives one straight chained line per level', () => {
+@@ -66,3 +66,112 @@ test('contours: a plane gives one straight chained line per level', () => {
    assert.equal(niceInterval(730), 50);
    assert.equal(niceInterval(18), 2);
  });
@@ -3921,6 +4553,118 @@ index 79048b8..8d969d2 100644
 +    assert.ok(median(e) < 0.02, `plane ${deg}°: ${median(e)}`);
 +    assert.ok(Math.abs(out - n * n) < 1e-6 * n * n, `mass balance at ${deg}°: ${out}`);
 +  }
++});
++
++test('contours: rings on a cone, Douglas–Peucker within tolerance, gaps split lines, saddles never cross', () => {
++  const n = 61;
++  const r = grid(n, n, (x, y) => -Math.hypot(x + 0.5 - n / 2, y + 0.5 - n / 2)).data;
++  for (const { level, lines } of contourGrid(r, n, n, [-5, -20])) {
++    assert.equal(lines.length, 1);
++    assert.deepEqual(lines[0][0], lines[0][lines[0].length - 1], 'closed ring');
++    assert.ok(lines[0].every(([x, y]) => Math.abs(Math.hypot(x - n / 2, y - n / 2) + level) < 0.15));
++  }
++  const full = contourGrid(r, n, n, [-20])[0].lines[0];
++  const simple = contourGrid(r, n, n, [-20], 0.25)[0].lines[0];
++  assert.ok(simple.length > 8 && simple.length < full.length);
++  const dist = (p: [number, number], a: [number, number], b: [number, number]) => Math.abs((b[0] - a[0]) * (a[1] - p[1]) - (a[0] - p[0]) * (b[1] - a[1])) / Math.hypot(b[0] - a[0], b[1] - a[1]);
++  assert.ok(full.every(p => Math.min(...simple.slice(1).map((q, i) => dist(p, simple[i], q))) <= 0.25 + 1e-9));
++  const gap = grid(8, 6, x => x).data;
++  for (let x = 0; x < 8; x++) gap[2 * 8 + x] = NaN;
++  assert.equal(contourGrid(gap, 8, 6, [5.5])[0].lines.length, 2);
++  assert.equal(contourGrid(Float32Array.from([1, 0, 0, 1]), 2, 2, [0.5])[0].lines.length, 2);
++});
++
++test('D∞ upslope dependence: Σ area × share equals the outlet’s D∞ area, and matches flow pushed by brute force', async () => {
++  const { dinfDependence, dinfFlow, fillDepressions } = await import('../src/lib/tools/hydrology');
++  const n = 30;
++  let seed = 5;
++  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
++  const z = grid(n, n, (x, y) => 0.3 * x + 0.2 * y + 2 * Math.sin(x / 5) * Math.cos(y / 7) + (rand() - 0.5) * 0.6).data;
++  const geo = { spacing: () => ({ dx: 1, dy: 1 }), cellArea: () => 1 };
++  const filled = fillDepressions(z, n, n).filled;
++  const d = dinfFlow(filled, n, n, geo);
++  const F_R1 = [0, -1, -1, 0, 0, 1, 1, 0], F_C1 = [1, 0, 0, -1, -1, 0, 0, 1], F_R2 = [-1, -1, -1, -1, 1, 1, 1, 1], F_C2 = [1, 1, -1, -1, -1, -1, 1, 1];
++  const order = Array.from({ length: n * n }, (_, i) => i).sort((a, b) => filled[b] - filled[a] || a - b);
++  for (const outlet of [15 * n + 15, 3 * n + 3]) {
++    const dep = dinfDependence(d.facet, d.share, n, n, outlet);
++    assert.equal(dep[outlet], 1);
++    assert.ok(Math.abs(dep.reduce((s, v) => s + v, 0) - d.acc[outlet]) < 1e-3 * d.acc[outlet]);
++    for (let start = 0; start < n * n; start += 37) {
++      const mass = new Float64Array(n * n);
++      mass[start] = 1;
++      let reached = 0;
++      for (const k of order) {
++        const m = mass[k];
++        if (!m) continue;
++        if (k === outlet) {
++          reached += m;
++          continue;
++        }
++        const f = d.facet[k];
++        if (f < 0) continue;
++        const r = Math.floor(k / n), c = k % n, p2 = d.share[k];
++        mass[(r + F_R1[f]) * n + c + F_C1[f]] += m * (1 - p2);
++        mass[(r + F_R2[f]) * n + c + F_C2[f]] += m * p2;
++      }
++      assert.ok(Math.abs(dep[start] - reached) < 1e-5, `cell ${start}: ${dep[start]} vs ${reached}`);
++    }
++  }
++});
+diff --git a/tests/overlay.test.ts b/tests/overlay.test.ts
+new file mode 100644
+index 0000000..b1961f1
+--- /dev/null
++++ b/tests/overlay.test.ts
+@@ -0,0 +1,50 @@
++import assert from 'node:assert/strict';
++import { test } from 'node:test';
++import { gridMapping, nativeZoom, registerTileGrid, renderTile } from '../src/lib/overlay';
++import { latLonToUtm, utmToLatLon } from '../src/lib/geo';
++import type { GeoMeta } from '../src/lib/rasterio';
++
++const tileOf = (lon: number, lat: number, z: number) => {
++  const n = 2 ** z;
++  return [Math.floor(((lon + 180) / 360) * n), Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n)];
++};
++
++test('native zoom: 10 m cells are zoom 14 at the equator, 13 at 60°', () => {
++  assert.equal(nativeZoom(10, 0), 14);
++  assert.equal(nativeZoom(30, 0), 13);
++  assert.equal(nativeZoom(10, 60), 13);
++});
++
++test('tiles reproduce a UTM class grid cell for cell, through the file CRS', () => {
++  // 3,000 × 2,000 cells of 10 m in UTM 46N, one-cell stripes: far finer than a 1,024 px picture.
++  const w = 3000, h = 2000, x0 = 500000, y1 = 3000000;
++  const rgba = new Uint8ClampedArray(w * h * 4);
++  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) rgba.set([c % 2 ? 255 : 0, Math.floor(r / 50) % 2 ? 255 : 0, 0, r < 100 && c < 100 ? 0 : 255], (r * w + c) * 4);
++  const meta = { geographic: false, epsg: 32646, bbox: [x0, y1 - h * 10, x0 + w * 10, y1] } as GeoMeta;
++  const [s, west] = utmToLatLon(x0, y1 - h * 10, 46, false), [n, east] = utmToLatLon(x0 + w * 10, y1, 46, false);
++  const id = registerTileGrid({ rgba, width: w, height: h, toGrid: gridMapping(w, h, [[s, west], [n, east]], meta) });
++  const [clat, clon] = utmToLatLon(x0 + 15000, y1 - 10000, 46, false);
++  const z = 17;
++  const [tx, ty] = tileOf(clon, clat, z);
++  const out = renderTile(id, z, tx, ty);
++  assert.ok(out);
++  let same = 0;
++  const world = 256 * 2 ** z;
++  for (let py = 0; py < 256; py++) {
++    const lat = (Math.atan(Math.sinh(Math.PI * (1 - (2 * (ty * 256 + py + 0.5)) / world))) * 180) / Math.PI;
++    for (let px = 0; px < 256; px++) {
++      const lon = ((tx * 256 + px + 0.5) / world) * 360 - 180;
++      const u = latLonToUtm(lat, lon, 46);
++      const c = Math.floor((u.easting - x0) / 10), r = Math.floor((y1 - u.northing) / 10);
++      const k = (py * 256 + px) * 4;
++      if (out[k] === (c % 2 ? 255 : 0) && out[k + 1] === (Math.floor(r / 50) % 2 ? 255 : 0)) same++;
++    }
++  }
++  assert.ok(same / 65536 > 0.99, `${same} of 65,536 pixels match`);
++  // The transparent corner gives no tile; far away there is none either.
++  const [alat, alon] = utmToLatLon(x0 + 300, y1 - 300, 46, false);
++  const [cx, cy] = tileOf(alon, alat, 19);
++  assert.equal(renderTile(id, 19, cx, cy), null);
++  assert.equal(renderTile(id, 17, 0, 0), null);
++  assert.equal(renderTile(9999, 17, tx, ty), null);
 +});
 diff --git a/tests/radar.test.ts b/tests/radar.test.ts
 new file mode 100644

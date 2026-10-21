@@ -36,6 +36,22 @@ fixes made since:
   geodesically per row as on the server (they agree to 1e-6).
 - The build escapes the two U+FFFD string literals of bundled libraries,
   which the artifact publisher otherwise rejects.
+- Analysis resolution is a setting (4, 16 or 36 MP; 4 MP by default), for
+  files opened after the change. Everything stays in the tab, so 36 MP needs
+  about 150 MB for each band read.
+- Map pictures stay at 1,024 px; a result grid wider than that is also drawn
+  as 256 px Web Mercator tiles from the full grid once zoomed in, each pixel
+  reprojected through the file's CRS (a canvas Leaflet GridLayer). On a
+  1 m-pixel tile of a UTM grid, 99 % of pixels match the cell beneath them;
+  only ties on cell edges differ.
+- Contours join marching-squares segments through the grid edges they share
+  (so lines never branch) and simplify them to a quarter cell (Douglas &
+  Peucker 1973), as on the server.
+- With D∞ flow, a clicked watershed adds the D∞ upslope dependence (TauDEM
+  DinfUpDependence): the share of each cell's flow reaching the outlet. Its
+  area-weighted sum equals the outlet's D∞ area, and a brute-force push of
+  flow down the facets gives the same shares; the cells sending at least half
+  export as a polygon.
 
 Rebuild it:
 
@@ -46,7 +62,7 @@ git apply ../TerraX/deploy/browser-preview/terrax-browser.patch
 cp ../TerraX/backend/data/samples/{s1_vv_vh_2023-01-08,s1_vv_vh_2024-01-03}_synthetic.tif \
    ../TerraX/backend/data/samples/{lidar_forest_synthetic.laz,landcover_training_synthetic.geojson} public/data/samples/
 npm ci
-npx tsx --test tests/*.test.ts      # 99 unit tests
+npx tsx --test tests/*.test.ts      # 105 unit tests
 npm run build:preview               # → dist-preview/
 ```
 
