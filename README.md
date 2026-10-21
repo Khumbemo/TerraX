@@ -11,6 +11,8 @@ TerraX is an Earth-observation workbench for forest, land, climate and imagery a
 | Jobs | **Celery** workers with **Redis** as broker; Celery beat deletes old files | `backend/terrax/tasks.py` |
 | Processing | Python: **rasterio**, **GeoPandas**, **scikit-learn**, SciPy, pyproj, Shapely, NumPy, numba, Pillow | `backend/terrax/processing/` |
 | Agents | Built-in assistant (no AI model) and Gemini agents (google-genai) | `backend/terrax/agents/` |
+| Accounts and data | **SQLAlchemy**: SQLite by default, **PostgreSQL** with `DATABASE_URL` (users, sessions, upload and job index, history, projects, recorded errors) | `backend/terrax/db.py`, `auth.py` |
+| Monitoring | Request IDs, JSON logs, Prometheus metrics, error records and optional Sentry | `backend/terrax/monitoring.py` |
 
 The browser uploads a file once and gets an id. To analyse it, the browser starts a job (`POST /api/jobs`), polls the job's progress and then shows the result. Pictures, GeoJSON and CSV files from a job are served from `/api/jobs/{id}/artifacts/`. Uploads and results live in a shared storage folder (`TERRAX_STORAGE`), so any worker can run any job. Interactive documentation for the API is at `/api/docs`.
 
@@ -143,6 +145,53 @@ For heavy workloads:
   - `TERRAX_WORKER_MAX_MEMORY_MB` replaces a worker process that a big job left large.
   - A job that hits either limit reports what to change instead of failing silently.
 
+## Accounts, access and data
+
+`TERRAX_AUTH` sets who can use a server:
+
+| Value | Who can use it |
+|---|---|
+| `off` | Anyone, with no accounts. Each browser gets a random guest cookie and can only see its own uploads, results, tiles and history. A job's ID alone is not enough to read it. |
+| `optional` (default) | As `off`, and people can also create accounts. Signing in moves the browser's guest work into the account, keeps results for `TERRAX_USER_RETENTION_DAYS` (30) instead of `TERRAX_RETENTION_HOURS` (72), and adds job history and projects on any device. |
+| `required` | Everyone signs in, except for health checks and the built-in world maps. Use this on a public server (`render.yaml` does). |
+
+- **Accounts and admins.**
+  - `TERRAX_SIGNUP=closed` stops self sign-up.
+  - `TERRAX_ADMIN_EMAIL` and `TERRAX_ADMIN_PASSWORD` create the first administrator at start-up. The same variables reset that account's password.
+  - `python -m terrax.manage create-user EMAIL --admin`, `set-password`, `set-role`, `disable`, `list-users`, `purge` and `check` do the same from a shell.
+  - Admins get an **Admin** tab: accounts, usage, recorded errors.
+  - Every user can change their password or delete their account, which deletes their data.
+- **Passwords and sessions.**
+  - Passwords are hashed with scrypt (N = 2¹⁵, r = 8, p = 3, one of OWASP's recommended settings).
+  - Session tokens are 32 random bytes in an HttpOnly, SameSite cookie; only their SHA-256 is stored.
+  - Changing a password signs the account out everywhere. Scripts can send the token as `Authorization: Bearer`.
+- **Cross-site requests.** Writes whose `Origin` is neither this site nor `TERRAX_CORS` are refused.
+- **Framed hosts.** On Hugging Face Spaces, which show the app in a frame on huggingface.co, cookies are `SameSite=None; Secure; Partitioned`. Set this with `TERRAX_COOKIE_SAMESITE=none` elsewhere.
+- **Rate limits.**
+  - Answered with HTTP 429 and `Retry-After`. Limits apply per user or guest and per client address. Redis-backed with Celery, in-process otherwise.
+  - Analyses (`TERRAX_JOBS_PER_MINUTE`, 30) and uploads (`TERRAX_UPLOADS_PER_HOUR`, 300).
+  - 10 sign-in attempts per address and per e-mail in 15 minutes.
+  - Live-data and assistant requests have limits too.
+- **Storage quotas.** `TERRAX_USER_QUOTA_MB` (10,000) and `TERRAX_GUEST_QUOTA_MB` (2,000) limit what one account or guest can store.
+- **Client addresses behind proxies.** Per-address limits need the real address. In `docker-compose.yml`, nginx sets `X-Forwarded-For` to the client's address and the API trusts that one hop (`TERRAX_TRUSTED_PROXIES=1`). Behind other proxies, set the number of hops you control.
+- **Database.**
+  - SQLite in the storage folder needs nothing and suits one machine.
+  - For several machines, set `DATABASE_URL=postgresql+psycopg://…` and install `pip install 'terrax[postgres]'`. `docker-compose.yml` runs PostgreSQL itself.
+  - Tables are created on first start. Schema changes go through the numbered migrations in `db.py`.
+  - The hourly clean-up deletes expired files. History rows stay, marked expired.
+
+## Monitoring
+
+- **Request IDs and logs.**
+  - Every response has an `X-Request-ID` (the caller's, or a new one), which every log line repeats. A 500 answer quotes it.
+  - `TERRAX_LOG_FORMAT=json` writes one JSON object per line for log collectors.
+- **Health checks.** `GET /api/health` checks the process is alive. `GET /api/health/ready` also checks the database, the storage folder and, with Celery, Redis (503 when one fails).
+- **Metrics.** `GET /api/metrics` serves Prometheus metrics: requests and latency by route, uploads, sign-ins, rate-limited requests, jobs by tool and state across all workers, recent job run times, stored bytes and memory. Scrape it with `TERRAX_METRICS_TOKEN` as a bearer token; admins can open it directly.
+- **Errors.**
+  - Unexpected errors in the API, in analyses on the workers, and in browsers are recorded in the database. Browsers report uncaught exceptions and crashed views to `/api/client-errors`.
+  - They are kept for `TERRAX_ERROR_RETENTION_DAYS` and shown in the Admin tab.
+  - With `SENTRY_DSN` (and `pip install 'terrax[sentry]'`) they also go to Sentry or a Sentry-compatible service such as GlitchTip.
+
 ## AI
 
 The assistants and "Add AI interpretation" use Gemini through the server (`/api/agents`). The key can come from two places:
@@ -156,7 +205,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 165 tests: statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 202 tests, on SQLite or (with `DATABASE_URL`) PostgreSQL: accounts, sessions, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 
@@ -178,7 +227,7 @@ The root `Dockerfile` builds a single container for hosts that run one service. 
 
 **Render.** [Deploy with the blueprint](https://render.com/deploy?repo=https://github.com/Khumbemo/TerraX) (`render.yaml`). The free plan has 512 MB of memory. It runs the sample data one analysis at a time, sleeps after 15 idle minutes and takes about a minute to wake. Large rasters need a paid plan.
 
-On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are kept for `TERRAX_RETENTION_HOURS` and are lost when the container restarts.
+On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are lost when the container restarts. So is the built-in SQLite database, with its accounts, history and projects. For accounts that last, set `DATABASE_URL` to a PostgreSQL database. `render.yaml` asks for it, along with `TERRAX_AUTH=required` and the first admin's e-mail and password.
 
 To run the same container yourself:
 
@@ -188,7 +237,7 @@ docker build -t terrax . && docker run -p 7860:7860 terrax   # http://localhost:
 
 ### Full stack: Docker Compose
 
-On any machine or VM, `docker compose up --build` runs the web app (nginx), the API, Celery workers, the scheduler and Redis, with uploads kept in a volume. You can also run the `backend` image as three services (API, worker, beat) next to a managed Redis, and serve `frontend/dist` behind a proxy that forwards `/api`. `frontend/nginx.conf` is a working example. If the API is on another origin, build the app with `VITE_API_BASE=https://api.example.org` and add that origin to `TERRAX_CORS`.
+On any machine or VM, `docker compose up --build` runs the web app (nginx), the API, Celery workers, the scheduler, Redis and PostgreSQL. Uploads are kept in one volume and the database in another. Set `POSTGRES_PASSWORD`, `TERRAX_AUTH` and the first admin in `.env` (see `backend/.env.example`). Put HTTPS in front of nginx for a public server. Cookies are marked Secure when the API sees HTTPS. If TLS ends at a proxy in front of nginx, set `TERRAX_COOKIE_SECURE=true`. You can also run the `backend` image as three services (API, worker, beat) next to a managed Redis, and serve `frontend/dist` behind a proxy that forwards `/api`. `frontend/nginx.conf` is a working example. If the API is on another origin, build the app with `VITE_API_BASE=https://api.example.org` and add that origin to `TERRAX_CORS`.
 
 ## Scientific notes
 

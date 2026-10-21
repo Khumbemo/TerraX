@@ -1,7 +1,8 @@
-# TerraX: web app (nginx), Python API (FastAPI), job workers (Celery) and Redis.
-#   cp .env.example .env    # optional: GEMINI_API_KEY and limits
+# TerraX: web app (nginx), Python API (FastAPI), job workers (Celery), Redis and PostgreSQL.
+#   cp backend/.env.example .env    # set TERRAX_ADMIN_EMAIL / TERRAX_ADMIN_PASSWORD, TERRAX_AUTH, POSTGRES_PASSWORD, …
 #   docker compose up --build
 #   open http://localhost:8080
+# Accounts, sessions, job history and projects live in PostgreSQL (volume "db"); uploads and results in "storage".
 x-backend: &backend
   build: ./backend
   env_file:
@@ -10,14 +11,34 @@ x-backend: &backend
   environment:
     REDIS_URL: redis://redis:6379/0
     TERRAX_STORAGE: /data/storage
+    DATABASE_URL: postgresql+psycopg://terrax:${POSTGRES_PASSWORD:-terrax}@db:5432/terrax
+    # nginx (service "web") is the one proxy in front of the API and sets X-Forwarded-For to the client's address.
+    TERRAX_TRUSTED_PROXIES: "1"
   volumes:
     - storage:/data/storage
   depends_on:
     redis:
       condition: service_healthy
+    db:
+      condition: service_healthy
   restart: unless-stopped
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: terrax
+      POSTGRES_DB: terrax
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-terrax}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "terrax", "-d", "terrax"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
@@ -41,7 +62,8 @@ services:
 
   beat:
     <<: *backend
-    # Deletes uploads and results older than TERRAX_RETENTION_HOURS (hourly).
+    # Hourly: deletes expired uploads and results (guests after TERRAX_RETENTION_HOURS, accounts after
+    # TERRAX_USER_RETENTION_DAYS) and recorded errors older than TERRAX_ERROR_RETENTION_DAYS.
     command: ["celery", "-A", "terrax.tasks", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
     healthcheck:
       disable: true
@@ -56,3 +78,4 @@ services:
 
 volumes:
   storage:
+  db:

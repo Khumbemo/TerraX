@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 && rm
 WORKDIR /app
 COPY pyproject.toml ./
 COPY terrax ./terrax
-RUN pip install .
+RUN pip install '.[postgres,sentry]'
 COPY data ./data
 
 RUN useradd --create-home --uid 1000 terrax && mkdir -p /data/storage /tmp/numba && chown -R terrax /data /tmp/numba

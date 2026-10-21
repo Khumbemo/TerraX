@@ -29,3 +29,23 @@ services:
       # Optional: server-side Gemini key for the AI assistants (entered in the Render dashboard, never stored here).
       - key: GEMINI_API_KEY
         sync: false
+      # A public URL: everyone signs in (accounts are free to create; TERRAX_SIGNUP=closed for invitation only).
+      - key: TERRAX_AUTH
+        value: required
+      # The first administrator, created at start-up (entered in the dashboard).
+      - key: TERRAX_ADMIN_EMAIL
+        sync: false
+      - key: TERRAX_ADMIN_PASSWORD
+        sync: false
+      # The free plan's disk is wiped on every deploy and restart, and with it the built-in SQLite database (accounts,
+      # history, projects). For accounts that last, point this at PostgreSQL, e.g. a Render PostgreSQL instance's
+      # internal URL written as postgresql+psycopg://USER:PASSWORD@HOST/DB.
+      - key: DATABASE_URL
+        sync: false
+      # Optional error tracking (Sentry or a compatible service) and a token for Prometheus at /api/metrics.
+      - key: SENTRY_DSN
+        sync: false
+      - key: TERRAX_METRICS_TOKEN
+        sync: false
+      - key: TERRAX_LOG_FORMAT
+        value: json
