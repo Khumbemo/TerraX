@@ -11,7 +11,7 @@ from ..processing.render import hex_rgb, ramp_rgba, viridis
 from ..processing.rio import Ground, grid_to_lonlat_arrays
 from ..processing.terrain import ASPECTS, CONTOUR_TOLERANCE, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
 from . import tool
-from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster, save_npz
+from .common import DISPLAY_SIDE, begin_tiles, boundary, clean, display_grid, finish_tiles, grid_crs, number, raster, save_npz
 from .context import ToolContext, ToolError
 
 WETNESS_COLORS = ["#f6efd2", "#a6cee3", "#3a87c0", "#0b3b78"]  # dry → wet
@@ -137,7 +137,13 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         "slope": ctx.png("slope.png", slope_rgba(display_grid(t["_slope"]))),
         "elevation": ctx.png("elevation.png", elevation_rgba(display_grid(t["_dem"]), e["min"], e["max"])),
     }
-    image = {"url": layers["slope"], "bounds": r.meta.latlng_bounds, "label": "Slope classes", "legend": [{"color": c["color"], "label": c["label"]} for c in SLOPE_CLASSES]} if r.meta.latlng_bounds else None
+    slope = t["_slope"]
+    tiles = begin_tiles(ctx, "slope", slope.shape[1], slope.shape[0], r.transform, grid_crs(r), "float32", {"kind": "slope"}, nodata=float("nan")) if slope.shape == (r.gh, r.gw) else None
+    if tiles is not None:
+        tiles.write(0, slope.astype(np.float32, copy=False))
+    tile_info = finish_tiles(ctx, tiles, "slope", r.meta.latlng_bounds)
+    image = {"url": layers["slope"], "bounds": r.meta.latlng_bounds, "label": "Slope classes", "legend": [{"color": c["color"], "label": c["label"]} for c in SLOPE_CLASSES],
+             "tiles": tile_info} if r.meta.latlng_bounds else None
     return clean({"tool": "terrain", "name": r.meta.filename, "markdown": terrain_markdown(t, r.meta), "terrain": t, "layers": layers,
                   "suggestedInterval": nice_interval(t["relief"]), "slopeClasses": SLOPE_CLASSES, "aspects": ASPECTS, "warnings": r.meta.warnings, "map": {"bounds": r.meta.latlng_bounds, "image": image}})
 

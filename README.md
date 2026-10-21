@@ -100,7 +100,7 @@ Settings are environment variables (see `backend/.env.example`):
 - `TERRAX_EAGER`: run each job inside its request (tests, development)
 - `TERRAX_JOB_THREADS`: run jobs on this many background threads, with no Redis (one-container hosting)
 - `TERRAX_STATIC`: folder with the built web app, so the API serves it itself
-- `TERRAX_MAX_PIXELS`, `TERRAX_DEM_PIXELS`, `TERRAX_TILE_THREADS` and `TERRAX_GRID_PIXELS`: resolution and parallelism for large rasters (see **Large rasters**)
+- `TERRAX_MAX_PIXELS`, `TERRAX_DEM_PIXELS`, `TERRAX_TILE_THREADS`, `TERRAX_GRID_PIXELS` and `TERRAX_TILES_MIN_SIDE`: resolution, parallelism and map tiles for large rasters (see **Large rasters**)
 - `TERRAX_WORKER_CONCURRENCY`, `TERRAX_JOB_MINUTES` and `TERRAX_WORKER_MAX_MEMORY_MB`: Celery workers
 - `GEMINI_API_KEY` and `GEMINI_MODEL`
 - `TERRAX_CORS`
@@ -132,7 +132,7 @@ Terrain and hydrology have their own budget, `TERRAX_DEM_PIXELS` (default 25 MP,
 
 The residential plot tool reads only the window around the property from each GeoTIFF, at the file's own resolution, so a large drone orthophoto is not coarsened first (for two 100 MP orthophotos: 2.6 s and 0.4 GB, instead of 6.5 s and 0.7 GB at a quarter of the resolution). Its analysis grid is at most 1,600 cells across, with 0.1 m cells at the finest.
 
-Contours and previews keep `TERRAX_GRID_PIXELS` (default 4 MP). Map overlays are drawn at display size, while the statistics, areas and polygons come from the full grid.
+Contours run on the DEM budget (Numba marching squares, simplified to a quarter cell by Douglas–Peucker); previews keep `TERRAX_GRID_PIXELS` (default 4 MP). Map overlays are a picture of at most 4,096 cells a side; a result grid larger than that (`TERRAX_TILES_MIN_SIDE`) is also kept as a GeoTIFF with overviews, and the map switches to 256 px Web Mercator tiles from `/api/jobs/{id}/tiles/{layer}/{z}/{x}/{y}.png` once zoomed in far enough to see more than the picture holds, down to the native cells. Class maps, the satellite layer, slope, canopy height and the radar false colour have tiles.
 
 For heavy workloads:
 

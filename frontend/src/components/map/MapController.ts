@@ -790,9 +790,18 @@ export class MapController {
     const key = `${img.url}`;
     if (this.slots.get('image')?.key === key) return void this.setOpacity('image', opacity);
     const [[s, w], [n, e]] = img.bounds;
-    this.put('image', key, { [`${P}image`]: { type: 'image', url: apiUrl(img.url), coordinates: [[w, n], [e, n], [e, s], [w, s]] } }, [
-      { id: `${P}image-r`, type: 'raster', source: `${P}image`, paint: { 'raster-opacity': opacity, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } },
-    ]);
+    const paint = { 'raster-opacity': opacity, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } as const;
+    const t = img.tiles;
+    const sources: Record<string, SourceSpecification> = { [`${P}image`]: { type: 'image', url: apiUrl(img.url), coordinates: [[w, n], [e, n], [e, s], [w, s]] } };
+    // The picture is thinned to at most 4096 cells a side; from the zoom where that shows, full-resolution tiles take over.
+    const layers: LayerSpecification[] = [{ id: `${P}image-r`, type: 'raster', source: `${P}image`, paint, ...(t ? { maxzoom: t.minzoom } : {}) }];
+    if (t) {
+      // An absolute template (tiles may load off the main thread), keeping {z}/{x}/{y} unencoded.
+      const tmpl = apiUrl(t.url);
+      sources[`${P}image-tiles`] = { type: 'raster', tiles: [/^https?:/.test(tmpl) ? tmpl : `${location.origin}${tmpl}`], tileSize: 256, bounds: t.bounds, minzoom: Math.max(0, t.minzoom), maxzoom: t.maxzoom };
+      layers.push({ id: `${P}image-tiles-r`, type: 'raster', source: `${P}image-tiles`, minzoom: t.minzoom, paint });
+    }
+    this.put('image', key, sources, layers);
   }
 
   private boundaryLayer(b: Boundary | null) {

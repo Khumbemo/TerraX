@@ -217,6 +217,9 @@ def test_canopy_from_point_cloud_and_rasters(client, tmp_path):
     c = res["canopy"]
     assert c["trees"]["count"] == 25 and 8 <= c["height"]["max"] <= 30.5 and 0.05 < c["cover"] < 0.6
     assert res["map"]["geojson"]["features"] and "Popescu & Wynne" in res["markdown"]
+    # The CHM picture sits where the tree tops are (its bounds once had west/south swapped).
+    (s_, w_), (n_, e_) = res["map"]["image"]["bounds"]
+    assert all(w_ <= f["geometry"]["coordinates"][0] <= e_ and s_ <= f["geometry"]["coordinates"][1] <= n_ for f in res["map"]["geojson"]["features"])
     chm_url = next(d["url"] for d in res["downloads"] if d["filename"].endswith(".tif"))
     p = tmp_path / "chm.tif"
     p.write_bytes(client.get(chm_url).content)

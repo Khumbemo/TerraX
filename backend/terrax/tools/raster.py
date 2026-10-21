@@ -9,7 +9,7 @@ from ..processing.render import ramp_rgba
 from ..processing.report import with_quality
 from ..processing.rio import Raster
 from . import tool
-from .common import bands, boundary, clean, raster
+from .common import bands, begin_tiles, boundary, clean, finish_tiles, grid_crs, raster
 from .context import ToolContext, ToolError
 
 
@@ -19,16 +19,21 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     view = params.get("view") or {"mode": "band", "band": 0}
     if view.get("mode") == "index":
         view = {**view, "bands": bands(view, "bands")}
-    ds, pv = dataset(r, view, boundary(params))
+    tiles = begin_tiles(ctx, "layer", r.gw, r.gh, r.transform, grid_crs(r), "float32", {"kind": "ramp", "min": 0.0, "max": 1.0}, nodata=float("nan"))
+    ds, pv = dataset(r, view, boundary(params), sink=tiles.write if tiles else None)
     ctx.progress(0.6, "Rendering preview")
     s = ds["stats"]
     image = None
+    tile_info = None
+    if tiles is not None:
+        tiles.recipe = {"kind": "ramp", "min": s["min"], "max": s["max"]} if s else tiles.recipe
+        tile_info = finish_tiles(ctx, tiles, "layer", r.meta.latlng_bounds)
     if s:
         url = ctx.png("preview.png", ramp_rgba(pv, s["min"], s["max"]))
         ds["preview"] = {"url": url, "width": int(pv.shape[1]), "height": int(pv.shape[0]), "min": s["min"], "max": s["max"]}
         if r.meta.latlng_bounds:
             label = next((d.short for d in INDICES if d.id == view.get("index")), f"Band {ds['view'].get('band', 0) + 1}") if view.get("mode") == "index" else f"Band {ds['view']['band'] + 1}"
-            image = {"url": url, "bounds": r.meta.latlng_bounds, "label": label, "legend": [], "ramp": {"min": s["min"], "max": s["max"], "palette": "viridis"}}
+            image = {"url": url, "bounds": r.meta.latlng_bounds, "label": label, "legend": [], "ramp": {"min": s["min"], "max": s["max"], "palette": "viridis"}, "tiles": tile_info}
     md = with_quality(raster_report(ds), ds["warnings"])
     return clean({"tool": "satellite", "name": r.meta.filename, "markdown": md, "dataset": ds, "map": {"bounds": r.meta.latlng_bounds, "image": image}})
 

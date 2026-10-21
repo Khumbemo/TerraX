@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from .. import __version__, storage
@@ -167,6 +167,20 @@ def artifact(job_id: str, name: str) -> FileResponse:
     p = storage.artifact_path(job_id, name)
     media = mimetypes.guess_type(p.name)[0] or ("application/geo+json" if p.suffix == ".geojson" else "application/octet-stream")
     return FileResponse(p, media_type=media, headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.get("/api/jobs/{job_id}/tiles/{name}/{z}/{x}/{y}.png")
+def tile(job_id: str, name: str, z: int, x: int, y: int) -> Response:
+    """A 256 × 256 Web Mercator tile of a full-resolution result layer (204 when it holds no data)."""
+    from ..processing.maptiles import render_tile
+    from ..processing.render import png_bytes
+
+    p = storage.artifact_path(job_id, f"tiles_{name}.tif")
+    rgba = render_tile(p, z, x, y)
+    headers = {"Cache-Control": "private, max-age=86400"}
+    if rgba is None:
+        return Response(status_code=204, headers=headers)
+    return Response(png_bytes(rgba), media_type="image/png", headers=headers)
 
 
 def include_routers() -> None:

@@ -7,7 +7,7 @@ import numpy as np
 from ..processing.radar import CHANGE, ENL_IW_GRD, analyze_radar, radar_markdown
 from ..processing.rio import Raster
 from . import tool
-from .common import boundary, class_overlay, clean, number, raster
+from .common import begin_tiles, boundary, class_overlay, clean, finish_tiles, grid_crs, number, raster
 from .context import ToolContext, ToolError
 
 
@@ -52,16 +52,25 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     enl = number(params, "enl", ENL_IW_GRD, 1, 100, "Set the equivalent number of looks between 1 and 100.")
     thr = number(params, "thresholdDb", 3.0, 0.1, 20, "Set the change threshold between 0.1 and 20 dB.")
     ctx.progress(0.15, "Filtering speckle")
+    tiles = begin_tiles(ctx, "composite", before.gw, before.gh, before.transform, grid_crs(before), "uint8", {"kind": "rgba"}, count=4)
+
+    def sink(r0: int, vv_db: np.ndarray, vh_db: np.ndarray) -> None:
+        if tiles is not None:
+            tiles.write(r0, np.moveaxis(composite_rgba(vv_db, vh_db), -1, 0))
+
     try:
-        res = analyze_radar(images, vv, vh, boundary(params), size, enl, thr, scale)
+        res = analyze_radar(images, vv, vh, boundary(params), size, enl, thr, scale, sink=sink)
     except ValueError as e:
+        if tiles is not None:
+            tiles.close()
         raise ToolError(str(e)) from None
+    composite_tiles = finish_tiles(ctx, tiles, "composite", before.meta.latlng_bounds)
     ctx.progress(0.8, "Rendering")
     views = res.pop("views")
     image_url = ctx.png("composite.png", composite_rgba(views["vv"], views["vh"]))
     bounds = before.meta.latlng_bounds
     image = {"url": image_url, "bounds": bounds, "label": "Sentinel-1 false colour (R VV, G VH, B VV/VH)", "legend": [],
-             "width": int(views["vv"].shape[1]), "height": int(views["vv"].shape[0])} if bounds else None
+             "width": int(views["vv"].shape[1]), "height": int(views["vv"].shape[0]), "tiles": composite_tiles} if bounds else None
     downloads = []
     change_image = None
     ch = res.get("change")

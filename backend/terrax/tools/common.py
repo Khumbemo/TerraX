@@ -76,8 +76,62 @@ def display_grid(a: np.ndarray, side: int = DISPLAY_SIDE) -> np.ndarray:
     return a[::k, ::k] if k > 1 else a
 
 
+#: Grids with a longer side than this also get full-resolution map tiles (the picture is thinned beyond it);
+#: None reads TERRAX_TILES_MIN_SIDE.
+TILES_MIN_SIDE: int | None = None
+
+
+def grid_crs(r: Raster):
+    """The CRS of a raster's analysis grid (WGS84 for geographic files that declare none), or None."""
+    if r.crs is not None:
+        return r.crs
+    return "EPSG:4326" if r.meta.geographic else None
+
+
+def begin_tiles(ctx: ToolContext, name: str, width: int, height: int, transform, crs, dtype: str, recipe: dict, count: int = 1, nodata: float | None = None):
+    """A TileSource for a grid too large for one picture, or None (small grid, or no georeferencing)."""
+    from ..processing.maptiles import TileSource
+
+    limit = TILES_MIN_SIDE if TILES_MIN_SIDE is not None else settings().tiles_min_side
+    if max(width, height) <= limit or transform is None or crs is None:
+        return None
+    return TileSource(ctx.dir / f"tiles_{name}.tif", width, height, transform, crs, dtype, recipe, count, nodata)
+
+
+def finish_tiles(ctx: ToolContext, src, name: str, bounds) -> dict | None:
+    """Closes a TileSource and describes its tiles for the map: URL template and the zoom range where they add detail."""
+    if src is None:
+        return None
+    from ..processing.maptiles import native_zoom
+
+    src.close()
+    if not bounds:
+        return None
+    (s, w), (n, e) = bounds
+    lat = (s + n) / 2
+    cell_m = (e - w) * 111_320 * math.cos(math.radians(lat)) / src.width
+    k = max(1, -(-max(src.width, src.height) // DISPLAY_SIDE))
+    return {"url": f"/api/jobs/{ctx.job_id}/tiles/{name}/{{z}}/{{x}}/{{y}}.png", "minzoom": native_zoom(cell_m * k, lat), "maxzoom": native_zoom(cell_m, lat),
+            "bounds": [w, s, e, n]}
+
+
+def class_tiles(ctx: ToolContext, name: str, classes: np.ndarray, legend: Sequence[Mapping[str, Any]], r: Raster) -> dict | None:
+    """Full-resolution tiles of a whole class grid (when it is larger than the picture)."""
+    if classes.shape != (r.gh, r.gw):
+        return None
+    palette = {str(c["id"]): list(c["color"]) for c in legend}
+    src = begin_tiles(ctx, name, classes.shape[1], classes.shape[0], r.transform, grid_crs(r), "uint8", {"kind": "classes", "palette": palette}, nodata=0)
+    if src is None:
+        return None
+    step = 4096
+    for r0 in range(0, classes.shape[0], step):
+        src.write(r0, classes[r0 : r0 + step].astype(np.uint8))
+    return finish_tiles(ctx, src, name, r.meta.latlng_bounds)
+
+
 def class_overlay(ctx: ToolContext, name: str, classes: np.ndarray, legend: Sequence[Mapping[str, Any]], r: Raster, label: str) -> dict | None:
     """Saves a class map as PNG and returns the map-image description (None without a WGS84 footprint)."""
+    tiles = class_tiles(ctx, name.rsplit(".", 1)[0], classes, legend, r)
     classes = display_grid(classes)
     palette = {c["id"]: tuple(c["color"]) for c in legend}
     url = ctx.png(name, classes_rgba(classes, palette, alpha=255))
@@ -89,6 +143,7 @@ def class_overlay(ctx: ToolContext, name: str, classes: np.ndarray, legend: Sequ
         "legend": [{"color": f"rgb({','.join(str(x) for x in c['color'])})", "label": c["label"]} for c in legend],
         "width": int(classes.shape[1]),
         "height": int(classes.shape[0]),
+        "tiles": tiles,
     } if bounds else {"url": url, "bounds": None, "label": label, "legend": [], "width": int(classes.shape[1]), "height": int(classes.shape[0])}
 
 

@@ -50,8 +50,11 @@ class _Layer:
         return a, masked
 
 
-def _gather(r: Raster, layer: _Layer, boundary=None, with_preview: bool = False) -> tuple[np.ndarray, np.ndarray | None, int, int]:
-    """Finite values of a layer (float32), its preview grid, cells masked by QA and cells inside the boundary."""
+def _gather(r: Raster, layer: _Layer, boundary=None, with_preview: bool = False, sink=None) -> tuple[np.ndarray, np.ndarray | None, int, int]:
+    """Finite values of a layer (float32), its preview grid, cells masked by QA and cells inside the boundary.
+
+    `sink(r0, rows)`, when given, also receives every strip of the layer (NaN outside the boundary and for no data).
+    """
     plan = StripPlan(r, boundary)
     w, h = plan.width, plan.height
     pv = pys = pxs = None
@@ -73,6 +76,8 @@ def _gather(r: Raster, layer: _Layer, boundary=None, with_preview: bool = False)
             sel = np.flatnonzero((pys >= st.r0) & (pys < st.r1))
             if sel.size:
                 pv[sel] = a[pys[sel] - st.r0][:, pxs]
+        if sink is not None:
+            sink(st.r0, a.astype(np.float32, copy=False))
         collected.add(a[np.isfinite(a)])
         return masked, inside
 
@@ -82,11 +87,12 @@ def _gather(r: Raster, layer: _Layer, boundary=None, with_preview: bool = False)
     return collected.values, pv, sum(p[0] for p in parts), inside
 
 
-def dataset(r: Raster, view: dict, boundary=None) -> tuple[dict, np.ndarray]:
-    """Statistics, histogram and hints of one layer, read in strips at full resolution; also returns its preview grid."""
+def dataset(r: Raster, view: dict, boundary=None, sink=None) -> tuple[dict, np.ndarray]:
+    """Statistics, histogram and hints of one layer, read in strips at full resolution; also returns its preview grid
+    (and hands every strip to `sink(r0, rows)` when given)."""
     layer = _Layer(r, view)
     w, h = r.gw, r.gh
-    vals, pv, masked, inside = _gather(r, layer, boundary, with_preview=True)
+    vals, pv, masked, inside = _gather(r, layer, boundary, with_preview=True, sink=sink)
     assert pv is not None
     hints: list[str] = []
     if boundary:

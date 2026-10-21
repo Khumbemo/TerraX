@@ -172,8 +172,11 @@ def _db(a: np.ndarray) -> np.ndarray:
 
 
 def analyze_radar(images: list[Raster], vv: int, vh: int, boundary=None, size: int = 5, enl: float = ENL_IW_GRD, threshold_db: float = 3.0,
-                  scale: str = "auto", display_side: int = 4096) -> dict:
-    """Per-date backscatter statistics and, for two images, the VH log-ratio change map, in strips."""
+                  scale: str = "auto", display_side: int = 4096, sink=None) -> dict:
+    """Per-date backscatter statistics and, for two images, the VH log-ratio change map, in strips.
+
+    `sink(r0, vv_db, vh_db)`, when given, receives the filtered backscatter of the last image strip by strip.
+    """
     if not 1 <= len(images) <= 2:
         raise ValueError("Add one Sentinel-1 image, or two (before and after) for change.")
     for r in images:
@@ -232,6 +235,8 @@ def analyze_radar(images: list[Raster], vv: int, vh: int, boundary=None, size: i
         sel = np.flatnonzero((np.arange(st.r0, st.r1) % k) == 0)
         last = filt[-1]
         out["views"] = [(st.r0 + int(j), _db(last[0][j, ::k]), _db(last[1][j, ::k])) for j in sel]
+        if sink is not None:
+            sink(st.r0, _db(last[0]), _db(last[1]))
         if two and change is not None:
             d = log_ratio(filt)
             ok = np.isfinite(d)
