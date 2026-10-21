@@ -268,6 +268,21 @@ def reflectance_transform(item: StacItem, asset: str) -> tuple[float, float, str
     return 1e-4, 0.0, "Reflectance = DN / 10,000."
 
 
+def offset_in_data(blue_dn: np.ndarray, scl: np.ndarray) -> bool | None:
+    """Whether the digital numbers still carry ESA's BOA_ADD_OFFSET (+1000), judged from the data itself.
+
+    The STAC metadata can say "offset −0.1" for files whose numbers do not contain it (Earth Search scenes of 2024 with
+    baseline 05.10 do: half their red values are below 1000, which would be negative reflectance). Healthy vegetation
+    absorbs blue strongly, so its blue surface reflectance is about 0.01–0.06: with the offset in the file its blue
+    numbers sit near 1100–1600, without it near 100–600. The median over pixels the scene classes as vegetation
+    (SCL 4) against 1000 separates the two widely. None when there are too few such pixels to tell (desert, snow).
+    """
+    veg = (scl == 4) & (blue_dn > 0)
+    if int(veg.sum()) < 50:
+        return None
+    return bool(np.median(blue_dn[veg]) >= 1000)
+
+
 S2_BANDS = ["blue", "green", "red", "nir"]
 S2_MAX_SIDE = 1500
 
@@ -319,18 +334,29 @@ def read_s2_window(item: StacItem, bbox: list[float], out: Path) -> list[str]:
             window = Window(c0, r0, gw, gh)
             transform = ds.window_transform(window)
             crs = ds.crs
+        dns = {}
         for k in S2_BANDS:
             with rasterio.open(item.assets[k]["href"]) as ds:
-                dn = ds.read(1, window=window).astype(np.float32)
-            scale, offset, note = reflectance_transform(item, k)
-            if k == "blue":
-                notes.append(note)
-            stack.append(np.where(dn == 0, np.nan, dn * np.float32(scale) + np.float32(offset)).astype(np.float32))
+                dns[k] = ds.read(1, window=window).astype(np.float32)
         left, top = transform.c, transform.f
         with rasterio.open(item.assets["scl"]["href"]) as ds:
             sw = from_bounds(left, top - gh * 10, left + gw * 10, top, ds.transform)
             scl = ds.read(1, window=sw, out_shape=(gh, gw), resampling=Resampling.nearest, boundless=True, fill_value=0).astype(np.float32)
-        stack.append(np.where(scl == 0, np.nan, scl).astype(np.float32))
+    in_data = offset_in_data(dns["blue"], scl)
+    for k in S2_BANDS:
+        scale, offset, note = reflectance_transform(item, k)
+        if in_data is False and offset != 0:
+            offset, note = 0.0, (f"Reflectance = DN × {scale:g}. The metadata gives an offset of {offset:g}, but these files do not contain it: over "
+                                 "vegetation the blue numbers are far below 1000, where the offset would put them (they would be negative reflectance).")
+        elif in_data is True and offset == 0:
+            offset, note = -0.1, ("Reflectance = (DN − 1000) / 10,000. The metadata gives no offset, but over vegetation the blue numbers are above "
+                                  "1000, which only the processing-baseline offset explains.")
+        elif in_data is None:
+            note += " (Too little vegetation in the area to check this against the data.)"
+        if k == "blue":
+            notes.append(note)
+        stack.append(np.where(dns[k] == 0, np.nan, dns[k] * np.float32(scale) + np.float32(offset)).astype(np.float32))
+    stack.append(np.where(scl == 0, np.nan, scl).astype(np.float32))
 
     profile = {"driver": "GTiff", "width": gw, "height": gh, "count": 5, "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan, "compress": "deflate", "tiled": True}
     with rasterio.open(out, "w", **profile) as dst:

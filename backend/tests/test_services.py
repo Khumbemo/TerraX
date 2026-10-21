@@ -267,3 +267,32 @@ def test_s1_window_and_matching_onto_the_first_grid(tmp_path, monkeypatch):
     assert vv2[50, j] == approx(0.1 * (1 + 0.001 * (col0 + j - 0.5)), rel=1e-5)
     with pytest.raises(ValueError, match="does not overlap"):
         live.read_s1_window(first, [10, 10, 10.1, 10.1], tmp_path / "c.tif", "tok")
+
+
+def test_sentinel_offset_is_checked_against_the_data(tmp_path, monkeypatch):
+    """Earth Search scenes of 2024 (baseline 05.10) say "offset −0.1" in their metadata, but their numbers do not carry
+    it: measured live over Kohima, vegetation red was 870–960 at the median (−0.05 reflectance with the offset, 0.09
+    without). The offset is decided from blue over SCL vegetation, where reflectance is about 0.01–0.06."""
+    E0, N0 = 600000, 2850000
+
+    def mk(name, w, res, value):
+        p = tmp_path / f"{name}.tif"
+        with rasterio.open(p, "w", driver="GTiff", width=w, height=w, count=1, dtype="uint16", crs="EPSG:32646", transform=from_origin(E0, N0, res, res)) as d:
+            d.write(np.full((w, w), value, dtype=np.uint16), 1)
+        return str(p)
+
+    files = {"blue": mk("blue", 200, 10, 300), "green": mk("green", 200, 10, 600), "red": mk("red", 200, 10, 450), "nir": mk("nir", 200, 10, 2600), "scl": mk("scl", 100, 20, 4)}
+    monkeypatch.setattr(live, "_allowed_href", lambda href: True)
+    assets = {k: {"href": v, "scale": 0.0001, "offset": -0.1} for k, v in files.items()}
+    item = live.StacItem(id="H", datetime="2024-03-18T00:00:00Z", cloud=2.0, epsg=32646, assets=assets, processing_baseline="05.10")
+    inv = Transformer.from_crs(32646, 4326, always_xy=True)
+    (lon_a, lon_b), (lat_a, lat_b) = inv.transform([E0 + 500, E0 + 1500], [N0 - 1500, N0 - 500])
+    notes = live.read_s2_window(item, [lon_a, lat_a, lon_b, lat_b], tmp_path / "h.tif")
+    with rasterio.open(tmp_path / "h.tif") as d:
+        assert d.read(3)[0, 0] == approx(0.045, abs=1e-6) and d.read(4)[0, 0] == approx(0.26, abs=1e-6)
+    assert any("do not contain it" in n for n in notes)
+    # The decision itself: offset in the data, not in it, or too little vegetation to tell.
+    veg = np.full((20, 20), 4.0)
+    assert live.offset_in_data(np.full((20, 20), 1350.0), veg) is True
+    assert live.offset_in_data(np.full((20, 20), 350.0), veg) is False
+    assert live.offset_in_data(np.full((20, 20), 350.0), np.full((20, 20), 5.0)) is None
