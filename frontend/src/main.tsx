@@ -2,17 +2,23 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { AccountProvider } from './lib/account';
+import { installErrorReporting } from './lib/errorReport';
 import { PrefsProvider } from './lib/prefs';
 import { ToastProvider } from './lib/toast';
 import './index.css';
+
+installErrorReporting();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <PrefsProvider>
       <ToastProvider>
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
+        <AccountProvider>
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
+        </AccountProvider>
       </ToastProvider>
     </PrefsProvider>
   </StrictMode>,

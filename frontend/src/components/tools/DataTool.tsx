@@ -212,7 +212,7 @@ export default function DataTool({ variant, onOutput, boundary, target }: Props)
                 <p className="notice">This table has no numeric columns to analyse.</p>
               )
             ) : (
-              <RasterPanel key={loaded.file.id} dataset={loaded.job.dataset} fileId={loaded.file.id} guessedBands={(loaded.file.meta.guessedBands ?? {}) as BandMap} busy={busy} onChangeView={changeView} />
+              <RasterPanel key={loaded.file.id} dataset={loaded.job.dataset} fileId={loaded.file.id} fileToken={loaded.file.token} guessedBands={(loaded.file.meta.guessedBands ?? {}) as BandMap} busy={busy} onChangeView={changeView} />
             )}
           </Suspense>
         </>

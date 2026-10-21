@@ -30,8 +30,17 @@ export default defineConfig({
           command: `${python} -m uvicorn terrax.api.main:app --host 127.0.0.1 --port 8000`,
           cwd: '../backend',
           url: 'http://127.0.0.1:8000/api/health',
-          // Tiles for any grid over 64 cells, so the small samples exercise full-resolution map tiles too.
-          env: { TERRAX_EAGER: 'true', TERRAX_STORAGE: process.env.TERRAX_STORAGE ?? '/tmp/terrax-e2e-storage', TERRAX_RETENTION_HOURS: '0', TERRAX_TILES_MIN_SIDE: '64' },
+          // Tiles for any grid over 64 cells, so the small samples exercise full-resolution map tiles too. Parallel tests
+          // share one address, so rate limits are off (pytest checks them); accounts.spec signs in as this admin.
+          env: {
+            TERRAX_EAGER: 'true',
+            TERRAX_STORAGE: process.env.TERRAX_STORAGE ?? '/tmp/terrax-e2e-storage',
+            TERRAX_RETENTION_HOURS: '0',
+            TERRAX_TILES_MIN_SIDE: '64',
+            TERRAX_RATE_LIMITS: 'false',
+            TERRAX_ADMIN_EMAIL: 'admin@terrax.test',
+            TERRAX_ADMIN_PASSWORD: 'e2e admin passphrase',
+          },
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },

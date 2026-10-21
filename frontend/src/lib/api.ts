@@ -10,7 +10,14 @@ const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 
 export const apiUrl = (path: string) => (/^https?:\/\//.test(path) ? path : `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`);
 
-class ApiError extends Error {
+/** Fired when the server needs a sign-in (HTTP 401 outside the sign-in endpoints); the account UI listens for it. */
+export const SIGNIN_NEEDED = 'terrax:signin-needed';
+
+function signInNeeded(path: string, status: number, message: string) {
+  if (status === 401 && !path.startsWith('/api/auth/') && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SIGNIN_NEEDED, { detail: message }));
+}
+
+export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
@@ -34,6 +41,7 @@ export async function request<T>(path: string, init: RequestInit & { json?: unkn
   let res: Response;
   try {
     res = await fetch(apiUrl(path), {
+      credentials: 'include', // the session or guest cookie, also when the API is on another origin (VITE_API_BASE)
       ...rest,
       headers: { ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers },
       body: json !== undefined ? JSON.stringify(json) : rest.body,
@@ -42,8 +50,12 @@ export async function request<T>(path: string, init: RequestInit & { json?: unkn
     if ((err as Error)?.name === 'AbortError') throw err;
     throw new ApiError('Could not reach the TerraX server. Check that the API is running and your connection works.', 0);
   }
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(detail(body, res.status), res.status);
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = detail(body, res.status);
+    signInNeeded(path, res.status, message);
+    throw new ApiError(message, res.status);
+  }
   return body as T;
 }
 
@@ -95,6 +107,8 @@ export interface StoredFile<M = Record<string, any>> {
   created: number;
   meta: M & { error?: string };
   sample: boolean;
+  /** Signed, expiring token that opens the file's pictures (composites) without cookies, e.g. from an API on another site. */
+  token?: string;
 }
 
 /** Uploads a file (with progress) and returns what the server found in it. */
@@ -102,9 +116,15 @@ export function uploadFile(file: File, onProgress?: (fraction: number) => void, 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', apiUrl('/api/files'));
+    xhr.withCredentials = true;
     xhr.responseType = 'json';
     xhr.upload.onprogress = e => e.lengthComputable && onProgress?.(e.loaded / e.total);
-    xhr.onload = () => (xhr.status < 300 ? resolve(xhr.response as StoredFile) : reject(new ApiError(detail(xhr.response, xhr.status), xhr.status)));
+    xhr.onload = () => {
+      if (xhr.status < 300) return resolve(xhr.response as StoredFile);
+      const message = detail(xhr.response, xhr.status);
+      signInNeeded('/api/files', xhr.status, message);
+      reject(new ApiError(message, xhr.status));
+    };
     xhr.onerror = () => reject(new ApiError(`Could not upload ${file.name}: the TerraX server is not reachable.`, 0));
     xhr.onabort = () => reject(new DOMException('Upload cancelled', 'AbortError'));
     if (signal?.aborted) return reject(new DOMException('Upload cancelled', 'AbortError'));

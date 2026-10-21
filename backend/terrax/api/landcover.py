@@ -10,14 +10,16 @@ import math
 from pathlib import Path
 
 import numpy as np
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import storage
+from .. import auth, storage
+from ..auth import Principal, principal
 from ..config import settings
 from ..processing.accuracy import allocate, assess, stratified_sample
 from ..processing.rio import Raster, grid_to_lonlat_arrays
 from ..processing.stats import fmt
+from ..signing import sign_urls
 
 router = APIRouter()
 
@@ -33,8 +35,9 @@ class AccuracyRequest(BaseModel):
     file: str
 
 
-def _job(job_id: str) -> tuple[dict, Path]:
+def _job(job_id: str, p: Principal) -> tuple[dict, Path]:
     try:
+        auth.own_job(p, job_id)
         st = storage.job_status(job_id)
     except KeyError:
         raise HTTPException(404, "That classification is no longer on the server. Run it again.") from None
@@ -61,8 +64,8 @@ def cochran_n(weights: np.ndarray, user_accuracy: float = 0.8, se: float = 0.01)
 
 
 @router.post("/api/landcover/{job_id}/sample")
-def sample(job_id: str, req: SampleRequest) -> dict:
-    res, art = _job(job_id)
+def sample(job_id: str, req: SampleRequest, p: Principal = Depends(principal)) -> dict:
+    res, art = _job(job_id, p)
     d = np.load(art / "classes.npz")
     classes, row_area = d["classes"], d["rowArea"]
     stats = res["landcover"]["stats"]
@@ -96,7 +99,7 @@ def sample(job_id: str, req: SampleRequest) -> dict:
     base = res["landcover"]["filename"].rsplit(".", 1)[0]
     (art / f"{base}_validation_sample.csv").write_text(lines.getvalue(), encoding="utf-8")
     def download(label: str, name: str, media: str) -> dict:
-        return {"label": label, "filename": name, "url": f"/api/jobs/{job_id}/artifacts/{name}", "mediaType": media}
+        return {"label": label, "filename": name, "url": sign_urls(f"/api/jobs/{job_id}/artifacts/{name}", job_id), "mediaType": media}
 
     downloads = [download("Validation sample (CSV)", f"{base}_validation_sample.csv", "text/csv")]
     if feats:
@@ -137,13 +140,14 @@ def _read_labels(path, name: str) -> dict[str, str]:
 
 
 @router.post("/api/landcover/{job_id}/accuracy")
-def accuracy(job_id: str, req: AccuracyRequest) -> dict:
-    _, art = _job(job_id)
+def accuracy(job_id: str, req: AccuracyRequest, who: Principal = Depends(principal)) -> dict:
+    _, art = _job(job_id, who)
     try:
         s = json.loads((art / "sample.json").read_text())
     except FileNotFoundError:
         raise HTTPException(400, "Create the validation sample first, then label it.") from None
     try:
+        auth.own_file(who, req.file)
         f = storage.get_file(req.file)
     except KeyError:
         raise HTTPException(404, "The labelled file is no longer on the server. Upload it again.") from None

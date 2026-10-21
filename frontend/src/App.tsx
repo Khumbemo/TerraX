@@ -10,12 +10,13 @@ import type { DrawState } from './components/map/MapController';
 import PlanetaryTelemetry from './components/PlanetaryTelemetry';
 import ReportPanel from './components/ReportPanel';
 import SessionGate from './components/SessionGate';
+import { useAccount } from './lib/account';
 import type { Target } from './components/SettingsModal';
 import ToolHub from './components/ToolHub';
 import { chat, getAiMode, type AiMode, type ChatTurn } from './lib/ai';
 import { downloadText, safeFilename } from './lib/download';
 import { usePrefs } from './lib/prefs';
-import { buildProject, mergeReports, parseProject } from './lib/project';
+import { buildProject, mergeReports, parseProject, type Project } from './lib/project';
 import { loadReports, saveReports } from './lib/reports';
 import { getJSON, removeItem, setJSON } from './lib/storage';
 import { useToast } from './lib/toast';
@@ -38,6 +39,7 @@ const CanopyTool = lazy(() => import('./components/tools/CanopyTool'));
 const ReportsView = lazy(() => import('./components/ReportsView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
 const Tour = lazy(() => import('./components/Tour'));
+const AccountDialog = lazy(() => import('./components/AccountDialog'));
 import SpaceBackground from './components/SpaceBackground';
 
 const AI_MODE_TEXT: Record<AiMode, string> = {
@@ -57,6 +59,7 @@ const STARTER_SUGGESTIONS = ['What can you do?', 'How do I estimate forest loss?
 export default function App() {
   const notify = useToast();
   const { t } = usePrefs();
+  const account = useAccount();
   const [session, setSession] = useState<{ operator: string } | null>(() => getJSON('session', null));
   const [view, setView] = useState<View>('explore');
   const [settings, setSettings] = useState<{ open: boolean; tab?: 'settings' | 'map' | 'guide' | 'gee' | 'about' }>({ open: false });
@@ -89,7 +92,8 @@ export default function App() {
   const refreshAi = useCallback(() => {
     getAiMode().then(setAiMode);
   }, []);
-  useEffect(refreshAi, [refreshAi]);
+  // Again after signing in or out: a server that needs a sign-in only answers then.
+  useEffect(refreshAi, [refreshAi, account.user?.id]);
 
   const [tour, setTour] = useState(false);
   const endTour = useCallback(() => {
@@ -140,27 +144,36 @@ export default function App() {
   };
 
   const PREF_KEYS = ['declination', 'units', 'theme', 'lang'];
-  const exportProject = () => {
+  const currentProject = (): Project => {
     const preferences: Record<string, unknown> = {};
     for (const k of PREF_KEYS) {
       const v = getJSON<unknown>(k, null);
       if (v !== null) preferences[k] = v;
     }
-    const p = buildProject({ target, boundary, reports, preferences });
-    downloadText(JSON.stringify(p), `TerraX_project_${new Date().toISOString().slice(0, 10)}.terrax.json`, 'application/json').catch(err =>
+    return buildProject({ target, boundary, reports, preferences });
+  };
+  const exportProject = () => {
+    downloadText(JSON.stringify(currentProject()), `TerraX_project_${new Date().toISOString().slice(0, 10)}.terrax.json`, 'application/json').catch(err =>
       notify(err instanceof Error ? err.message : 'The download failed.', 'error'),
     );
   };
 
+  /** Opens a project (from a file or the server): its reports join the saved ones; boundary, target and preferences replace the current ones. */
+  const applyProject = (p: Project, done: string) => {
+    const { reports: merged, added } = mergeReports(reports, p.reports);
+    persistReports(merged);
+    if (p.target) updateTarget(p.target);
+    if (p.boundary) setBoundary(p.boundary);
+    for (const k of PREF_KEYS) if (k in p.preferences) setJSON(k, p.preferences[k]);
+    notify(`${done}: ${added} new report${added === 1 ? '' : 's'}${p.boundary ? ', analysis boundary' : ''}${p.target ? ', target location' : ''}. Reload to apply display preferences.`, 'success');
+  };
+
+  const saveReportText = (title: string, datasetName: string, markdown: string) =>
+    saveReport({ id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, title, datasetName, createdAt: new Date().toISOString(), source: 'local', content: markdown });
+
   const importProject = async (file: File) => {
     try {
-      const p = parseProject(JSON.parse(await file.text()));
-      const { reports: merged, added } = mergeReports(reports, p.reports);
-      persistReports(merged);
-      if (p.target) updateTarget(p.target);
-      if (p.boundary) setBoundary(p.boundary);
-      for (const k of PREF_KEYS) if (k in p.preferences) setJSON(k, p.preferences[k]);
-      notify(`Project imported: ${added} new report${added === 1 ? '' : 's'}${p.boundary ? ', analysis boundary' : ''}${p.target ? ', target location' : ''}. Reload to apply display preferences.`, 'success');
+      applyProject(parseProject(JSON.parse(await file.text())), 'Project imported');
     } catch (err) {
       notify(err instanceof SyntaxError ? `${file.name} is not valid JSON.` : err instanceof Error ? err.message : 'Could not import the project.', 'error');
     }
@@ -213,11 +226,27 @@ export default function App() {
     }
   };
 
+  const accountDialog = (page = false) => (
+    <Suspense fallback={null}>
+      <AccountDialog currentProject={currentProject} applyProject={applyProject} saveReport={saveReportText} page={page} />
+    </Suspense>
+  );
+
+  // A server with TERRAX_AUTH=required: sign in before anything else.
+  if (account.me?.mode === 'required' && !account.user)
+    return (
+      <>
+        <SpaceBackground target={target} />
+        {accountDialog(true)}
+      </>
+    );
+
   if (!session)
     return (
       <>
         <SpaceBackground target={target} />
-        <SessionGate onStart={startSession} />
+        <SessionGate onStart={startSession} account={account.me && account.me.mode !== 'off' ? account : null} />
+        {account.dialog && accountDialog()}
       </>
     );
 
@@ -253,6 +282,16 @@ export default function App() {
             AI {aiMode === 'off' ? 'off' : aiMode ? 'on' : '…'}
           </span>
           {session.operator && <span className="operator">{session.operator}</span>}
+          {account.me && account.me.mode !== 'off' && (
+            <button type="button" id="account-button" className="link-btn" onClick={() => account.openDialog(account.user ? 'history' : 'signin')}>
+              {account.user ? account.user.name || account.user.email : 'Sign in'}
+            </button>
+          )}
+          {account.me?.mode === 'off' && (
+            <button type="button" id="account-button" className="link-btn" onClick={() => account.openDialog('history')}>
+              History
+            </button>
+          )}
           <button type="button" className="link-btn" onClick={endSession}>
             {t('nav.end')}
           </button>
@@ -276,6 +315,8 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {account.dialog && accountDialog()}
 
       {tour && (
         <Suspense fallback={null}>

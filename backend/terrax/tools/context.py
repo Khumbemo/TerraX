@@ -19,6 +19,8 @@ class ToolError(ValueError):
 class ToolContext:
     def __init__(self, job_id: str):
         self.job_id = job_id
+        #: Who ran the job; files the tool stores (for example a downloaded Sentinel scene) belong to them.
+        self.owner = storage.job_owner(job_id)
         self.dir = storage.job_dir(job_id) / "artifacts"
         self.dir.mkdir(parents=True, exist_ok=True)
 

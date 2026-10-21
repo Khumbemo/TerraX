@@ -40,6 +40,8 @@ interface Props {
   dataset: RasterDataset;
   /** Id of the uploaded GeoTIFF, for composites and the pixel inspector. */
   fileId: string;
+  /** The file's signed token, so the composite <img> loads where cookies are not sent. */
+  fileToken?: string;
   guessedBands: BandMap;
   busy: boolean;
   onChangeView: (view: RasterMode) => void;
@@ -47,7 +49,7 @@ interface Props {
 
 const AXIS = { stroke: '#4a6580', fontSize: 10, fontFamily: 'Space Mono, monospace' };
 
-export default function RasterPanel({ dataset: ds, fileId, guessedBands, busy, onChangeView }: Props) {
+export default function RasterPanel({ dataset: ds, fileId, fileToken, guessedBands, busy, onChangeView }: Props) {
   const notify = useToast();
   const [bands, setBands] = useState<BandMap>(() => (ds.view.mode === 'index' ? ds.view.bands : guessedBands));
   const [index, setIndex] = useState<SpectralIndex>(ds.view.mode === 'index' ? ds.view.index : 'ndvi');
@@ -103,7 +105,7 @@ export default function RasterPanel({ dataset: ds, fileId, guessedBands, busy, o
     if (rgb.some(v => v === undefined)) return notify(kind === 'true' ? 'Assign red, green and blue bands first.' : 'Assign NIR, red and green bands first.', 'error');
     setCompositeKind(kind);
     setComposite({
-      url: apiUrl(`/api/rasters/${fileId}/composite.png?bands=${rgb.join(',')}&lo=${st[0]}&hi=${st[1]}${qaQuery(qaOverride)}`),
+      url: apiUrl(`/api/rasters/${fileId}/composite.png?bands=${rgb.join(',')}&lo=${st[0]}&hi=${st[1]}${qaQuery(qaOverride)}${fileToken ? `&t=${encodeURIComponent(fileToken)}` : ''}`),
       label: `${kind === 'true' ? 'True colour (R G B)' : 'False colour (NIR R G): vegetation appears red'}; ${stretch.lo}–${stretch.hi} % stretch per channel${qaOverride ? '; masked pixels transparent' : ''}`,
     });
   };

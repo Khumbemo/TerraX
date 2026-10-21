@@ -22,7 +22,8 @@ test('forest loss: synthetic sample gives areas and a report', async ({ page }) 
   const tiles = await mapState<{ min: number; max: number } | null>(page, `m => { const s = m.getSource('tx-image-tiles'); return s ? { min: s.minzoom, max: s.maxzoom } : null; }`);
   test.skip(tiles === null && Boolean(process.env.TERRAX_URL), 'the deployment under test makes tiles only for large grids');
   expect(tiles).not.toBeNull();
-  const tile = page.waitForResponse(r => /\/tiles\/change\/\d+\/\d+\/\d+\.png$/.test(r.url()) && r.status() === 200);
+  // Signed (?t=…), so tiles also load where cookies are not sent.
+  const tile = page.waitForResponse(r => /\/tiles\/change\/\d+\/\d+\/\d+\.png\?t=\d+\.[\w-]+$/.test(r.url()) && r.status() === 200);
   await mapState(page, `m => { const [w, s, e, n] = m.getSource('tx-image-tiles').serialize().bounds; m.jumpTo({ center: [(w + e) / 2, (s + n) / 2], zoom: ${tiles!.max} }); return true; }`);
   await tile;
   expect(errors).toEqual([]);
