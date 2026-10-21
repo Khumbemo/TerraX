@@ -30,7 +30,8 @@ export default defineConfig({
           command: `${python} -m uvicorn terrax.api.main:app --host 127.0.0.1 --port 8000`,
           cwd: '../backend',
           url: 'http://127.0.0.1:8000/api/health',
-          env: { TERRAX_EAGER: 'true', TERRAX_STORAGE: process.env.TERRAX_STORAGE ?? '/tmp/terrax-e2e-storage', TERRAX_RETENTION_HOURS: '0' },
+          // Tiles for any grid over 64 cells, so the small samples exercise full-resolution map tiles too.
+          env: { TERRAX_EAGER: 'true', TERRAX_STORAGE: process.env.TERRAX_STORAGE ?? '/tmp/terrax-e2e-storage', TERRAX_RETENTION_HOURS: '0', TERRAX_TILES_MIN_SIDE: '64' },
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },

@@ -6,6 +6,9 @@
   https://power.larc.nasa.gov/docs/services/api/temporal/daily/
 * Earth Search STAC (Element 84) for Sentinel-2 L2A cloud-optimised GeoTIFFs,
   https://earth-search.aws.element84.com/v1
+* Microsoft Planetary Computer STAC for Sentinel-1 radiometrically terrain-corrected
+  backscatter (collection sentinel-1-rtc, γ⁰ in linear power, 10 m), read through
+  short-lived SAS tokens, https://planetarycomputer.microsoft.com/api/stac/v1
 
 The server fetches the data, so the browser needs no cross-origin access.
 The parsing functions are pure, so they can be tested on recorded responses.
@@ -339,4 +342,173 @@ def read_s2_window(item: StacItem, bbox: list[float], out: Path) -> list[str]:
         f"Sentinel-2 L2A scene {item.id} ({item.datetime[:10]}, {cloud} % cloud over the tile) from Earth Search; "
         "bands B2, B3, B4, B8 at 10 m and SCL (band 5, resampled from 20 m)."
     )
+    return notes
+
+
+# ── Sentinel-1 RTC via the Planetary Computer ─────────────────────────────────
+
+PC_STAC = "https://planetarycomputer.microsoft.com/api/stac/v1"
+PC_SAS_TOKEN = "https://planetarycomputer.microsoft.com/api/sas/v1/token/sentinel-1-rtc"
+S1_MAX_SIDE = 1500
+
+
+@dataclass
+class S1Item:
+    id: str
+    datetime: str
+    orbit_state: str | None
+    relative_orbit: int | None
+    platform: str | None
+    epsg: int | None
+    assets: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def public(self) -> dict[str, Any]:
+        return {"id": self.id, "datetime": self.datetime, "orbitState": self.orbit_state, "relativeOrbit": self.relative_orbit, "platform": self.platform,
+                "epsg": self.epsg, "assets": self.assets}
+
+    @classmethod
+    def from_public(cls, d: dict[str, Any]) -> S1Item:
+        ro = d.get("relativeOrbit")
+        return cls(id=str(d["id"]), datetime=str(d.get("datetime", "")), orbit_state=d.get("orbitState"), relative_orbit=int(ro) if isinstance(ro, (int, float)) else None,
+                   platform=d.get("platform"), epsg=d.get("epsg"), assets=d.get("assets") or {})
+
+
+def s1_search_body(bbox: list[float], start: str, end: str, orbit: str | None = None, limit: int = 12) -> dict[str, Any]:
+    if not _iso_date(start) or not _iso_date(end) or start > end:
+        raise ValueError("Choose a start date before the end date.")
+    w, s, e, n = (float(v) for v in bbox)
+    if not (-180 <= w < e <= 180 and -90 <= s < n <= 90):
+        raise ValueError("The search area is not a valid longitude/latitude box.")
+    if orbit not in (None, "ascending", "descending"):
+        raise ValueError("The orbit direction is ascending or descending.")
+    body: dict[str, Any] = {
+        "collections": ["sentinel-1-rtc"],
+        "bbox": [w, s, e, n],
+        "datetime": f"{start}T00:00:00Z/{end}T23:59:59Z",
+        "sortby": [{"field": "properties.datetime", "direction": "desc"}],
+        "limit": limit,
+    }
+    if orbit:
+        body["query"] = {"sat:orbit_state": {"eq": orbit}}
+    return body
+
+
+def _epsg_of(props: dict[str, Any]) -> int | None:
+    code = props.get("proj:epsg")
+    if code is None and isinstance(props.get("proj:code"), str):
+        try:
+            code = int(re.sub(r"^EPSG:", "", props["proj:code"], flags=re.I))
+        except ValueError:
+            code = None
+    return int(code) if isinstance(code, (int, float)) else None
+
+
+def parse_s1_items(fc: Any) -> list[S1Item]:
+    """Scenes with both VV and VH (single-polarisation scenes cannot give the VH ratio or RVI)."""
+    if not isinstance(fc, dict) or not isinstance(fc.get("features"), list):
+        raise ValueError("The STAC server returned an unexpected response.")
+    out = []
+    for f in fc["features"]:
+        props = f.get("properties") or {}
+        assets = {k: {"href": a["href"]} for k, a in (f.get("assets") or {}).items() if k in ("vv", "vh") and isinstance(a, dict) and a.get("href")}
+        if set(assets) != {"vv", "vh"}:
+            continue
+        ro = props.get("sat:relative_orbit")
+        out.append(S1Item(id=str(f.get("id")), datetime=str(props.get("datetime") or ""), orbit_state=props.get("sat:orbit_state"),
+                          relative_orbit=int(ro) if isinstance(ro, (int, float)) else None, platform=props.get("platform"), epsg=_epsg_of(props), assets=assets))
+    return out
+
+
+def _allowed_s1_href(href: str) -> bool:
+    # Only Azure Blob Storage, where the Planetary Computer keeps its data, so the server cannot be pointed at arbitrary hosts.
+    return bool(re.match(r"^https://[a-z0-9]{3,24}\.blob\.core\.windows\.net/[^?#]+\.tiff?$", href))
+
+
+def sas_token(fetch=None) -> str:
+    """A short-lived read token for the Planetary Computer's Sentinel-1 RTC container (no account needed)."""
+    j = (fetch or fetch_json)(PC_SAS_TOKEN)
+    token = j.get("token") if isinstance(j, dict) else None
+    if not isinstance(token, str) or not token:
+        raise ValueError("The Planetary Computer did not issue a data token.")
+    return token.lstrip("?")
+
+
+def _sign(href: str, token: str) -> str:
+    return f"{href}?{token}"
+
+
+def read_s1_window(item: S1Item, bbox: list[float], out: Path, token: str, match: Path | None = None) -> list[str]:
+    """Reads VV and VH (γ⁰, linear power) for a WGS84 box into a 2-band float32 GeoTIFF (NaN for no data).
+
+    With `match`, the window is read onto that GeoTIFF's grid instead (bilinear in linear power), so a second date
+    lines up pixel for pixel with the first for change detection.
+    """
+    import rasterio
+    import rasterio.errors
+    from pyproj import Transformer
+    from rasterio.enums import Resampling
+    from rasterio.vrt import WarpedVRT
+    from rasterio.windows import Window, from_bounds
+
+    for k in ("vv", "vh"):
+        if k not in item.assets or not _allowed_s1_href(item.assets[k]["href"]):
+            raise ValueError("The scene's files are not on the Planetary Computer's storage.")
+    signed = {k: _sign(item.assets[k]["href"], token) for k in ("vv", "vh")}
+    env = {"GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "GDAL_HTTP_MAX_RETRY": "3", "GDAL_HTTP_RETRY_DELAY": "1"}
+    notes: list[str] = []
+    bands: list[np.ndarray] = []
+
+    def clean_band(a: np.ndarray, nodata: float | None) -> np.ndarray:
+        a = a.astype(np.float32)
+        bad = ~np.isfinite(a) | (a <= 0)  # power is positive; RTC marks no data with −32768
+        if nodata is not None:
+            bad |= a == np.float32(nodata)
+        a[bad] = np.nan
+        return a
+
+    try:
+        with rasterio.Env(**env):
+            if match is not None:
+                with rasterio.open(match) as ref:
+                    crs, transform, gw, gh = ref.crs, ref.transform, ref.width, ref.height
+                for k in ("vv", "vh"):
+                    with rasterio.open(signed[k]) as ds, WarpedVRT(ds, crs=crs, transform=transform, width=gw, height=gh, resampling=Resampling.bilinear,
+                                                                src_nodata=ds.nodata, nodata=np.nan, dtype="float32") as vrt:
+                        bands.append(clean_band(vrt.read(1), None))
+                notes.append("Read onto the first image's grid (bilinear interpolation in linear power) so the two dates line up pixel for pixel.")
+            else:
+                with rasterio.open(signed["vv"]) as ds:
+                    if ds.crs is None:
+                        raise ValueError("The scene has no coordinate reference system.")
+                    tr = Transformer.from_crs(4326, ds.crs, always_xy=True)
+                    w, s, e, n = bbox
+                    xs, ys = tr.transform([w, e, w, e], [s, s, n, n])
+                    win = from_bounds(min(xs), min(ys), max(xs), max(ys), ds.transform)
+                    c0, r0 = max(0, math.floor(win.col_off)), max(0, math.floor(win.row_off))
+                    c1, r1 = min(ds.width, math.ceil(win.col_off + win.width)), min(ds.height, math.ceil(win.row_off + win.height))
+                    if c1 <= c0 or r1 <= r0:
+                        raise ValueError("The area does not overlap this scene.")
+                    gw, gh = c1 - c0, r1 - r0
+                    if max(gw, gh) > S1_MAX_SIDE:
+                        raise ValueError(f"The area is {gw} × {gh} pixels; choose an area under {S1_MAX_SIDE * 10 // 1000} km across.")
+                    window = Window(c0, r0, gw, gh)
+                    transform, crs = ds.window_transform(window), ds.crs
+                    vv_grid = (ds.transform, ds.width, ds.height)
+                    bands.append(clean_band(ds.read(1, window=window), ds.nodata))
+                with rasterio.open(signed["vh"]) as ds:
+                    if (ds.transform, ds.width, ds.height) != vv_grid or ds.crs != crs:
+                        raise ValueError("The scene's VV and VH files are not on the same grid.")
+                    bands.append(clean_band(ds.read(1, window=window), ds.nodata))
+    except rasterio.errors.RasterioIOError as err:
+        raise ValueError(f"Could not read the scene from the Planetary Computer ({err}). Search again for a fresh link.") from err
+    if not any(np.isfinite(b).any() for b in bands):
+        raise ValueError("The scene has no data over this area.")
+    profile = {"driver": "GTiff", "width": gw, "height": gh, "count": 2, "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan, "compress": "deflate", "tiled": True}
+    with rasterio.open(out, "w", **profile) as dst:
+        for i, (band, name) in enumerate(zip(bands, ["VV", "VH"], strict=True), start=1):
+            dst.write(band, i)
+            dst.set_band_description(i, name)
+    orbit = f"{item.orbit_state or '?'} pass, relative orbit {item.relative_orbit if item.relative_orbit is not None else '?'}"
+    notes.append(f"Sentinel-1 RTC scene {item.id} ({item.datetime[:10]}, {item.platform or 'Sentinel-1'}, {orbit}) from the Microsoft Planetary Computer: "
+                 "γ⁰ backscatter in linear power, radiometrically terrain corrected, 10 m (contains modified Copernicus Sentinel data).")
     return notes

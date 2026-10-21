@@ -7,13 +7,15 @@
 * Flow direction: D8 steepest descent (O'Callaghan & Mark 1984) with ground
   distances; flow accumulation as upslope contributing area (m²); Strahler
   (1957) stream order on cells above an area threshold.
-* Watersheds above an outlet, stream lines, and contours by marching squares.
+* Watersheds above an outlet, stream lines, and contours by marching squares
+  (simplified by Douglas & Peucker 1973 to a quarter cell).
 """
 
 from __future__ import annotations
 
 import heapq
 import math
+from concurrent.futures import ThreadPoolExecutor
 from typing import TypedDict
 
 import numpy as np
@@ -307,13 +309,17 @@ TAN_FLOOR = 0.001  # slope floor for the wetness index: filled flats keep only a
 def _dinf(filled, dx, dy, area_r, order):
     """D∞ flow (Tarboton 1997): steepest of eight triangular facets, split between its two cells by angle.
 
-    Returns upslope area (m²), specific catchment area (m² per m of contour across the flow) and tan β of
-    the steepest facet. `order` lists cells by descending filled elevation, so donors come before receivers.
+    Returns upslope area (m²), specific catchment area (m² per m of contour across the flow), tan β of the
+    steepest facet, and each cell's facet (−1 for none) with the share p2 of its flow sent to the facet's diagonal
+    cell (the rest goes to its cardinal cell). `order` lists cells by descending filled elevation, so donors come
+    before receivers.
     """
     h, w = filled.shape
     acc = np.zeros((h, w), dtype=np.float64)
     tanb = np.zeros((h, w), dtype=np.float32)
     width = np.ones((h, w), dtype=np.float32)
+    facet = np.full((h, w), -1, dtype=np.int8)
+    share = np.zeros((h, w), dtype=np.float32)
     for r in range(h):
         for c in range(w):
             if not np.isnan(filled[r, c]):
@@ -351,6 +357,8 @@ def _dinf(filled, dx, dy, area_r, order):
         d2 = dy[r] if _F_R1[k] == 0 else dx[r]
         width[r, c] = d2 * math.cos(best_r)  # cell width across the flow
         p2 = best_r / best_rmax
+        facet[r, c] = k
+        share[r, c] = p2
         a = acc[r, c]
         if p2 < 1.0:
             acc[r + _F_R1[k], c + _F_C1[k]] += a * (1.0 - p2)
@@ -360,7 +368,71 @@ def _dinf(filled, dx, dy, area_r, order):
     for r in range(h):
         for c in range(w):
             sca[r, c] = np.nan if np.isnan(filled[r, c]) else acc[r, c] / width[r, c]
-    return acc, sca, tanb
+    return acc, sca, tanb, facet, share
+
+
+@njit(cache=True)
+def dinf_dependence(facet: np.ndarray, share: np.ndarray, orow: int, ocol: int) -> np.ndarray:
+    """D∞ upslope dependence on one outlet cell (TauDEM DinfUpDependence; Tarboton 1997): the fraction of each
+    cell's flow that reaches the outlet, 1 at the outlet and 0 outside its upslope area.
+
+    The cells upslope of the outlet are found first; then, receivers before donors (Kahn's order on the flow
+    graph, which descends strictly), each cell takes the shares of its two receivers' dependence. Σ area ×
+    dependence equals the D∞ upslope area at the outlet.
+    """
+    h, w = facet.shape
+    up = np.zeros((h, w), dtype=np.uint8)
+    up[orow, ocol] = 1
+    stack = [(orow, ocol)]
+    while len(stack) > 0:  # every cell that sends any flow into the set
+        r, c = stack.pop()
+        for d in range(8):
+            rr, cc = r + DR[d], c + DC[d]
+            if rr < 0 or cc < 0 or rr >= h or cc >= w or up[rr, cc]:
+                continue
+            k = facet[rr, cc]
+            if k < 0:
+                continue
+            p2 = share[rr, cc]
+            if (p2 < 1.0 and rr + _F_R1[k] == r and cc + _F_C1[k] == c) or (p2 > 0.0 and rr + _F_R2[k] == r and cc + _F_C2[k] == c):
+                up[rr, cc] = 1
+                stack.append((rr, cc))
+    # receivers inside the set still to be finished, per cell
+    pending = np.zeros((h, w), dtype=np.uint8)
+    for r in range(h):
+        for c in range(w):
+            if up[r, c] and not (r == orow and c == ocol):
+                k = facet[r, c]
+                p2 = share[r, c]
+                if p2 < 1.0 and up[r + _F_R1[k], c + _F_C1[k]]:
+                    pending[r, c] += 1
+                if p2 > 0.0 and up[r + _F_R2[k], c + _F_C2[k]]:
+                    pending[r, c] += 1
+    dep = np.zeros((h, w), dtype=np.float32)
+    acc = np.zeros((h, w), dtype=np.float64)  # dependence gathered from the receivers so far
+    acc[orow, ocol] = 1.0
+    ready = [(orow, ocol)]
+    while len(ready) > 0:
+        r, c = ready.pop()
+        dep[r, c] = acc[r, c]
+        for d in range(8):
+            rr, cc = r + DR[d], c + DC[d]
+            if rr < 0 or cc < 0 or rr >= h or cc >= w or not up[rr, cc] or (rr == orow and cc == ocol):
+                continue
+            k = facet[rr, cc]
+            p2 = share[rr, cc]
+            got = False
+            if p2 < 1.0 and rr + _F_R1[k] == r and cc + _F_C1[k] == c:
+                acc[rr, cc] += (1.0 - p2) * acc[r, c]
+                got = True
+            if p2 > 0.0 and rr + _F_R2[k] == r and cc + _F_C2[k] == c:
+                acc[rr, cc] += p2 * acc[r, c]
+                got = True
+            if got:
+                pending[rr, cc] -= 1
+                if pending[rr, cc] == 0:
+                    ready.append((rr, cc))
+    return dep
 
 
 def dinf_flow(filled: np.ndarray, geo: Ground) -> dict:
@@ -368,12 +440,12 @@ def dinf_flow(filled: np.ndarray, geo: Ground) -> dict:
     flat = np.where(np.isnan(filled), -np.inf, filled).ravel()
     order = np.argsort(-flat, kind="stable")
     order = order.astype(np.int32 if order.size < 2**31 else np.int64)
-    acc, sca, tanb = _dinf(np.ascontiguousarray(filled, dtype=np.float64), geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), order)
+    acc, sca, tanb, facet, share = _dinf(np.ascontiguousarray(filled, dtype=np.float64), geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), order)
     del order
     with np.errstate(invalid="ignore", divide="ignore"):
         twi = np.log(sca / np.maximum(tanb, TAN_FLOOR)).astype(np.float32)
     twi[np.isnan(filled)] = np.nan
-    return {"acc": acc, "sca": sca, "twi": twi, "tanb": tanb}
+    return {"acc": acc, "sca": sca, "twi": twi, "tanb": tanb, "facet": facet, "share": share}
 
 
 def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float, dinf: bool = False) -> dict:
@@ -518,99 +590,215 @@ def nice_interval(relief: float, target: int = 10) -> float:
     return (1 if m < 1.5 else 2 if m < 3.5 else 5 if m < 7.5 else 10) * p
 
 
-def contour_grid(z: np.ndarray, levels: list[float]) -> list[tuple[float, list[list[tuple[float, float]]]]]:
-    """Marching squares on cell centres (grid coordinates col,row), saddles resolved by the centre value."""
+@njit(cache=True, nogil=True)
+def _segments(z, lv):
+    """Marching-squares segments at one level: (x1, y1, x2, y2) in grid coordinates and the ids of the two grid edges
+    each endpoint lies on (horizontal edge r,c→r,c+1 = 2(rW+c), vertical r,c→r+1,c = 2(rW+c)+1)."""
+    h, w = z.shape
+    cap = 1024
+    xy = np.empty((cap, 4))
+    ed = np.empty((cap, 2), dtype=np.int64)
+    n = 0
+    for r in range(h - 1):
+        for c in range(w - 1):
+            A, B, C, D = z[r, c], z[r, c + 1], z[r + 1, c + 1], z[r + 1, c]
+            if not (np.isfinite(A) and np.isfinite(B) and np.isfinite(C) and np.isfinite(D)):
+                continue
+            k = (8 if A >= lv else 0) | (4 if B >= lv else 0) | (2 if C >= lv else 0) | (1 if D >= lv else 0)
+            if k == 0 or k == 15:
+                continue
+            x0, y0 = c + 0.5, r + 0.5
+            # edges: 0 top (A-B), 1 right (B-C), 2 bottom (D-C), 3 left (A-D)
+            if k == 1 or k == 14:
+                pa, pb, m = 3, 2, 1
+            elif k == 2 or k == 13:
+                pa, pb, m = 2, 1, 1
+            elif k == 3 or k == 12:
+                pa, pb, m = 3, 1, 1
+            elif k == 4 or k == 11:
+                pa, pb, m = 0, 1, 1
+            elif k == 6 or k == 9:
+                pa, pb, m = 0, 2, 1
+            elif k == 7 or k == 8:
+                pa, pb, m = 3, 0, 1
+            else:
+                m = 2
+                high = (A + B + C + D) / 4 >= lv
+                pa, pb = (3, 0) if (k == 5) == high else (0, 1)
+            for s in range(m):
+                if s == 1:
+                    if (pa, pb) == (3, 0):
+                        pa, pb = 2, 1
+                    else:
+                        pa, pb = 3, 2
+                if n == cap:
+                    cap *= 2
+                    xy2 = np.empty((cap, 4))
+                    xy2[:n] = xy[:n]
+                    ed2 = np.empty((cap, 2), dtype=np.int64)
+                    ed2[:n] = ed[:n]
+                    xy, ed = xy2, ed2
+                for j in range(2):
+                    e = pa if j == 0 else pb
+                    if e == 0:
+                        px, py, eid = x0 + (lv - A) / (B - A), y0, 2 * (r * w + c)
+                    elif e == 1:
+                        px, py, eid = x0 + 1, y0 + (lv - B) / (C - B), 2 * (r * w + c + 1) + 1
+                    elif e == 2:
+                        px, py, eid = x0 + (lv - D) / (C - D), y0 + 1, 2 * ((r + 1) * w + c)
+                    else:
+                        px, py, eid = x0, y0 + (lv - A) / (D - A), 2 * (r * w + c) + 1
+                    xy[n, 2 * j] = px
+                    xy[n, 2 * j + 1] = py
+                    ed[n, j] = eid
+                n += 1
+    return xy[:n], ed[:n]
+
+
+@njit(cache=True, nogil=True)
+def _chain_lines(xy, ed):
+    """Joins segments that share a grid edge into lines; returns the points (x, y) and each line's start offset."""
+    n = ed.shape[0]
+    keys = ed.ravel()
+    order = np.argsort(keys, kind="mergesort")
+    partner = np.full(2 * n, -1, dtype=np.int64)  # endpoint slot (2·segment + end) → the other segment's slot on that edge
+    for i in range(2 * n - 1):
+        a, b = order[i], order[i + 1]
+        if keys[a] == keys[b]:
+            partner[a], partner[b] = b, a
+    used = np.zeros(n, dtype=np.bool_)
+    pts = np.empty((n + 2 * n, 2))
+    starts = np.empty(n + 1, dtype=np.int64)
+    npts, nl = 0, 0
+    for phase in range(2):  # open lines from a free end first, then closed rings
+        for s0 in range(n):
+            if used[s0]:
+                continue
+            if phase == 0:
+                if partner[2 * s0] == -1:
+                    end = 0
+                elif partner[2 * s0 + 1] == -1:
+                    end = 1
+                else:
+                    continue
+            else:
+                end = 0
+            starts[nl] = npts
+            nl += 1
+            s = s0
+            pts[npts, 0], pts[npts, 1] = xy[s, 2 * end], xy[s, 2 * end + 1]
+            npts += 1
+            while True:
+                used[s] = True
+                out = 1 - end
+                pts[npts, 0], pts[npts, 1] = xy[s, 2 * out], xy[s, 2 * out + 1]
+                npts += 1
+                q = partner[2 * s + out]
+                if q == -1 or used[q // 2]:
+                    break
+                s, end = q // 2, q % 2
+    starts[nl] = npts
+    return pts[:npts], starts[: nl + 1]
+
+
+@njit(cache=True, nogil=True)
+def _simplify(pts, starts, tol):
+    """Douglas–Peucker (1973) on each line: keeps the vertices that lie more than `tol` from the chord of their span."""
+    keep = np.zeros(pts.shape[0], dtype=np.bool_)
+    stack = np.empty((pts.shape[0], 2), dtype=np.int64)
+    t2 = tol * tol
+    for li in range(starts.size - 1):
+        a0, b0 = starts[li], starts[li + 1] - 1
+        keep[a0] = keep[b0] = True
+        top = 0
+        if b0 - a0 > 1:
+            # a ring's chord is a point: split it at its farthest vertex first
+            if pts[a0, 0] == pts[b0, 0] and pts[a0, 1] == pts[b0, 1]:
+                far, fd = a0 + 1, -1.0
+                for i in range(a0 + 1, b0):
+                    d = (pts[i, 0] - pts[a0, 0]) ** 2 + (pts[i, 1] - pts[a0, 1]) ** 2
+                    if d > fd:
+                        far, fd = i, d
+                keep[far] = True
+                stack[0, 0], stack[0, 1], stack[1, 0], stack[1, 1] = a0, far, far, b0
+                top = 2
+            else:
+                stack[0, 0], stack[0, 1] = a0, b0
+                top = 1
+        while top:
+            top -= 1
+            a, b = stack[top, 0], stack[top, 1]
+            if b - a < 2:
+                continue
+            ax, ay = pts[a, 0], pts[a, 1]
+            dx, dy = pts[b, 0] - ax, pts[b, 1] - ay
+            L2 = dx * dx + dy * dy
+            far, fd = -1, t2
+            for i in range(a + 1, b):
+                px, py = pts[i, 0] - ax, pts[i, 1] - ay
+                cr = px * dy - py * dx
+                d = cr * cr / L2 if L2 > 0 else px * px + py * py
+                if d > fd:
+                    far, fd = i, d
+            if far >= 0:
+                keep[far] = True
+                stack[top, 0], stack[top, 1] = a, far
+                stack[top + 1, 0], stack[top + 1, 1] = far, b
+                top += 2
+    idx = np.flatnonzero(keep)
+    new_starts = np.searchsorted(idx, starts)
+    return pts[idx], new_starts
+
+
+def contour_grid(z: np.ndarray, levels: list[float], tol: float = 0.0) -> list[tuple[float, list[list[tuple[float, float]]]]]:
+    """Marching squares on cell centres (grid coordinates col,row), saddles resolved by the centre value; segments
+    are joined through the grid edges they share, and `tol` > 0 simplifies the lines (Douglas–Peucker, in cells)."""
     out = []
-    a, b = z[:-1, :-1], z[:-1, 1:]
-    cc, d = z[1:, 1:], z[1:, :-1]
-    ok = np.isfinite(a) & np.isfinite(b) & np.isfinite(cc) & np.isfinite(d)
-    rows, cols = np.nonzero(ok)
-    A, B, C, D = a[rows, cols], b[rows, cols], cc[rows, cols], d[rows, cols]
-    x0, y0 = cols + 0.5, rows + 0.5
-    centre = (A + B + C + D) / 4
-    with np.errstate(divide="ignore", invalid="ignore"):
-        for lv in levels:
-            idx = (A >= lv) * 8 | (B >= lv) * 4 | (C >= lv) * 2 | (D >= lv) * 1
-            sel = (idx != 0) & (idx != 15)
-            segs: list = []
-            for i in np.flatnonzero(sel):
-                k = int(idx[i])
-
-                def lerp(v1: float, v2: float, lv: float = lv) -> float:
-                    return (lv - v1) / (v2 - v1)
-
-                top = (x0[i] + lerp(A[i], B[i]), y0[i])
-                right = (x0[i] + 1, y0[i] + lerp(B[i], C[i]))
-                bottom = (x0[i] + lerp(D[i], C[i]), y0[i] + 1)
-                left = (x0[i], y0[i] + lerp(A[i], D[i]))
-                high = centre[i] >= lv
-                if k in (1, 14):
-                    segs.append((left, bottom))
-                elif k in (2, 13):
-                    segs.append((bottom, right))
-                elif k in (3, 12):
-                    segs.append((left, right))
-                elif k in (4, 11):
-                    segs.append((top, right))
-                elif k in (6, 9):
-                    segs.append((top, bottom))
-                elif k in (7, 8):
-                    segs.append((left, top))
-                elif k == 5:
-                    segs += [(left, top), (bottom, right)] if high else [(top, right), (left, bottom)]
-                elif k == 10:
-                    segs += [(top, right), (left, bottom)] if high else [(left, top), (bottom, right)]
-            out.append((lv, _chain(segs)))
+    zz = np.ascontiguousarray(z, dtype=np.float64)
+    for lv in levels:
+        pts, starts = _level_lines(zz, lv, tol)
+        out.append((lv, [[(float(x), float(y)) for x, y in pts[starts[i] : starts[i + 1]].tolist()] for i in range(starts.size - 1)]))
     return out
 
 
-def _chain(segs):
-    key = lambda p: (round(p[0] * 1e6), round(p[1] * 1e6))
-    ends: dict = {}
-    for i, (p, q) in enumerate(segs):
-        for e in (key(p), key(q)):
-            ends.setdefault(e, []).append(i)
-    used = [False] * len(segs)
-    lines = []
-
-    def extend(line, at_end):
-        while True:
-            tip = line[-1] if at_end else line[0]
-            nxt = next((i for i in ends.get(key(tip), []) if not used[i]), None)
-            if nxt is None:
-                return
-            used[nxt] = True
-            p, q = segs[nxt]
-            other = q if key(p) == key(tip) else p
-            if at_end:
-                line.append(other)
-            else:
-                line.insert(0, other)
-
-    for i, (p, q) in enumerate(segs):
-        if used[i]:
-            continue
-        used[i] = True
-        line = [p, q]
-        extend(line, True)
-        extend(line, False)
-        lines.append(line)
-    return lines
+def _level_lines(z: np.ndarray, lv: float, tol: float) -> tuple[np.ndarray, np.ndarray]:
+    xy, ed = _segments(z, lv)
+    pts, starts = _chain_lines(xy, ed)
+    return _simplify(pts, starts, tol) if tol > 0 else (pts, starts)
 
 
-def contours_geojson(z: np.ndarray, to_lonlat, interval: float, max_levels: int = 60) -> dict:
+#: Douglas–Peucker tolerance for exported contours, in cells: a quarter cell is below what a DEM can place.
+CONTOUR_TOLERANCE = 0.25
+#: Most vertices one contour export may hold (about 30 bytes each in GeoJSON).
+CONTOUR_MAX_POINTS = 3_000_000
+
+
+def contours_geojson(z: np.ndarray, to_lonlat_arrays, interval: float, max_levels: int = 60, tol: float = CONTOUR_TOLERANCE) -> dict:
+    """Contour lines every `interval` (at most `max_levels`) as GeoJSON; to_lonlat_arrays: vectorised grid → lon/lat."""
     v = z[np.isfinite(z)]
     if not interval > 0 or not v.size:
-        return {"fc": {"type": "FeatureCollection", "features": []}, "levels": 0}
+        return {"fc": {"type": "FeatureCollection", "features": []}, "levels": 0, "points": 0}
     lo, hi = float(v.min()), float(v.max())
     levels: list[float] = []
     x = math.ceil(lo / interval) * interval
     while x <= hi and len(levels) < max_levels:
         levels.append(round(x * 1e6) / 1e6)
         x += interval
+    zz = np.ascontiguousarray(z, dtype=np.float64)
+    with ThreadPoolExecutor() as pool:  # the kernels release the GIL
+        per_level = list(pool.map(lambda lv: _level_lines(zz, lv, tol), levels))
+    total = sum(p.shape[0] for p, _ in per_level)
+    if total > CONTOUR_MAX_POINTS:
+        raise ValueError(f"These contours would hold {total:,} vertices (the limit is {CONTOUR_MAX_POINTS:,}); choose a larger interval.")
     feats = []
-    for level, lines in contour_grid(z, levels):
-        for line in lines:
-            if len(line) >= 2:
-                feats.append({"type": "Feature", "properties": {"elevation": level}, "geometry": {"type": "LineString", "coordinates": [to_lonlat(px, py) for px, py in line]}})
-    return {"fc": {"type": "FeatureCollection", "features": feats}, "levels": len(levels)}
+    for level, (pts, starts) in zip(levels, per_level, strict=True):
+        if not pts.shape[0]:
+            continue
+        lon, lat = to_lonlat_arrays(pts[:, 0], pts[:, 1])
+        bad = np.concatenate([[0], np.cumsum(~(np.isfinite(lon) & np.isfinite(lat)))])  # lines with a point the CRS cannot place are left out
+        coords = np.column_stack([np.round(lon, 7), np.round(lat, 7)]).tolist()
+        for i in range(starts.size - 1):
+            a, b = int(starts[i]), int(starts[i + 1])
+            if b - a >= 2 and bad[b] == bad[a]:
+                feats.append({"type": "Feature", "properties": {"elevation": level}, "geometry": {"type": "LineString", "coordinates": coords[a:b]}})
+    return {"fc": {"type": "FeatureCollection", "features": feats}, "levels": len(levels), "points": total}

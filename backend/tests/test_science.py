@@ -1,6 +1,7 @@
 """Statistics, dates, metrics, climate, hydrology, patches and EXIF (ported from the TypeScript unit tests)."""
 
 import io
+import itertools
 import math
 from datetime import date
 
@@ -263,6 +264,29 @@ def test_contours_on_a_plane():
     assert (nice_interval(1000), nice_interval(730), nice_interval(18)) == (100, 50, 2)
 
 
+def test_contours_join_and_simplify():
+    # A cone: each level is one closed ring, its points at the level's radius (within the linear interpolation).
+    n = 61
+    yy, xx = np.mgrid[0:n, 0:n] + 0.5
+    r = np.hypot(xx - n / 2, yy - n / 2)
+    for level, lines in contour_grid(-r, [-5.0, -20.0]):
+        assert len(lines) == 1 and lines[0][0] == lines[0][-1]
+        assert all(abs(math.hypot(x - n / 2, y - n / 2) + level) < 0.15 for x, y in lines[0])
+    full = contour_grid(-r, [-20.0])[0][1][0]
+    simple = contour_grid(-r, [-20.0], tol=0.25)[0][1][0]
+    assert simple[0] == simple[-1] and 8 < len(simple) < len(full)
+    # every dropped vertex stays within the tolerance of the simplified ring
+    segs = list(itertools.pairwise(simple))
+    dist = lambda p, a, b: abs((b[0] - a[0]) * (a[1] - p[1]) - (a[0] - p[0]) * (b[1] - a[1])) / math.hypot(b[0] - a[0], b[1] - a[1])
+    assert all(min(dist(p, a, b) for a, b in segs) <= 0.25 + 1e-9 for p in full)
+    # a gap of no data splits a line in two, and saddles never cross
+    z = np.tile(np.arange(8.0), (6, 1))
+    z[2, :] = np.nan
+    assert len(contour_grid(z, [5.5])[0][1]) == 2
+    sad = np.array([[1.0, 0.0], [0.0, 1.0]])
+    assert len(contour_grid(sad, [0.5])[0][1]) == 2
+
+
 # ── Patches ──────────────────────────────────────────────────────────────────
 
 
@@ -460,6 +484,48 @@ def test_dinf_specific_catchment_area_on_a_cone_and_planes():
         assert d["acc"][outlets].sum() == pytest.approx(n * n, rel=1e-9), deg
 
 
+def test_dinf_dependence_matches_brute_force_and_the_outlet_area():
+    """Upslope dependence: Σ area × share equals the D∞ area at the outlet, and each cell's share equals a unit of
+    flow pushed down the facet graph by brute force (Tarboton 1997; TauDEM DinfUpDependence)."""
+    from terrax.processing.rio import Ground
+    from terrax.processing.terrain import _F_C1, _F_C2, _F_R1, _F_R2, dinf_dependence, dinf_flow, fill_depressions
+
+    rng = np.random.default_rng(5)
+    n = 40
+    yy, xx = np.mgrid[0:n, 0:n].astype(float)
+    dem = 0.3 * xx + 0.2 * yy + 2 * np.sin(xx / 5) * np.cos(yy / 7) + rng.normal(0, 0.3, (n, n))
+    dem[5:8, 30:33] = np.nan
+    area = rng.uniform(0.9, 1.1, n)
+    g = Ground(area, np.sqrt(area), np.sqrt(area), "")
+    filled = fill_depressions(dem)[0]
+    d = dinf_flow(filled, g)
+    facet, share = d["facet"], d["share"]
+    for orow, ocol in ((n // 2, n // 2), (3, 3), (n - 2, 1)):
+        dep = dinf_dependence(facet, share, orow, ocol)
+        assert dep[orow, ocol] == 1 and dep.min() >= 0 and dep.max() <= 1 + 1e-6
+        assert float((dep.astype(np.float64) * area[:, None]).sum()) == pytest.approx(d["acc"][orow, ocol], rel=1e-6)
+        order = np.argsort(-np.where(np.isnan(filled), -np.inf, filled), axis=None, kind="stable")
+        for start in rng.choice(n * n, 60, replace=False):
+            mass = np.zeros(n * n)
+            mass[start] = 1.0
+            reached = 0.0
+            for idx in order:  # push the unit down, highest cells first
+                m = mass[idx]
+                if m == 0:
+                    continue
+                r, c = divmod(int(idx), n)
+                if (r, c) == (orow, ocol):
+                    reached += m
+                    continue
+                k = facet[r, c]
+                if k < 0:
+                    continue
+                p2 = float(share[r, c])
+                mass[(r + _F_R1[k]) * n + c + _F_C1[k]] += m * (1 - p2)
+                mass[(r + _F_R2[k]) * n + c + _F_C2[k]] += m * p2
+            assert dep.ravel()[start] == pytest.approx(reached, abs=1e-6)
+
+
 def _three_class_scene(tmp_path, n=240, seed=3):
     """A 4-band UTM scene: water (west), forest (centre), bare soil (east), with noise; and its true class map."""
     import rasterio
@@ -588,17 +654,31 @@ def test_lee_filter_reduces_speckle_and_keeps_the_mean():
     assert fs[:, 140:146].mean() == pytest.approx(0.05, rel=0.05) and fs[:, 154:160].mean() == pytest.approx(0.2, rel=0.05)
 
 
-def test_hist_stats_quartiles_within_half_a_bin():
+def test_hist_stats_quartiles_exact_after_the_second_pass():
     from terrax.processing.radar import HistStats
 
-    v = np.random.default_rng(4).normal(-12, 3, 200_001).astype(np.float32)
-    h = HistStats(-60, 40, 0.01)
-    for part in np.array_split(v, 7):
-        h.add(part)
-    d = h.dict()
-    assert d is not None and d["n"] == v.size and d["mean"] == pytest.approx(float(v.astype(np.float64).mean()), abs=1e-9)
-    for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
-        assert abs(d[key] - float(np.quantile(v, p))) <= 0.005 + 1e-6
+    rng = np.random.default_rng(4)
+    for v in (rng.normal(-12, 3, 200_001).astype(np.float32), rng.normal(-12, 3, 10).astype(np.float32), np.full(1000, -7.5, np.float32),
+              np.r_[rng.normal(-12, 3, 5000), [-80.0, 55.0]].astype(np.float32)):  # values beyond the bins too
+        h = HistStats(-60, 40, 0.01)
+        parts = np.array_split(v, 7)
+        for part in parts:
+            h.add(part)
+        approx_d = h.dict()
+        assert approx_d is not None and not approx_d["exactQuartiles"]
+        for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+            assert abs(approx_d[key] - float(np.quantile(v.astype(np.float64), p))) <= 0.005 + 1e-6
+        assert h.wants_second_pass()
+        for part in parts[::-1]:  # any order
+            h.collect(part)
+        d = h.dict()
+        assert d is not None and d["exactQuartiles"] and d["n"] == v.size and d["mean"] == pytest.approx(float(v.astype(np.float64).mean()), abs=1e-9)
+        for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+            assert d[key] == pytest.approx(float(np.quantile(v.astype(np.float64), p)), abs=1e-12)
+    small = HistStats(-60, 40, 0.01, max_collect=10)
+    small.add(np.full(100, -3.0, np.float32))
+    sd = small.dict()
+    assert not small.wants_second_pass() and sd is not None and sd["exactQuartiles"] is False
 
 
 @pytest.mark.parametrize("db", [True, False])
@@ -622,6 +702,16 @@ def test_radar_change_finds_the_clearing_and_strips_equal_whole_grid(tmp_path, m
     vh = res["dates"][0]["vh"]
     assert vh["median"] == pytest.approx(-13 - 0.4, abs=0.6)  # filtered speckle: the dB median sits a little below the linear mean
     assert "Lee (1980)" in radar.radar_markdown(res)
+    # Exact quartiles: the same in strips as on the whole grid, and equal to numpy's on every filtered pixel.
+    r0 = Raster(paths[0])
+    (a,) = r0.read_rows([1], 0, r0.gh)
+    ref = radar._db(radar.lee_filter(radar.to_linear(a, res["dates"][0]["scale"]), 5))
+    ref = ref[np.isfinite(ref)].astype(np.float64)
+    for d in (whole, res):
+        assert d["dates"][0]["vh"]["exactQuartiles"] and d["change"]["logRatio"]["exactQuartiles"]
+        for key, p in (("q1", 0.25), ("median", 0.5), ("q3", 0.75)):
+            assert d["dates"][0]["vh"][key] == pytest.approx(float(np.quantile(ref, p)), abs=1e-12)
+            assert d["change"]["logRatio"][key] == whole["change"]["logRatio"][key]
 
 
 def _forest_cloud(path, unit=1.0, crs="EPSG:32646", seed=8):

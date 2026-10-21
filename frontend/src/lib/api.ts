@@ -203,6 +203,8 @@ export interface ResultImage {
   width?: number;
   height?: number;
   ramp?: { min: number; max: number; palette: string };
+  /** Full-resolution Web Mercator tiles of a grid larger than the picture, from `minzoom` (where they add detail) to `maxzoom` (native cells). */
+  tiles?: { url: string; minzoom: number; maxzoom: number; bounds: [number, number, number, number] } | null;
 }
 
 export interface Summary {

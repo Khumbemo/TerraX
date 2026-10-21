@@ -23,7 +23,7 @@ interface Props {
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-function boundaryBbox(b: Boundary): [number, number, number, number] {
+export function boundaryBbox(b: Boundary): [number, number, number, number] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const visit = (c: unknown): void => {
     if (Array.isArray(c) && typeof c[0] === 'number') {

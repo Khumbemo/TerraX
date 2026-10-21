@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { runJob, type Download, type RasterMeta, type ResultImage, type StoredFile } from '../../lib/api';
 import type { LatLngBounds } from '../../lib/geo';
 import { fmt } from '../../lib/stats';
@@ -10,9 +10,12 @@ import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
 import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
 
+const Sentinel1SearchPanel = lazy(() => import('../Sentinel1SearchPanel'));
+
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
   boundary: Boundary | null;
+  target: { lat: number; lon: number; name: string };
 }
 
 interface Quartiles {
@@ -41,7 +44,7 @@ type View = 'composite' | 'change';
 const BEFORE = 's1_vv_vh_2023-01-08_synthetic.tif';
 const AFTER = 's1_vv_vh_2024-01-03_synthetic.tif';
 
-export default function RadarTool({ onOutput, boundary }: Props) {
+export default function RadarTool({ onOutput, boundary, target }: Props) {
   const notify = useToast();
   const job = useJob();
   const busy = Boolean(job.busy);
@@ -54,11 +57,17 @@ export default function RadarTool({ onOutput, boundary }: Props) {
   const [threshold, setThreshold] = useState('3');
   const [out, setOut] = useState<RadarJob | null>(null);
   const [view, setView] = useState<View>('composite');
+  const [firstOrbit, setFirstOrbit] = useState<number | null>(null);
+  const [liveNotes, setLiveNotes] = useState<string[]>([]);
   const fail = (m: string) => notify(m, 'error');
 
-  const load = async (picked: File | string, slot: 'before' | 'after') => {
-    const f = await job.run('upload', signal => (typeof picked === 'string' ? files.sample(picked) : files.upload(picked, signal)), fail);
+  const load = async (picked: File | string | StoredFile<RasterMeta>, slot: 'before' | 'after') => {
+    const f = typeof picked === 'object' && 'id' in picked ? picked : await job.run('upload', signal => (typeof picked === 'string' ? files.sample(picked) : files.upload(picked, signal)), fail);
     if (!f) return null;
+    if (typeof picked !== 'object' || !('id' in picked)) {
+      setLiveNotes([]);
+      if (slot === 'before') setFirstOrbit(null);
+    }
     if (slot === 'before') {
       setBefore(f);
       const names = f.meta.bandNames.map(n => n.toUpperCase());
@@ -100,6 +109,24 @@ export default function RadarTool({ onOutput, boundary }: Props) {
         Upload Sentinel-1 backscatter with VV and VH bands (for example COPERNICUS/S1_GRD exported from Earth Engine in dB, or ASF RTC in linear power). Radar sees
         through cloud. Add a second image from the same relative orbit to map change: a drop in VH is the usual sign of clearing.
       </p>
+      <Suspense fallback={null}>
+        <Sentinel1SearchPanel
+          target={target}
+          boundary={boundary}
+          match={before && !after ? { file: before, relativeOrbit: firstOrbit } : null}
+          onRaster={async (file, item, notes) => {
+            const slot = before && !after ? 'after' : 'before';
+            if (slot === 'before') {
+              setAfter(null);
+              setFirstOrbit(item.relativeOrbit);
+              setLiveNotes(notes);
+            } else setLiveNotes(n => [...n, ...notes]);
+            await load(file, slot);
+            notify(slot === 'before' ? 'First date loaded. Load a second scene for change, or Analyse.' : 'Second date loaded on the first one’s grid.', 'success');
+          }}
+        />
+      </Suspense>
+      {liveNotes.length > 0 && <Notes items={liveNotes} />}
       <FileDrop id="radar-before" label="Image (before, or the only one)" accept=".tif,.tiff" hint="GeoTIFF · VV and VH bands" busy={job.busy === 'upload'} loaded={before?.name} onFile={f => load(f, 'before')} />
       <FileDrop id="radar-after" label="Second image (after, optional)" accept=".tif,.tiff" hint="Same grid and relative orbit" compact loaded={after?.name} onFile={f => load(f, 'after')} />
       <div className="param-row">

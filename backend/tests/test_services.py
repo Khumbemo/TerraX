@@ -202,3 +202,68 @@ def test_maps_api(client):
     labels = [f["properties"]["label"] for f in g["features"] if f["properties"]["kind"] == "special"]
     assert labels[0] == "Equator" and labels[1].startswith("Tropic of Cancer 23.4")
     assert client.get("/api/maps/vector/plates").json()["features"]
+
+
+def test_s1_search_body_items_and_token():
+    body = live.s1_search_body([94, 25.6, 94.1, 25.7], "2024-01-01", "2024-03-31", "descending")
+    assert body["collections"] == ["sentinel-1-rtc"] and body["query"] == {"sat:orbit_state": {"eq": "descending"}}
+    assert "query" not in live.s1_search_body([94, 25.6, 94.1, 25.7], "2024-01-01", "2024-03-31")
+    with pytest.raises(ValueError, match="ascending or descending"):
+        live.s1_search_body([94, 25.6, 94.1, 25.7], "2024-01-01", "2024-03-31", "sideways")
+    href = "https://sentinel1euwestrtc.blob.core.windows.net/sentinel1-grd-rtc/GRD/2024/3/1/IW/DV/x_rtc/measurement/iw-{}.tiff"
+    items = live.parse_s1_items({"features": [
+        {"id": "S1A_dual", "properties": {"datetime": "2024-03-01T23:41:00Z", "sat:orbit_state": "descending", "sat:relative_orbit": 77, "platform": "SENTINEL-1A", "proj:code": "EPSG:32646"},
+         "assets": {"vv": {"href": href.format("vv")}, "vh": {"href": href.format("vh")}, "rendered_preview": {"href": "https://x/y.png"}}},
+        {"id": "S1A_single", "properties": {}, "assets": {"vv": {"href": href.format("vv")}}},  # no VH: left out
+    ]})
+    assert [i.id for i in items] == ["S1A_dual"] and items[0].relative_orbit == 77 and items[0].epsg == 32646 and set(items[0].assets) == {"vv", "vh"}
+    assert live.S1Item.from_public(items[0].public()) == items[0]
+    assert live._allowed_s1_href(href.format("vh")) and not live._allowed_s1_href("https://evil.example.com/iw-vh.tiff")
+    assert not live._allowed_s1_href("https://x.blob.core.windows.net.evil.com/a.tif") and not live._allowed_s1_href("http://x.blob.core.windows.net/a.tif")
+    assert live.sas_token(lambda url: {"token": "se=2026&sig=abc", "msft:expiry": "2026-10-21T12:00:00Z"}) == "se=2026&sig=abc"
+    with pytest.raises(ValueError, match="did not issue"):
+        live.sas_token(lambda url: {"error": "nope"})
+    with pytest.raises(ValueError, match="unexpected response"):
+        live.parse_s1_items([])
+
+
+def test_s1_window_and_matching_onto_the_first_grid(tmp_path, monkeypatch):
+    E0, N0 = 600000, 2850000
+
+    def mk(name, value, e0=E0, n0=N0):
+        p = tmp_path / f"{name}.tif"
+        data = np.fromfunction(lambda r, c: value * (1 + 0.001 * c), (300, 300)).astype(np.float32)
+        data[:5, :] = -32768  # RTC no data
+        with rasterio.open(p, "w", driver="GTiff", width=300, height=300, count=1, dtype="float32", crs="EPSG:32646", transform=from_origin(e0, n0, 10, 10), nodata=-32768) as d:
+            d.write(data, 1)
+        return str(p)
+
+    monkeypatch.setattr(live, "_allowed_s1_href", lambda href: True)
+    monkeypatch.setattr(live, "_sign", lambda href, token: href)
+    first = live.S1Item(id="A", datetime="2024-01-03T00:00:00Z", orbit_state="descending", relative_orbit=77, platform="SENTINEL-1A", epsg=32646,
+                        assets={"vv": {"href": mk("vv1", 0.1)}, "vh": {"href": mk("vh1", 0.02)}})
+    inv = Transformer.from_crs(32646, 4326, always_xy=True)
+    (lon_a, lon_b), (lat_a, lat_b) = inv.transform([E0 + 500, E0 + 1500], [N0 - 1500, N0 - 20])
+    out1 = tmp_path / "a.tif"
+    notes = live.read_s1_window(first, [lon_a, lat_a, lon_b, lat_b], out1, "tok")
+    with rasterio.open(out1) as d:
+        assert d.count == 2 and d.descriptions == ("VV", "VH") and 100 <= d.width <= 106  # the lon/lat box of a UTM square is a little wider
+        vv, vh = d.read(1), d.read(2)
+        col0 = round((d.transform.c - E0) / 10)
+        row0 = round((N0 - d.transform.f) / 10)
+    assert row0 < 5 and np.isnan(vv[: 5 - row0]).all() and np.isfinite(vv[5 - row0 :]).all()  # −32768 became no data
+    assert vv[5 - row0, 0] == approx(0.1 * (1 + 0.001 * col0), rel=1e-6) and vh[-1, -1] > 0
+    assert any("relative orbit 77" in n and "γ⁰" in n for n in notes)
+    # A second date on a grid shifted by half a pixel, read onto the first one's grid.
+    second = live.S1Item(id="B", datetime="2024-03-01T00:00:00Z", orbit_state="descending", relative_orbit=77, platform="SENTINEL-1A", epsg=32646,
+                         assets={"vv": {"href": mk("vv2", 0.1, E0 + 5)}, "vh": {"href": mk("vh2", 0.02, E0 + 5)}})
+    out2 = tmp_path / "b.tif"
+    live.read_s1_window(second, [0, 0, 1, 1], out2, "tok", match=out1)
+    with rasterio.open(out1) as a, rasterio.open(out2) as b:
+        assert (a.transform, a.width, a.height, a.crs) == (b.transform, b.width, b.height, b.crs)
+        vv2 = b.read(1)
+    # the same ramp shifted by half a pixel: bilinear gives the value half a column earlier
+    j = vv2.shape[1] // 2
+    assert vv2[50, j] == approx(0.1 * (1 + 0.001 * (col0 + j - 0.5)), rel=1e-5)
+    with pytest.raises(ValueError, match="does not overlap"):
+        live.read_s1_window(first, [10, 10, 10.1, 10.1], tmp_path / "c.tif", "tok")

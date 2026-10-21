@@ -9,7 +9,7 @@ from ..processing.canopy import analyze_canopy, canopy_markdown, chm_from_las
 from ..processing.render import ramp_rgba
 from ..processing.rio import Raster, grid_to_lonlat_arrays, ground_geometry, same_grid
 from . import tool
-from .common import clean, display_grid, number
+from .common import begin_tiles, clean, display_grid, finish_tiles, number
 from .context import ToolContext, ToolError
 
 CHM_COLORS = ["#f7fcf5", "#c7e9c0", "#74c476", "#238b45", "#00441b"]
@@ -125,11 +125,15 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         from rasterio.transform import array_bounds
         from rasterio.warp import transform_bounds
 
-        south, west, north, east = array_bounds(chm.shape[0], chm.shape[1], transform)
+        west, south, east, north = array_bounds(chm.shape[0], chm.shape[1], transform)
         lo_w, lo_s, lo_e, lo_n = transform_bounds(crs, "EPSG:4326", west, south, east, north, densify_pts=21)
         bounds = [[lo_s, lo_w], [lo_n, lo_e]]
     view = display_grid(chm)
-    image = {"url": layer, "bounds": bounds, "label": "Canopy height", "legend": [], "width": int(view.shape[1]), "height": int(view.shape[0])} if bounds else None
+    tiles = begin_tiles(ctx, "chm", chm.shape[1], chm.shape[0], transform, crs, "float32", {"kind": "ramp", "min": 0.0, "max": max(hi, threshold), "colors": CHM_COLORS}, nodata=float("nan"))
+    if tiles is not None:
+        tiles.write(0, chm.astype(np.float32, copy=False))
+    image = {"url": layer, "bounds": bounds, "label": "Canopy height", "legend": [], "width": int(view.shape[1]), "height": int(view.shape[0]),
+             "tiles": finish_tiles(ctx, tiles, "chm", bounds)} if bounds else None
     return clean({"tool": "canopy", "name": name, "canopy": res, "source": source, "layer": layer, "range": [0.0, max(hi, threshold)], "colors": CHM_COLORS,
             "width": int(chm.shape[1]), "height": int(chm.shape[0]), "markdown": canopy_markdown(name, source, res, notes), "notes": notes,
             "downloads": downloads, "map": {"bounds": bounds, "image": image, "geojson": fc} if bounds else None})

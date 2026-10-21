@@ -357,7 +357,7 @@ export default function App() {
                       {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
-                      {tool === 'radar' && <RadarTool onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'radar' && <RadarTool onOutput={setOutput} boundary={boundary} target={target} />}
                       {tool === 'canopy' && <CanopyTool onOutput={setOutput} />}
                     </Suspense>
                   </section>

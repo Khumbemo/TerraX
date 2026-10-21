@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { backToTools, chat, openTool, shapefileZip, start } from './helpers';
+import { backToTools, chat, mapState, openTool, shapefileZip, start } from './helpers';
 
 test('tool hub lists every tool', async ({ page }) => {
   const errors = await start(page);
@@ -18,6 +18,13 @@ test('forest loss: synthetic sample gives areas and a report', async ({ page }) 
   await expect(stats).toContainText('Forest loss');
   await expect(stats).toContainText('ha');
   await expect(page.locator('.report-card')).toContainText('Method and limits');
+  // Zoomed in past the picture's detail, the map loads full-resolution tiles of the class grid.
+  const tiles = await mapState<{ min: number; max: number } | null>(page, `m => { const s = m.getSource('tx-image-tiles'); return s ? { min: s.minzoom, max: s.maxzoom } : null; }`);
+  test.skip(tiles === null && Boolean(process.env.TERRAX_URL), 'the deployment under test makes tiles only for large grids');
+  expect(tiles).not.toBeNull();
+  const tile = page.waitForResponse(r => /\/tiles\/change\/\d+\/\d+\/\d+\.png$/.test(r.url()) && r.status() === 200);
+  await mapState(page, `m => { const [w, s, e, n] = m.getSource('tx-image-tiles').serialize().bounds; m.jumpTo({ center: [(w + e) / 2, (s + n) / 2], zoom: ${tiles!.max} }); return true; }`);
+  await tile;
   expect(errors).toEqual([]);
 });
 

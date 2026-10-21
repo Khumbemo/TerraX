@@ -39,8 +39,10 @@ class Settings:
     #: Pixel budget for DEMs (terrain, hydrology, watersheds): slope works in strips, flow routing needs the whole grid
     #: (about 40 bytes a pixel), so this budget sits between the two others.
     dem_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_DEM_PIXELS", "2.5e7"))))
-    #: Pixel budget for tools that need the whole grid in memory at once (contours, previews).
+    #: Pixel budget for tools that need the whole grid in memory at once (previews, canopy rasters).
     grid_pixels: int = field(default_factory=lambda: int(float(os.environ.get("TERRAX_GRID_PIXELS", "4e6"))))
+    #: Result grids with a longer side than this also get full-resolution map tiles (the map picture is thinned to 4096).
+    tiles_min_side: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_TILES_MIN_SIDE", "4096"))))
     #: Threads that process strips of one raster in parallel (GDAL reads and NumPy release the GIL).
     tile_threads: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_TILE_THREADS", "0")) or min(4, os.cpu_count() or 1)))
     #: Hard time limit for one job, minutes (the job is told to stop a minute earlier).
