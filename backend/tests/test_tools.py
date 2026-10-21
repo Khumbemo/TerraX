@@ -80,6 +80,13 @@ def test_terrain_hydrology_watershed_contours(client):
     assert ws["cells"] > 1 and ws["areaM2"] > 0 and ws["geojson"]["features"]
     c = run(client, "contours", {"dem": dem}, {"interval": t["suggestedInterval"]})
     assert c["contours"]["lines"] == 23
+    # D∞ adds a wetness layer; the D8 stream network and its numbers stay the same.
+    d = run(client, "hydrology", {"dem": dem}, {"thresholdKm2": 0.5, "method": "dinf"})
+    assert d["method"] == "dinf" and d["flow"] == h["flow"] and len(d["streams"]["features"]) == 42
+    w = d["wetness"]["summary"]
+    assert w["q1"] < w["median"] < w["q3"] and client.get(d["wetness"]["layer"]).status_code == 200
+    assert "Topographic wetness index" in d["markdown"] and h["wetness"] is None
+    assert "D8 or D∞" in run_err(client, "hydrology", {"dem": dem}, {"method": "mfd"})
 
 
 def test_landcover(client):
@@ -127,3 +134,88 @@ def test_map_streams_keeps_whole_highest_orders_within_the_budget():
     assert [f["properties"]["strahler"] for f in fc["features"]] == [2, 3] and note and "order 2 and above (2 of 3 lines)" in note
     fc, note = map_streams({"type": "FeatureCollection", "features": [line(4, MAP_STREAM_POINTS + 1)]})
     assert fc["features"] == [] and note and "too large to draw" in note
+
+
+def test_landcover_random_forest_sample_and_accuracy(client):
+    """Train on the sample shapes, draw a stratified sample, label it from the scene's true geometry, estimate accuracy."""
+    import csv
+    import io
+
+    img = sample(client, "satellite_4band_synthetic.tif")
+    shapes = sample(client, "landcover_training_synthetic.geojson")
+    res = run(client, "landcover", {"file": img, "training": shapes}, {"method": "rf", "bands": [0, 1, 2, 3], "roles": {"red": 2, "nir": 3}})
+    lc = res["landcover"]
+    assert res["labels"] == ["Built-up", "Forest", "Water"] and lc["method"] == "rf" and lc["validation"]["overall"] > 0.95
+    assert "Cross-validation by training shape" in res["markdown"]
+    job_id = res["map"]["image"]["url"].split("/")[3]
+    s = client.post(f"/api/landcover/{job_id}/sample", json={"total": 150, "minPerClass": 30}).json()
+    assert s["points"] == 150 and [a["n"] >= 30 for a in s["allocation"]] == [True] * 3 and s["unit"] == "ha"
+    gj = client.get(s["downloads"][0]["url"]).json()
+    assert len(gj["features"]) == 150 and gj["features"][0]["properties"]["reference"] == ""
+    rows = list(csv.DictReader(io.StringIO(client.get(s["downloads"][1]["url"]).text)))
+
+    def truth(r: int, c: int) -> str:  # scripts/make_samples.py: river, town, forest
+        x, y = c + 0.5, r + 0.5
+        return "Water" if abs(x - 60 - y * 0.2) < 4 else "Built-up" if (x - 200) ** 2 + (y - 40) ** 2 < 22**2 else "Forest"
+
+    for row in rows:
+        row["reference"] = truth(int(row["row"]), int(row["col"]))
+    rows[0]["reference"] = ""  # one point left unlabelled
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=list(rows[0]))
+    w.writeheader()
+    w.writerows(rows)
+    up = client.post("/api/files", files={"file": ("labelled.csv", buf.getvalue().encode(), "text/csv")}).json()
+    a = client.post(f"/api/landcover/{job_id}/accuracy", json={"file": up["id"]}).json()
+    assert a["samples"] == 149 and a["unlabelled"] == 1 and a["overallAccuracy"] > 0.9
+    total_ha = 240 * 200 * 0.09
+    assert sum(c["area"] for c in a["classes"]) == pytest.approx(total_ha, rel=1e-9)
+    water = next(c for c in a["classes"] if c["label"] == "Water")
+    true_water = sum(truth(r, c) == "Water" for r in range(200) for c in range(240)) * 0.09
+    assert abs(water["area"] - true_water) <= water["areaCi"] * 1.5
+    assert "## Accuracy and area (stratified sample)" in a["markdown"]
+    # Labels outside the legend are refused with the allowed names.
+    rows[1]["reference"] = "Swamp"
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=list(rows[0]))
+    w.writeheader()
+    w.writerows(rows)
+    up = client.post("/api/files", files={"file": ("bad.csv", buf.getvalue().encode(), "text/csv")}).json()
+    bad = client.post(f"/api/landcover/{job_id}/accuracy", json={"file": up["id"]})
+    assert bad.status_code == 400 and "Built-up, Forest, Water" in bad.json()["detail"]
+
+
+def test_radar_single_and_change(client):
+    a = sample(client, "s1_vv_vh_2023-01-08_synthetic.tif")
+    b = sample(client, "s1_vv_vh_2024-01-03_synthetic.tif")
+    one = run(client, "radar", {"before": a})
+    assert one["bands"] == {"vv": 0, "vh": 1} and one["radar"]["dates"][0]["scale"] == "db" and "change" not in one["radar"]
+    assert client.get(one["layers"]["composite"]).status_code == 200
+    res = run(client, "radar", {"before": a, "after": b}, {"window": 5, "thresholdDb": 3})
+    ch = res["radar"]["change"]
+    assert ch["ha"]["1"] == pytest.approx(30, rel=0.15)  # the 600 m × 500 m clearing
+    assert ch["share"]["3"] < 0.01 and "Change (VH log ratio)" in res["markdown"]
+    tif = client.get(res["downloads"][0]["url"])
+    assert tif.status_code == 200 and tif.content[:2] in (b"II", b"MM")
+    assert "different bands" in run_err(client, "radar", {"before": a}, {"vv": 1, "vh": 1})
+
+
+def test_canopy_from_point_cloud_and_rasters(client, tmp_path):
+    import rasterio
+
+    cloud = sample(client, "lidar_forest_synthetic.laz")
+    res = run(client, "canopy", {"cloud": cloud}, {"cell": 1, "threshold": 2, "minTree": 5})
+    c = res["canopy"]
+    assert c["trees"]["count"] == 25 and 8 <= c["height"]["max"] <= 30.5 and 0.05 < c["cover"] < 0.6
+    assert res["map"]["geojson"]["features"] and "Popescu & Wynne" in res["markdown"]
+    chm_url = next(d["url"] for d in res["downloads"] if d["filename"].endswith(".tif"))
+    p = tmp_path / "chm.tif"
+    p.write_bytes(client.get(chm_url).content)
+    with rasterio.open(p) as d:
+        assert d.crs.to_epsg() == 32646 and d.res == (1.0, 1.0)
+    # The exported CHM as input gives the same answer.
+    with p.open("rb") as fh:
+        fid = client.post("/api/files", files={"file": ("chm.tif", fh, "image/tiff")}).json()["id"]
+    again = run(client, "canopy", {"chm": fid}, {"threshold": 2, "minTree": 5})
+    assert again["canopy"]["trees"]["count"] == 25 and again["canopy"]["cover"] == pytest.approx(c["cover"], abs=1e-9)
+    assert "point cloud, a canopy height model" in run_err(client, "canopy", {}, {})

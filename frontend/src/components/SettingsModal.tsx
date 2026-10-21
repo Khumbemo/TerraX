@@ -314,8 +314,9 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                 </p>
                 <h4>GeoTIFFs</h4>
                 <p>
-                  Statistics skip no-data and NaN pixels. Rasters over 4 million pixels are resampled for statistics, and TerraX says so. The footprint is drawn on the
-                  map for WGS84, Web Mercator and WGS84 UTM files. With two or more bands you can compute NDVI = (NIR − Red) / (NIR + Red).
+                  Statistics skip no-data and NaN pixels. Rasters are analysed at full resolution up to the server’s pixel budget (100 million by default, 25 million
+                  for DEMs), and TerraX says when it resamples. Any CRS that PROJ can convert to WGS84 is placed on the map, and its areas and slopes are measured in
+                  metres. With two or more bands you can compute NDVI = (NIR − Red) / (NIR + Red).
                 </p>
                 <h4>Limits</h4>
                 <p>

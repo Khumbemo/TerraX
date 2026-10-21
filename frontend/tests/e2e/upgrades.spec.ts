@@ -54,6 +54,20 @@ test('terrain: streams, watershed boundary and contours', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('terrain: D∞ flow adds a wetness index layer', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Terrain');
+  await page.click('button:has-text("Try synthetic DEM")');
+  await page.selectOption('#terrain-flow-method', 'dinf');
+  await page.click('#terrain-flow');
+  await expect(page.locator('.stat', { hasText: 'Median wetness index' })).toBeVisible();
+  await page.click('[role="tab"]:has-text("Wetness (TWI)")');
+  await expect(page.locator('figcaption .legend-labels')).toContainText('ln(a / tan β)');
+  await expect(page.locator('img.raster-canvas')).toHaveAttribute('src', /wetness\.png/);
+  await expect(page.locator('.report-card')).toContainText('Topographic wetness index');
+  expect(errors).toEqual([]);
+});
+
 test('photos: EXIF location on the map and comparing two photos', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Space & aerial photos');
@@ -108,6 +122,36 @@ test('satellite: pixel inspector, stretch and a multi-date series', async ({ pag
   expect(errors).toEqual([]);
 });
 
+test('land cover: random forest from training shapes, validation sample and accuracy', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Land cover');
+  await page.selectOption('#landcover-method', 'rf');
+  await page.click('button:has-text("Try synthetic scene")');
+  await expect(page.locator('.stat', { hasText: 'Cross-validated by shape' })).toBeVisible();
+  await expect(page.locator('#landcover-label-1')).toHaveValue('Built-up');
+  await page.fill('#landcover-sample-total', '90');
+  await page.fill('#landcover-sample-min', '20');
+  await page.click('#landcover-sample');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Validation sample (CSV)")')]);
+  const csv = await (await import('node:fs/promises')).readFile((await dl.path())!, 'utf8');
+  // Label every point from the scene's true geometry (scripts/make_samples.py): river, town, forest.
+  const [head, ...lines] = csv.trim().split(/\r?\n/); // RFC 4180 CSV ends lines with CRLF
+  const cols = head.split(',');
+  const at = (name: string) => cols.indexOf(name);
+  const labelled = [head, ...lines.map(l => {
+    const v = l.split(',');
+    const x = Number(v[at('col')]) + 0.5, y = Number(v[at('row')]) + 0.5;
+    v[at('reference')] = Math.abs(x - 60 - y * 0.2) < 4 ? 'Water' : (x - 200) ** 2 + (y - 40) ** 2 < 22 ** 2 ? 'Built-up' : 'Forest';
+    return v.join(',');
+  })].join('\n');
+  expect(lines).toHaveLength(90);
+  await page.setInputFiles('#landcover-reference', { name: 'labelled.csv', mimeType: 'text/csv', buffer: Buffer.from(labelled) });
+  await expect(page.locator('#landcover-accuracy tbody tr')).toHaveCount(3);
+  await expect(page.locator('.stat', { hasText: 'Overall accuracy' })).toContainText('%');
+  await expect(page.locator('.report-card')).toContainText('Accuracy and area (stratified sample)');
+  expect(errors).toEqual([]);
+});
+
 test('land cover: classify, rename a class and export', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Land cover');
@@ -122,5 +166,33 @@ test('land cover: classify, rename a class and export', async ({ page }) => {
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export class table")')]);
   expect(dl.suggestedFilename()).toBe('satellite_4band_synthetic_landcover_classes.csv');
   await expect.poll(() => mapState<boolean>(page, `m => !!m.getLayer('tx-image-r')`)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('radar: speckle-filtered Sentinel-1 pair maps the clearing', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Radar (Sentinel-1)');
+  await page.click('button:has-text("Try synthetic pair")');
+  await expect(page.locator('.stat', { hasText: 'VH decrease' })).toContainText('ha');
+  const ha = Number((await page.locator('.stat', { hasText: 'VH decrease' }).locator('.stat-value').innerText()).split(' ')[0]);
+  expect(ha).toBeGreaterThan(25);
+  expect(ha).toBeLessThan(35); // the 600 m × 500 m clearing is 30 ha
+  await expect(page.locator('#radar-vh')).toHaveValue('1');
+  await expect(page.locator('.report-card')).toContainText('Lee (1980)');
+  await page.click('[role="tab"]:has-text("False colour")');
+  await expect(page.locator('img.raster-canvas')).toHaveAttribute('src', /composite\.png/);
+  expect(errors).toEqual([]);
+});
+
+test('canopy: LiDAR point cloud gives height, cover and tree tops', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Canopy height');
+  await page.click('button:has-text("Try synthetic LiDAR")');
+  await expect(page.locator('.stat', { hasText: 'Tree tops' })).toContainText('25');
+  await expect(page.locator('.stat', { hasText: 'Canopy cover' })).toContainText('%');
+  await expect(page.locator('.report-card')).toContainText('Popescu & Wynne');
+  await expect.poll(() => mapState<number>(page, `m => m.getSource('tx-features') ? m.getSource('tx-features').serialize().data.features.length : 0`)).toBe(25);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export canopy height model")')]);
+  expect(dl.suggestedFilename()).toBe('chm.tif');
   expect(errors).toEqual([]);
 });

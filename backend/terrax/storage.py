@@ -88,7 +88,7 @@ class StoredFile:
     id: str
     name: str
     size: int
-    kind: str  # raster | vector | table | image | archive | other
+    kind: str  # raster | vector | table | image | pointcloud | archive | other
     created: float
     meta: dict[str, Any] = field(default_factory=dict)
     sample: bool = False

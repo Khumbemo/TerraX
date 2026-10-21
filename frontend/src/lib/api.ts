@@ -49,7 +49,7 @@ export async function request<T>(path: string, init: RequestInit & { json?: unkn
 
 // ── Files ────────────────────────────────────────────────────────────────
 
-export type FileKind = 'raster' | 'table' | 'image' | 'vector' | 'archive' | 'other';
+export type FileKind = 'raster' | 'table' | 'image' | 'vector' | 'pointcloud' | 'archive' | 'other';
 
 export interface RasterMeta {
   filename: string;

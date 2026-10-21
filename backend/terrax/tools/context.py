@@ -54,6 +54,17 @@ class ToolContext:
         save_png(rgba, self.dir / storage.safe_name(name))
         return self.url(name)
 
+    def geotiff(self, name: str, data: np.ndarray, transform, crs, nodata: float | None = None) -> str:
+        """A single-band GeoTIFF (deflate-compressed, tiled) for download and use in other GIS software."""
+        import rasterio
+
+        h, w = data.shape
+        profile = {"driver": "GTiff", "width": w, "height": h, "count": 1, "dtype": data.dtype.name, "crs": crs, "transform": transform,
+                   "compress": "deflate", "tiled": w >= 256 and h >= 256, "nodata": nodata}
+        with rasterio.open(self.dir / storage.safe_name(name), "w", **profile) as d:
+            d.write(data, 1)
+        return self.url(name)
+
     def json(self, name: str, data: Any) -> str:
         (self.dir / storage.safe_name(name)).write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         return self.url(name)

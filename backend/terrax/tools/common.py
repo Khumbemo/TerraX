@@ -101,3 +101,15 @@ def clean(obj: Any) -> Any:
     if isinstance(obj, float) and not math.isfinite(obj):
         return None
     return obj
+
+
+def save_npz(path, arrays: dict[str, np.ndarray]) -> None:
+    """np.savez with deflate only for integer grids: float grids barely compress, and deflating them costs most of the save time."""
+    import zipfile
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+        for key, a in arrays.items():
+            info = zipfile.ZipInfo(key + ".npy")
+            info.compress_type = zipfile.ZIP_DEFLATED if a.dtype.kind in "iub" else zipfile.ZIP_STORED
+            with z.open(info, "w", force_zip64=True) as fh:
+                np.lib.format.write_array(fh, np.ascontiguousarray(a), allow_pickle=False)

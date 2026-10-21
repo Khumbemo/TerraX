@@ -253,7 +253,8 @@ def ground_geometry(meta: Meta, width: int, height: int) -> Ground | None:
 
     Geographic cells use exact WGS84 ellipsoid areas (via authalic latitude);
     Web Mercator cells are corrected by cos²(latitude); UTM cells use the
-    projected size (scale error < 0.1 % within a zone).
+    projected size (scale error < 0.1 % within a zone); any other projected
+    CRS is measured geodesically row by row.
     """
     if not meta.bbox or not meta.pixel_size:
         return None
@@ -278,7 +279,43 @@ def ground_geometry(meta: Meta, width: int, height: int) -> Ground | None:
     if is_utm(meta.epsg):
         return Ground(np.full(height, cw * ch), np.full(height, cw), np.full(height, ch),
                       f"Pixel sizes are in metres (EPSG:{meta.epsg}); UTM scale error is below 0.1 % within a zone.")
+    if meta.crs_wkt:
+        return _geodesic_ground(meta, width, height, cw, ch)
     return None
+
+
+def _geodesic_ground(meta: Meta, width: int, height: int, cw: float, ch: float, samples: int = 17) -> Ground | None:
+    """Ground geometry for any other projected CRS, measured on the WGS84 ellipsoid.
+
+    In each row, cells at `samples` columns are mapped to longitude/latitude; the geodesic lengths of their
+    east and north sides give the spacing, and side lengths × sin(angle between them) the area. The row mean is
+    used, so this handles any linear unit (metres, feet) and the projection's own scale distortion.
+    """
+    from pyproj import CRS, Geod, Transformer
+
+    try:
+        tr = Transformer.from_crs(CRS.from_wkt(meta.crs_wkt or ""), "EPSG:4326", always_xy=True)
+    except Exception:
+        return None
+    minx, _, _, maxy = meta.bbox or (0.0, 0.0, 0.0, 0.0)
+    cols = np.unique(np.linspace(0, width - 1, min(samples, width)).round()).astype(np.float64)
+    rows = np.arange(height, dtype=np.float64)
+    c, r = np.meshgrid(cols, rows)
+    x, y = minx + c * cw, maxy - r * ch  # each cell's north-west corner
+    lon0, lat0 = tr.transform(x, y)
+    lon_e, lat_e = tr.transform(x + cw, y)
+    lon_s, lat_s = tr.transform(x, y - ch)
+    if not (np.isfinite(lon0).all() and np.isfinite(lon_e).all() and np.isfinite(lon_s).all()):
+        return None
+    geod = Geod(ellps="WGS84")
+    az_e, _, dx = geod.inv(lon0, lat0, lon_e, lat_e)
+    az_s, _, dy = geod.inv(lon0, lat0, lon_s, lat_s)
+    area = dx * dy * np.abs(np.sin(np.radians(np.asarray(az_s) - np.asarray(az_e))))
+    spread = float(area.max(axis=1).max() / area.min(axis=1).min() - 1) if area.size and area.min() > 0 else 0.0
+    unit = CRS.from_wkt(meta.crs_wkt or "").axis_info[0].unit_name if meta.crs_wkt else "unit"
+    note = (f"Pixel sizes were measured on the WGS84 ellipsoid from the file's projection ({f'EPSG:{meta.epsg}' if meta.epsg else 'custom CRS'}, units: {unit}), "
+            f"per row; cell areas vary by {spread * 100:.2g} % across the raster.")
+    return Ground(area.mean(axis=1), np.asarray(dx).mean(axis=1), np.asarray(dy).mean(axis=1), note)
 
 
 # ── Cloud and quality masks ──────────────────────────────────────────────────

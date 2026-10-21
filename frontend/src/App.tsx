@@ -33,6 +33,8 @@ const DataTool = lazy(() => import('./components/tools/DataTool'));
 const LandCoverTool = lazy(() => import('./components/tools/LandCoverTool'));
 const TerrainTool = lazy(() => import('./components/tools/TerrainTool'));
 const PhotoTool = lazy(() => import('./components/tools/PhotoTool'));
+const RadarTool = lazy(() => import('./components/tools/RadarTool'));
+const CanopyTool = lazy(() => import('./components/tools/CanopyTool'));
 const ReportsView = lazy(() => import('./components/ReportsView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
 const Tour = lazy(() => import('./components/Tour'));
@@ -335,7 +337,7 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    {boundary && tool !== 'photo' && tool !== 'carbon' && (
+                    {boundary && tool !== 'photo' && tool !== 'carbon' && tool !== 'canopy' && (
                       <div className="boundary-banner" role="status">
                         <span>
                           Analysis boundary: <strong>{boundary.name}</strong> ({(boundary.areaM2 / 10_000).toFixed(2)} ha).{' '}
@@ -355,6 +357,8 @@ export default function App() {
                       {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
+                      {tool === 'radar' && <RadarTool onOutput={setOutput} boundary={boundary} />}
+                      {tool === 'canopy' && <CanopyTool onOutput={setOutput} />}
                     </Suspense>
                   </section>
 

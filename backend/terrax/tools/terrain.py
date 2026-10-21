@@ -7,13 +7,14 @@ import math
 import numpy as np
 
 from ..config import settings
-from ..processing.render import hex_rgb, viridis
+from ..processing.render import hex_rgb, ramp_rgba, viridis
 from ..processing.rio import Ground, grid_to_lonlat, grid_to_lonlat_arrays
 from ..processing.terrain import ASPECTS, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
 from . import tool
-from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster
+from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster, save_npz
 from .context import ToolContext, ToolError
 
+WETNESS_COLORS = ["#f6efd2", "#a6cee3", "#3a87c0", "#0b3b78"]  # dry → wet
 ORDER_COLORS = np.array([[125, 211, 252], [56, 189, 248], [14, 165, 233], [2, 132, 199], [3, 105, 161], [30, 64, 175]], dtype=float)
 
 
@@ -49,18 +50,6 @@ def flow_png(ctx_dir, name: str, z: np.ndarray, shade: np.ndarray, acc: np.ndarr
     thin = lambda a: a[::k, ::k] if (a is not None and k > 1) else a
     o = (outlet[0] // k, outlet[1] // k) if outlet is not None else None
     save_png(flow_rgba(thin(z), shade, thin(acc), thin(order), thin(basin), o), ctx_dir / name)
-
-
-def save_npz(path, arrays: dict[str, np.ndarray]) -> None:
-    """np.savez with deflate only for integer grids: float grids barely compress, and deflating them costs most of the save time."""
-    import zipfile
-
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-        for key, a in arrays.items():
-            info = zipfile.ZipInfo(key + ".npy")
-            info.compress_type = zipfile.ZIP_DEFLATED if a.dtype.kind in "iub" else zipfile.ZIP_STORED
-            with z.open(info, "w", force_zip64=True) as fh:
-                np.lib.format.write_array(fh, np.ascontiguousarray(a), allow_pickle=False)
 
 
 def flow_rgba(z: np.ndarray, hs: np.ndarray, acc: np.ndarray, order: np.ndarray, basin: np.ndarray | None = None, outlet: tuple[int, int] | None = None) -> np.ndarray:
@@ -105,7 +94,7 @@ def map_streams(fc: dict) -> tuple[dict, str | None]:
     return {"type": "FeatureCollection", "features": shown}, note
 
 
-def hydrology_markdown(f: dict, valid_km2: float) -> str:
+def hydrology_markdown(f: dict, valid_km2: float, wetness: dict | None = None) -> str:
     """The report's hydrology section."""
     from ..processing.stats import fmt, thousands
 
@@ -119,6 +108,14 @@ def hydrology_markdown(f: dict, valid_km2: float) -> str:
         "- Method: Priority-Flood depression filling with an ε gradient (Barnes et al. 2014), D8 steepest-descent flow (O’Callaghan & Mark 1984), Strahler (1957) stream order. "
         "The threshold sets where channels start and is a choice, not a measurement; D8 cannot split flow, so it draws parallel lines on planar slopes.",
     ]
+    w = (wetness or {}).get("summary")
+    if w:
+        lines += [
+            f"- Topographic wetness index ln(a / tan β): median {fmt(w['median'], 3)} (quartiles {fmt(w['q1'], 3)}–{fmt(w['q3'], 3)}, range {fmt(w['min'], 3)} to {fmt(w['max'], 3)}).",
+            "- Wetness method: D∞ flow (Tarboton 1997) splits each cell's flow between the two cells of its steepest triangular facet, so it follows divergent "
+            "and planar slopes that D8 cannot. a is the upslope area per metre of contour across the flow (a plane gives its exact upslope length), tan β the steepest "
+            "facet slope, floored at 0.001 on filled flats (Beven & Kirkby 1979; Sørensen et al. 2006). Streams, Strahler orders and watersheds still use D8.",
+        ]
     return "\n".join(lines)
 
 
@@ -150,8 +147,22 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     km2 = number(params, "thresholdKm2", 0.5, 0.0001, 100000, "Set the stream threshold as a positive area in km².")
     t = analyze_terrain(r, boundary(params))
     geo: Ground = t["_geo"]
+    method = params.get("method") or "d8"
+    if method not in ("d8", "dinf"):
+        raise ToolError("Choose D8 or D∞ for flow accumulation.")
     ctx.progress(0.3, "Filling depressions and routing flow")
-    f = flow_routing(t["_dem"], geo, km2 * 1e6)
+    f = flow_routing(t["_dem"], geo, km2 * 1e6, dinf=method == "dinf")
+    wetness = None
+    if f["dinf"] is not None:
+        from ..processing.stats import summarize_large
+
+        twi = f.pop("dinf")["twi"]
+        summary = summarize_large(twi[np.isfinite(twi)])
+        view = display_grid(twi)
+        lo, hi = (float(v) for v in np.nanpercentile(view, [2, 98])) if np.isfinite(view).any() else (0.0, 1.0)
+        wetness = {"layer": ctx.png("wetness.png", ramp_rgba(view, lo, hi, WETNESS_COLORS)), "summary": summary.dict() if summary else None,
+                   "range": [lo, hi], "colors": WETNESS_COLORS}
+        del twi, view
     ctx.progress(0.75, "Tracing streams")
     ll = grid_to_lonlat_arrays(r, f["width"], f["height"])
     downloads = []
@@ -172,7 +183,7 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         streams, note = map_streams(streams)
         notes += [note] if note else []
     out = clean({"tool": "terrain", "name": r.meta.filename, "flow": stats, "layer": flow_url, "downloads": downloads, "notes": notes,
-                 "markdown": hydrology_markdown(stats, valid_km2),
+                 "wetness": wetness, "method": method, "markdown": hydrology_markdown(stats, valid_km2, wetness),
                  "demFile": inputs.get("dem"), "boundary": params.get("boundary")})
     out["streams"] = streams  # finite, rounded coordinates already; walking them through clean() is slow on large networks
     return out

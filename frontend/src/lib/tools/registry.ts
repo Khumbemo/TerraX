@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import type { LatLngBounds } from '../geo';
 import type { ResultImage } from '../api';
 
-export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'terrain' | 'photo';
+export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'radar' | 'canopy' | 'terrain' | 'photo';
 
 export interface ToolInfo {
   id: ToolId;
@@ -76,9 +76,27 @@ export const TOOLS: ToolInfo[] = [
     name: 'Land cover',
     group: 'Remote sensing',
     summary: 'Group pixels into spectral classes, name them and measure their areas.',
-    measures: ['k-means clusters on chosen bands', 'Area and share per class', 'Editable class names and CSV export'],
+    measures: ['k-means clusters or a random forest from training shapes', 'Area and share per class', 'Validation sample, accuracy and area estimates with 95 % CIs'],
     formats: 'Multiband GeoTIFF',
     mark: 'Lc',
+  },
+  {
+    id: 'radar',
+    name: 'Radar (Sentinel-1)',
+    group: 'Remote sensing',
+    summary: 'Backscatter through cloud: speckle filtering, polarisation indices and change between two dates.',
+    measures: ['Lee speckle filter, VV, VH, VH/VV and RVI', 'VH log-ratio change map with areas', 'Change classes as GeoTIFF'],
+    formats: 'Sentinel-1 GeoTIFF (VV, VH; dB or linear)',
+    mark: 'Sa',
+  },
+  {
+    id: 'canopy',
+    name: 'Canopy height',
+    group: 'Elevation',
+    summary: 'Canopy height, cover and tree tops from LiDAR or surface and terrain models.',
+    measures: ['Canopy height model from LAS/LAZ', 'Canopy cover (2 m and FAO 5 m) and height classes', 'Tree tops with heights (GeoJSON)'],
+    formats: 'LAS · LAZ · DSM + DTM or CHM GeoTIFF',
+    mark: 'Ch',
   },
   {
     id: 'terrain',

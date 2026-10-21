@@ -84,7 +84,7 @@ def analyze_terrain(raster: Raster, boundary=None) -> dict:
     plan = StripPlan(raster, boundary)
     geo = plan.geo
     if not geo:
-        raise ValueError("The DEM has no ground units TerraX can use (supported: WGS84, Web Mercator, WGS84 UTM), so slope cannot be computed.")
+        raise ValueError("The DEM has no coordinate reference system (or one PROJ cannot convert to WGS84), so its ground units are unknown and slope cannot be computed.")
     h, w = plan.height, plan.width
     dem = np.full((h, w), np.nan, dtype=np.float32)
     slope = np.full((h, w), np.nan, dtype=np.float32)
@@ -292,8 +292,94 @@ def _route(filled, dxr, dyr, area_r, threshold, queue):
     return direction, acc, order, max_order, length
 
 
-def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float) -> dict:
+# D∞ facets (Tarboton 1997, Table 1): cardinal neighbour e1, diagonal neighbour e2, and the
+# constants giving the flow angle (counter-clockwise from east) as ac·π/2 + af·r.
+_F_R1 = np.array([0, -1, -1, 0, 0, 1, 1, 0], dtype=np.int64)
+_F_C1 = np.array([1, 0, 0, -1, -1, 0, 0, 1], dtype=np.int64)
+_F_R2 = np.array([-1, -1, -1, -1, 1, 1, 1, 1], dtype=np.int64)
+_F_C2 = np.array([1, 1, -1, -1, -1, -1, 1, 1], dtype=np.int64)
+_F_AC = np.array([0, 1, 1, 2, 2, 3, 3, 4], dtype=np.float64)
+_F_AF = np.array([1, -1, 1, -1, 1, -1, 1, -1], dtype=np.float64)
+TAN_FLOOR = 0.001  # slope floor for the wetness index: filled flats keep only an ε gradient
+
+
+@njit(cache=True)
+def _dinf(filled, dx, dy, area_r, order):
+    """D∞ flow (Tarboton 1997): steepest of eight triangular facets, split between its two cells by angle.
+
+    Returns upslope area (m²), specific catchment area (m² per m of contour across the flow) and tan β of
+    the steepest facet. `order` lists cells by descending filled elevation, so donors come before receivers.
+    """
+    h, w = filled.shape
+    acc = np.zeros((h, w), dtype=np.float64)
+    tanb = np.zeros((h, w), dtype=np.float32)
+    width = np.ones((h, w), dtype=np.float32)
+    for r in range(h):
+        for c in range(w):
+            if not np.isnan(filled[r, c]):
+                acc[r, c] = area_r[r]
+    for idx in order:
+        r, c = idx // w, idx % w
+        e0 = filled[r, c]
+        if np.isnan(e0):
+            continue
+        best_s, best_k, best_r, best_rmax = 0.0, -1, 0.0, 0.0
+        for k in range(8):
+            r1, c1, r2, c2 = r + _F_R1[k], c + _F_C1[k], r + _F_R2[k], c + _F_C2[k]
+            if r2 < 0 or r2 >= h or c2 < 0 or c2 >= w or r1 < 0 or r1 >= h or c1 < 0 or c1 >= w:
+                continue
+            e1, e2 = filled[r1, c1], filled[r2, c2]
+            if np.isnan(e1) or np.isnan(e2):
+                continue
+            d1 = dx[r] if _F_R1[k] == 0 else dy[r]  # to the cardinal neighbour
+            d2 = dy[r] if _F_R1[k] == 0 else dx[r]  # from it to the diagonal one
+            s1, s2 = (e0 - e1) / d1, (e1 - e2) / d2
+            rmax = math.atan2(d2, d1)
+            ang = math.atan2(s2, s1)
+            if ang < 0:
+                ang, sl = 0.0, s1
+            elif ang > rmax:
+                ang, sl = rmax, (e0 - e2) / math.hypot(d1, d2)
+            else:
+                sl = math.hypot(s1, s2)
+            if sl > best_s:
+                best_s, best_k, best_r, best_rmax = sl, k, ang, rmax
+        if best_k < 0:
+            continue  # outlet: nothing lower inside the grid
+        k = best_k
+        tanb[r, c] = best_s
+        d2 = dy[r] if _F_R1[k] == 0 else dx[r]
+        width[r, c] = d2 * math.cos(best_r)  # cell width across the flow
+        p2 = best_r / best_rmax
+        a = acc[r, c]
+        if p2 < 1.0:
+            acc[r + _F_R1[k], c + _F_C1[k]] += a * (1.0 - p2)
+        if p2 > 0.0:
+            acc[r + _F_R2[k], c + _F_C2[k]] += a * p2
+    sca = np.empty((h, w), dtype=np.float32)
+    for r in range(h):
+        for c in range(w):
+            sca[r, c] = np.nan if np.isnan(filled[r, c]) else acc[r, c] / width[r, c]
+    return acc, sca, tanb
+
+
+def dinf_flow(filled: np.ndarray, geo: Ground) -> dict:
+    """D∞ upslope area, specific catchment area and topographic wetness index ln(a / tan β) on a filled DEM."""
+    flat = np.where(np.isnan(filled), -np.inf, filled).ravel()
+    order = np.argsort(-flat, kind="stable")
+    order = order.astype(np.int32 if order.size < 2**31 else np.int64)
+    acc, sca, tanb = _dinf(np.ascontiguousarray(filled, dtype=np.float64), geo.dx.astype(np.float64), geo.dy.astype(np.float64), geo.cell_area.astype(np.float64), order)
+    del order
+    with np.errstate(invalid="ignore", divide="ignore"):
+        twi = np.log(sca / np.maximum(tanb, TAN_FLOOR)).astype(np.float32)
+    twi[np.isnan(filled)] = np.nan
+    return {"acc": acc, "sca": sca, "twi": twi, "tanb": tanb}
+
+
+def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float, dinf: bool = False) -> dict:
+    """D8 directions, accumulation, Strahler streams; with `dinf`, also D∞ upslope area and wetness (key "dinf")."""
     filled, raised, max_raise = fill_depressions(dem)
+    extra = dinf_flow(filled, geo) if dinf else None
     n = filled.size
     # Cells in topological order; int32 indices halve this array whenever the grid allows it.
     queue = np.empty(n, dtype=np.int32 if n < 2**31 else np.int64)
@@ -306,7 +392,7 @@ def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float) -> dict:
         lengths.pop()
         max_order -= 1
     return {"width": dem.shape[1], "height": dem.shape[0], "dir": direction, "acc": acc, "order": order, "thresholdM2": threshold_m2,
-            "maxOrder": int(max_order), "lengthByOrder": lengths, "raisedCells": int(raised), "maxRaise": float(max_raise)}
+            "maxOrder": int(max_order), "lengthByOrder": lengths, "raisedCells": int(raised), "maxRaise": float(max_raise), "dinf": extra}
 
 
 def snap_outlet(acc: np.ndarray, col: int, row: int, radius: int = 3) -> tuple[int, int]:

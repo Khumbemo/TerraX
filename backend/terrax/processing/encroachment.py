@@ -55,15 +55,18 @@ def _rgb_bands(n: int) -> list[int]:
     return [0, 0, 0]
 
 
-def _native_cell_m(r: Raster, lat: float) -> float | None:
-    if not r.meta.pixel_size:
+def _native_cell_m(r: Raster, epsg: int, lon: float, lat: float) -> float | None:
+    """The file's pixel size at the property, in metres of the property's UTM grid (any CRS and linear unit)."""
+    if not r.meta.pixel_size or not r.meta.bbox:
+        return None
+    src = "EPSG:4326" if r.meta.geographic else r.crs
+    if src is None:
         return None
     px, py = r.meta.pixel_size
-    if r.meta.geographic:
-        return min(px * 111_320 * math.cos(math.radians(lat)), py * 110_574)
-    if r.meta.epsg in (3857, 900913):
-        return min(px, py) * math.cos(math.radians(lat))
-    return min(px, py)
+    x, y = Transformer.from_crs(4326, src, always_xy=True).transform(lon, lat)
+    e, n = Transformer.from_crs(src, epsg, always_xy=True).transform(np.array([x, x + px, x]), np.array([y, y, y - py]))
+    size = min(math.hypot(e[1] - e[0], n[1] - n[0]), math.hypot(e[2] - e[0], n[2] - n[0]))
+    return size if math.isfinite(size) and size > 0 else None
 
 
 def _rings(fc: dict) -> list[list]:
@@ -96,10 +99,10 @@ def prepare_geo_stack(images: list[dict], boundary: dict, buffer_m: float = 20, 
     min_e, max_e = min(e for e, _ in en) - buffer_m, max(e for e, _ in en) + buffer_m
     min_n, max_n = min(n for _, n in en) - buffer_m, max(n for _, n in en) + buffer_m
     notes: list[str] = []
-    native = [_native_cell_m(i["raster"], clat) for i in images]
+    native = [_native_cell_m(i["raster"], epsg, clon, clat) for i in images]
     sizes = [s for s in native if s is not None and s > 0]
     if len(sizes) < len(native):
-        raise ValueError("Every image must be georeferenced (WGS84, Web Mercator or UTM) to be placed on the property.")
+        raise ValueError("Every image must be georeferenced (with a coordinate reference system) to be placed on the property.")
     cell = max(0.1, min(sizes))
     span = max(max_e - min_e, max_n - min_n)
     if span / cell > max_side:
@@ -117,7 +120,7 @@ def prepare_geo_stack(images: list[dict], boundary: dict, buffer_m: float = 20, 
     for img in images:
         r: Raster = img["raster"]
         if not r.meta.bbox or (not r.meta.geographic and r.crs is None):
-            raise ValueError(f"{r.meta.filename} is not in a supported CRS (WGS84, Web Mercator or UTM).")
+            raise ValueError(f"{r.meta.filename} has no coordinate reference system, so it cannot be placed on the property.")
         idx = _rgb_bands(r.meta.bands)
         uniq = sorted(set(idx))
         dst = "EPSG:4326" if r.meta.geographic else r.crs
