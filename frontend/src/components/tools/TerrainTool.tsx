@@ -59,9 +59,10 @@ interface HydroJob {
 }
 
 interface ContourJob {
-  contours: { levels: number; lines: number; interval: number };
+  contours: { levels: number; lines: number; interval: number; points: number };
   geojson: FeatureCollection;
   downloads: Download[];
+  notes?: string[];
 }
 
 interface Basin {
@@ -294,6 +295,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
               </div>
             )}
             {flow && <Notes items={flow.notes ?? []} />}
+            {showContours && contours && <Notes items={contours.notes ?? []} />}
             <div className="button-row">
               {basin && onBoundary && (
                 <button

@@ -1,6 +1,7 @@
 """Statistics, dates, metrics, climate, hydrology, patches and EXIF (ported from the TypeScript unit tests)."""
 
 import io
+import itertools
 import math
 from datetime import date
 
@@ -261,6 +262,29 @@ def test_contours_on_a_plane():
     ys = sorted(p[1] for p in lines[0])
     assert (ys[0], ys[-1]) == (0.5, h - 0.5)
     assert (nice_interval(1000), nice_interval(730), nice_interval(18)) == (100, 50, 2)
+
+
+def test_contours_join_and_simplify():
+    # A cone: each level is one closed ring, its points at the level's radius (within the linear interpolation).
+    n = 61
+    yy, xx = np.mgrid[0:n, 0:n] + 0.5
+    r = np.hypot(xx - n / 2, yy - n / 2)
+    for level, lines in contour_grid(-r, [-5.0, -20.0]):
+        assert len(lines) == 1 and lines[0][0] == lines[0][-1]
+        assert all(abs(math.hypot(x - n / 2, y - n / 2) + level) < 0.15 for x, y in lines[0])
+    full = contour_grid(-r, [-20.0])[0][1][0]
+    simple = contour_grid(-r, [-20.0], tol=0.25)[0][1][0]
+    assert simple[0] == simple[-1] and 8 < len(simple) < len(full)
+    # every dropped vertex stays within the tolerance of the simplified ring
+    segs = list(itertools.pairwise(simple))
+    dist = lambda p, a, b: abs((b[0] - a[0]) * (a[1] - p[1]) - (a[0] - p[0]) * (b[1] - a[1])) / math.hypot(b[0] - a[0], b[1] - a[1])
+    assert all(min(dist(p, a, b) for a, b in segs) <= 0.25 + 1e-9 for p in full)
+    # a gap of no data splits a line in two, and saddles never cross
+    z = np.tile(np.arange(8.0), (6, 1))
+    z[2, :] = np.nan
+    assert len(contour_grid(z, [5.5])[0][1]) == 2
+    sad = np.array([[1.0, 0.0], [0.0, 1.0]])
+    assert len(contour_grid(sad, [0.5])[0][1]) == 2
 
 
 # ── Patches ──────────────────────────────────────────────────────────────────

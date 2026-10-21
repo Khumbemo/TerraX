@@ -8,8 +8,8 @@ import numpy as np
 
 from ..config import settings
 from ..processing.render import hex_rgb, ramp_rgba, viridis
-from ..processing.rio import Ground, grid_to_lonlat, grid_to_lonlat_arrays
-from ..processing.terrain import ASPECTS, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
+from ..processing.rio import Ground, grid_to_lonlat_arrays
+from ..processing.terrain import ASPECTS, CONTOUR_TOLERANCE, SLOPE_CLASSES, analyze_terrain, contours_geojson, flow_routing, nice_interval, stream_lines, terrain_markdown
 from . import tool
 from .common import DISPLAY_SIDE, boundary, clean, display_grid, number, raster, save_npz
 from .context import ToolContext, ToolError
@@ -191,17 +191,22 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
 
 @tool("contours")
 def run_contours(ctx: ToolContext, inputs: dict, params: dict) -> dict:
-    r = raster(ctx, inputs, "dem")
+    r = raster(ctx, inputs, "dem", pixels=settings().dem_pixels)
     interval = number(params, "interval", 10, 1e-6, 1e6, "Set a positive contour interval in metres.")
     (dem,) = r.read_bands([0])
     from ..processing.zonal import clip_to_boundary
 
     clip_to_boundary(r, dem, boundary(params))
-    ll = grid_to_lonlat(r, dem.width, dem.height)
+    ll = grid_to_lonlat_arrays(r, dem.width, dem.height)
     if not ll:
         raise ToolError("Contours need a DEM with a known coordinate reference system.")
-    out = contours_geojson(dem.data.astype(np.float64), ll, interval)
+    try:
+        out = contours_geojson(dem.data.astype(np.float64), ll, interval)
+    except ValueError as e:
+        raise ToolError(str(e)) from None
     name = f"{r.meta.filename.rsplit('.', 1)[0]}_contours_{interval:g}m.geojson"
     url = ctx.json(name, out["fc"])
-    return clean({"tool": "terrain", "name": r.meta.filename, "contours": {"levels": out["levels"], "lines": len(out["fc"]["features"]), "interval": interval},
-                  "geojson": out["fc"], "downloads": [ctx.download("Export contours (GeoJSON)", name, url, "application/geo+json")]})
+    grid = f"the DEM resampled, each cell = {r.resample_factor:.3g} original pixels; TERRAX_DEM_PIXELS sets the limit" if r.resample_factor > 1 else "full resolution"
+    notes = [f"Contours were traced on a {dem.width}×{dem.height} grid ({grid}) and simplified to within {CONTOUR_TOLERANCE:g} cell of the traced line (Douglas–Peucker)."]
+    return clean({"tool": "terrain", "name": r.meta.filename, "contours": {"levels": out["levels"], "lines": len(out["fc"]["features"]), "interval": interval, "points": out["points"]},
+                  "geojson": out["fc"], "notes": notes, "downloads": [ctx.download("Export contours (GeoJSON)", name, url, "application/geo+json")]})
