@@ -1,16 +1,66 @@
 diff --git a/package-lock.json b/package-lock.json
-index 42cd76d..fba94d5 100644
+index 42cd76d..9a237a0 100644
 --- a/package-lock.json
 +++ b/package-lock.json
-@@ -12,6 +12,7 @@
+@@ -10,14 +10,19 @@
+       "dependencies": {
+         "@google/genai": "^1.29.0",
          "@maplibre/maplibre-gl-leaflet": "^0.1.4",
++        "delaunator": "^5.0.1",
          "dotenv": "^17.2.3",
          "express": "^5.2.1",
 +        "geographiclib-geodesic": "^2.2.0",
          "geotiff": "^3.0.5",
++        "geotiff-geokeys-to-proj4": "^2026.8.16",
          "jspdf": "^4.2.1",
++        "laz-perf": "^0.0.7",
          "leaflet": "^1.9.4",
-@@ -2898,6 +2899,12 @@
+         "maplibre-gl": "^6.11.2",
+         "papaparse": "^5.5.3",
+         "pmtiles": "^4.5.0",
++        "proj4": "^2.22.0",
+         "protomaps-leaflet": "^5.1.0",
+         "react": "^19.0.1",
+         "react-dom": "^19.0.1",
+@@ -34,6 +39,7 @@
+       },
+       "devDependencies": {
+         "@playwright/test": "^1.56.1",
++        "@types/delaunator": "^5.0.3",
+         "@types/express": "^5.0.6",
+         "@types/geojson": "^7946.0.16",
+         "@types/leaflet": "^1.9.22",
+@@ -1576,6 +1582,13 @@
+         "@types/ms": "*"
+       }
+     },
++    "node_modules/@types/delaunator": {
++      "version": "5.0.3",
++      "resolved": "https://registry.npmjs.org/@types/delaunator/-/delaunator-5.0.3.tgz",
++      "integrity": "sha512-6tTLP8NX0OwtB/fmW9bXp4EWPptawTSsrSGjboWRuzqkxNEEJGyzRPHbr8wnV2DBWfAZ+EPTOvW3B/KysJrl2g==",
++      "dev": true,
++      "license": "MIT"
++    },
+     "node_modules/@types/estree": {
+       "version": "1.0.8",
+       "resolved": "https://registry.npmjs.org/@types/estree/-/estree-1.0.8.tgz",
+@@ -2416,6 +2429,15 @@
+         "url": "https://github.com/sponsors/wooorm"
+       }
+     },
++    "node_modules/delaunator": {
++      "version": "5.0.1",
++      "resolved": "https://registry.npmjs.org/delaunator/-/delaunator-5.0.1.tgz",
++      "integrity": "sha512-8nvh+XBe96aCESrGOqMp/84b13H9cdKbG5P2ejQCh4d4sK9RL4371qou9drQjMhvnPmhWl5hnmqbEE0fXr9Xnw==",
++      "license": "ISC",
++      "dependencies": {
++        "robust-predicates": "^3.0.2"
++      }
++    },
+     "node_modules/depd": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
+@@ -2898,6 +2920,12 @@
          "node": ">=6.9.0"
        }
      },
@@ -23,18 +73,77 @@ index 42cd76d..fba94d5 100644
      "node_modules/geotiff": {
        "version": "3.0.5",
        "resolved": "https://registry.npmjs.org/geotiff/-/geotiff-3.0.5.tgz",
+@@ -2917,6 +2945,12 @@
+         "node": ">=10.19"
+       }
+     },
++    "node_modules/geotiff-geokeys-to-proj4": {
++      "version": "2026.8.16",
++      "resolved": "https://registry.npmjs.org/geotiff-geokeys-to-proj4/-/geotiff-geokeys-to-proj4-2026.8.16.tgz",
++      "integrity": "sha512-7yuqPaLweuLGRV+ab7CCso3c9v6MGstmzZzcy0EJzp+SdRx4vaaGZgcatcjYXF4jd7EDGSMZMduhUJSYy6+sQA==",
++      "license": "BSD-3-Clause"
++    },
+     "node_modules/get-intrinsic": {
+       "version": "1.3.0",
+       "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
+@@ -3363,6 +3397,12 @@
+       "integrity": "sha512-e9vurzrXJQrFX6ckpHP3bvj5l+9CnYzkxDNnNQ1h2QTqdWsUAJgXiKdGNcOa1EY85dU8KbQ+z/FdQdB7P+9yfQ==",
+       "license": "ISC"
+     },
++    "node_modules/laz-perf": {
++      "version": "0.0.7",
++      "resolved": "https://registry.npmjs.org/laz-perf/-/laz-perf-0.0.7.tgz",
++      "integrity": "sha512-2xRqm/f/2UqDS5qqkjOyDb6uVIjkVw6SGmQlMoTQliVWkZhPfIbUJTubUl3mTloaWqKcjlS/urmP1CYoxelsEg==",
++      "license": "Apache-2.0"
++    },
+     "node_modules/leaflet": {
+       "version": "1.9.4",
+       "resolved": "https://registry.npmjs.org/leaflet/-/leaflet-1.9.4.tgz",
+@@ -5505,6 +5545,12 @@
+         "node": ">= 0.8.15"
+       }
+     },
++    "node_modules/robust-predicates": {
++      "version": "3.0.3",
++      "resolved": "https://registry.npmjs.org/robust-predicates/-/robust-predicates-3.0.3.tgz",
++      "integrity": "sha512-NS3levdsRIUOmiJ8FZWCP7LG3QpJyrs/TE0Zpf1yvZu8cAJJ6QMW92H1c7kWpdIHo8RvmLxN/o2JXTKHp74lUA==",
++      "license": "Unlicense"
++    },
+     "node_modules/rollup": {
+       "version": "4.60.3",
+       "resolved": "https://registry.npmjs.org/rollup/-/rollup-4.60.3.tgz",
 diff --git a/package.json b/package.json
-index f0dfe67..f9ea295 100644
+index f0dfe67..ea84f1c 100644
 --- a/package.json
 +++ b/package.json
-@@ -19,6 +19,7 @@
+@@ -17,14 +17,19 @@
+   "dependencies": {
+     "@google/genai": "^1.29.0",
      "@maplibre/maplibre-gl-leaflet": "^0.1.4",
++    "delaunator": "^5.0.1",
      "dotenv": "^17.2.3",
      "express": "^5.2.1",
 +    "geographiclib-geodesic": "^2.2.0",
      "geotiff": "^3.0.5",
++    "geotiff-geokeys-to-proj4": "^2026.8.16",
      "jspdf": "^4.2.1",
++    "laz-perf": "^0.0.7",
      "leaflet": "^1.9.4",
+     "maplibre-gl": "^6.11.2",
+     "papaparse": "^5.5.3",
+     "pmtiles": "^4.5.0",
++    "proj4": "^2.22.0",
+     "protomaps-leaflet": "^5.1.0",
+     "react": "^19.0.1",
+     "react-dom": "^19.0.1",
+@@ -41,6 +46,7 @@
+   },
+   "devDependencies": {
+     "@playwright/test": "^1.56.1",
++    "@types/delaunator": "^5.0.3",
+     "@types/express": "^5.0.6",
+     "@types/geojson": "^7946.0.16",
+     "@types/leaflet": "^1.9.22",
 diff --git a/playwright.artifact.config.ts b/playwright.artifact.config.ts
 new file mode 100644
 index 0000000..cabf51a
@@ -44,10 +153,16 @@ index 0000000..cabf51a
 +import base from './playwright.config';
 +export default { ...base, use: { ...base.use, baseURL: 'http://127.0.0.1:4180' }, webServer: { command: 'python3 -m http.server 4180 --bind 127.0.0.1 --directory dist-preview', url: 'http://127.0.0.1:4180', reuseExistingServer: false, timeout: 60_000 } };
 diff --git a/scripts/encode-preview-samples.mjs b/scripts/encode-preview-samples.mjs
-index 0cd18cc..fc4abbf 100644
+index 0cd18cc..a06af00 100644
 --- a/scripts/encode-preview-samples.mjs
 +++ b/scripts/encode-preview-samples.mjs
-@@ -9,3 +9,12 @@ for (const name of readdirSync(dir).filter(n => /\.tiff?$/i.test(n))) {
+@@ -4,8 +4,17 @@
+ import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ 
+ const dir = new URL('../dist-preview/data/samples/', import.meta.url);
+-for (const name of readdirSync(dir).filter(n => /\.tiff?$/i.test(n))) {
++for (const name of readdirSync(dir).filter(n => /\.(tiff?|la[sz])$/i.test(n))) {
+   writeFileSync(new URL(`${name}.b64.txt`, dir), readFileSync(new URL(name, dir)).toString('base64'));
    rmSync(new URL(name, dir));
    console.log('encoded', name);
  }
@@ -60,6 +175,37 @@ index 0cd18cc..fc4abbf 100644
 +const fixed = html.replaceAll('"�"', '"\\uFFFD"');
 +if (fixed.includes('�')) throw new Error('index.html has a U+FFFD outside a JS string literal; check the build.');
 +if (fixed !== html) writeFileSync(page, fixed);
+diff --git a/src/App.tsx b/src/App.tsx
+index 297c3c8..4a90d4e 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -36,6 +36,8 @@ const DataTool = lazy(() => import('./components/tools/DataTool'));
+ const LandCoverTool = lazy(() => import('./components/tools/LandCoverTool'));
+ const TerrainTool = lazy(() => import('./components/tools/TerrainTool'));
+ const PhotoTool = lazy(() => import('./components/tools/PhotoTool'));
++const RadarTool = lazy(() => import('./components/tools/RadarTool'));
++const CanopyTool = lazy(() => import('./components/tools/CanopyTool'));
+ const ReportsView = lazy(() => import('./components/ReportsView'));
+ const SettingsModal = lazy(() => import('./components/SettingsModal'));
+ const Tour = lazy(() => import('./components/Tour'));
+@@ -388,7 +390,7 @@ export default function App() {
+                         </button>
+                       )}
+                     </div>
+-                    {boundary && tool !== 'photo' && tool !== 'carbon' && (
++                    {boundary && tool !== 'photo' && tool !== 'carbon' && tool !== 'canopy' && (
+                       <div className="boundary-banner" role="status">
+                         <span>
+                           Analysis boundary: <strong>{boundary.name}</strong> ({(boundary.areaM2 / 10_000).toFixed(2)} ha).{' '}
+@@ -408,6 +410,8 @@ export default function App() {
+                       {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}
+                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
+                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
++                      {tool === 'radar' && <RadarTool onOutput={setOutput} boundary={boundary} />}
++                      {tool === 'canopy' && <CanopyTool onOutput={setOutput} />}
+                     </Suspense>
+                   </section>
+ 
 diff --git a/src/components/CoreAnalysisDashboard.tsx b/src/components/CoreAnalysisDashboard.tsx
 index 8ea3d0c..6ad1f23 100644
 --- a/src/components/CoreAnalysisDashboard.tsx
@@ -112,6 +258,295 @@ index 37bdcdf..5e8f84b 100644
                <li key={n}>{n}</li>
              ))}
            </ul>
+diff --git a/src/components/tools/CanopyTool.tsx b/src/components/tools/CanopyTool.tsx
+new file mode 100644
+index 0000000..0257dae
+--- /dev/null
++++ b/src/components/tools/CanopyTool.tsx
+@@ -0,0 +1,283 @@
++import { useState } from 'react';
++import type { Feature, FeatureCollection, Point } from 'geojson';
++import { downloadText } from '../../lib/download';
++import { bboxToLatLng } from '../../lib/geo';
++import { mapImage } from '../../lib/overlay';
++import { unprojector } from '../../lib/patches';
++import { groundGeometry, openGeoTiff, sameGrid, type GeoMeta } from '../../lib/rasterio';
++import { fetchSample } from '../../lib/samples';
++import { fmt } from '../../lib/stats';
++import { useToast } from '../../lib/toast';
++import type { ToolOutput } from '../../lib/tools/registry';
++import { analyzeCanopy, canopyMarkdown, chmFromLas, type CanopyResult } from '../../lib/tools/canopy';
++import FileDrop from '../FileDrop';
++import RgbaCanvas from '../RgbaCanvas';
++import { Stat } from './ForestLossTool';
++
++interface Props {
++  onOutput: (out: ToolOutput | null) => void;
++}
++
++type Source = 'cloud' | 'dsm' | 'chm';
++const COLORS: [number, number, number][] = [[247, 252, 245], [199, 233, 192], [116, 196, 118], [35, 139, 69], [0, 68, 27]];
++const MAP_TREES = 20_000;
++
++interface Done {
++  name: string;
++  source: string;
++  chm: Float32Array;
++  width: number;
++  height: number;
++  res: CanopyResult;
++  notes: string[];
++  hi: number;
++  trees: FeatureCollection<Point> | null;
++}
++
++function chmRgba(chm: Float32Array, hi: number): Uint8ClampedArray {
++  const out = new Uint8ClampedArray(chm.length * 4);
++  for (let k = 0; k < chm.length; k++) {
++    const v = chm[k];
++    if (Number.isNaN(v)) continue;
++    const x = Math.min(1, Math.max(0, v / (hi || 1))) * (COLORS.length - 1);
++    const i = Math.min(COLORS.length - 2, Math.floor(x)), f = x - i;
++    out.set([0, 1, 2].map(c => COLORS[i][c] + (COLORS[i + 1][c] - COLORS[i][c]) * f).concat(255), k * 4);
++  }
++  return out;
++}
++
++export default function CanopyTool({ onOutput }: Props) {
++  const notify = useToast();
++  const [source, setSource] = useState<Source>('cloud');
++  const [files, setFiles] = useState<Partial<Record<'cloud' | 'dsm' | 'dtm' | 'chm', File>>>({});
++  const [cell, setCell] = useState('1');
++  const [threshold, setThreshold] = useState('2');
++  const [minTree, setMinTree] = useState('5');
++  const [busy, setBusy] = useState(false);
++  const [done, setDone] = useState<Done | null>(null);
++  const fail = (m: string) => notify(m, 'error');
++
++  const run = async (src = source, fs = files) => {
++    const thr = Number(threshold), mt = Number(minTree), cs = Number(cell);
++    if (![thr, mt, cs].every(v => Number.isFinite(v) && v > 0)) return fail('Cell size and heights must be positive numbers of metres.');
++    setBusy(true);
++    try {
++      let chm: Float32Array, w: number, h: number, cellM: number, cellArea: (row: number) => number, name: string, sourceText: string;
++      const notes: string[] = [];
++      let toLonLat: ((col: number, row: number) => [number, number]) | null = null;
++      let bounds: ReturnType<typeof bboxToLatLng> = null;
++      if (src === 'cloud') {
++        const f = fs.cloud;
++        if (!f) throw new Error('Add a LAS or LAZ point cloud first.');
++        const g = await chmFromLas(await f.arrayBuffer(), cs);
++        ({ chm, width: w, height: h } = g);
++        cellM = cs;
++        cellArea = () => cs * cs;
++        name = f.name;
++        sourceText = `${g.points.toLocaleString()} points, ${g.ground.toLocaleString()} ground (class 2), gridded at ${fmt(cs, 3)} m`;
++        notes.push(...g.notes);
++        const bbox: [number, number, number, number] = [g.x0, g.y1 - h * g.cellUnits, g.x0 + w * g.cellUnits, g.y1];
++        const meta = { geographic: false, epsg: g.epsg } as GeoMeta;
++        const un = g.epsg ? unprojector(meta) : null;
++        if (un) {
++          toLonLat = (c, r) => un(g.x0 + (c + 0.5) * g.cellUnits, g.y1 - (r + 0.5) * g.cellUnits);
++          bounds = bboxToLatLng(bbox, g.epsg);
++        } else if (g.epsg) notes.push(`EPSG:${g.epsg} cannot be placed on the map in the browser version (supported: WGS84, Web Mercator, WGS84 UTM); the measurements are unaffected.`);
++      } else {
++        const open = async (f: File | undefined, what: string) => {
++          if (!f) throw new Error(`Add the ${what} first.`);
++          return openGeoTiff(f);
++        };
++        const ref = src === 'chm' ? await open(fs.chm, 'canopy height model') : await open(fs.dsm, 'surface model (DSM)');
++        const [g0] = await ref.readBands([0]);
++        ({ width: w, height: h } = g0);
++        if (src === 'chm') {
++          chm = Float32Array.from(g0.data);
++          name = ref.meta.filename;
++          sourceText = 'canopy height raster';
++        } else {
++          const dtm = await open(fs.dtm, 'terrain model (DTM)');
++          if (!sameGrid(ref.meta, dtm.meta)) throw new Error('The DSM and DTM are not on the same grid. Export both with the same extent, cell size and CRS.');
++          const [t0] = await dtm.readBands([0]);
++          chm = new Float32Array(w * h);
++          for (let k = 0; k < chm.length; k++) chm[k] = Number.isNaN(g0.data[k]) || Number.isNaN(t0.data[k]) ? NaN : Math.max(g0.data[k] - t0.data[k], 0);
++          name = `${ref.meta.filename} − ${dtm.meta.filename}`;
++          sourceText = 'DSM − DTM rasters';
++          notes.push('CHM = DSM − DTM, negatives set to 0.');
++        }
++        const geo = groundGeometry(ref.meta, g0);
++        if (!geo) throw new Error('The raster has no ground units the browser version can use (WGS84, Web Mercator or WGS84 UTM).');
++        cellArea = geo.cellArea;
++        const sp = geo.spacing(Math.floor(h / 2));
++        cellM = Math.sqrt(sp.dx * sp.dy);
++        notes.push(geo.note, ...ref.meta.warnings);
++        if (g0.resampleFactor > 1) notes.push('Analysed on a resampled grid; tree tops need the original resolution, so counts are a lower bound.');
++        const un = unprojector(ref.meta);
++        const bb = ref.meta.bbox;
++        if (un && bb) {
++          const cw = (bb[2] - bb[0]) / w, ch = (bb[3] - bb[1]) / h;
++          toLonLat = (c, r) => un(bb[0] + (c + 0.5) * cw, bb[3] - (r + 0.5) * ch);
++        }
++        bounds = ref.meta.latLngBounds;
++      }
++      const res = analyzeCanopy(chm, w, h, cellArea, cellM, thr, mt);
++      notes.push(
++        `Tree tops: local maxima of the CHM (Gaussian σ 0.67 cells) at least ${fmt(mt, 3)} m tall and highest within half the crown width expected for their height, CW = 3.75 − 0.179 H + 0.0124 H² m (Popescu & Wynne 2004). Suppressed trees under taller crowns are missed, so counts in dense stands are a lower bound.`,
++        'Canopy cover is the share of cells at or above the height threshold seen from above; FAO’s forest definition uses trees of at least 5 m and more than 10 % cover.',
++      );
++      let trees: FeatureCollection<Point> | null = null;
++      if (toLonLat) {
++        const feats: Feature<Point>[] = res.trees.cells.map((k, i) => ({ type: 'Feature', properties: { height_m: Math.round(res.trees.heights[i] * 100) / 100 }, geometry: { type: 'Point', coordinates: toLonLat!(k % w, Math.floor(k / w)).map(v => Math.round(v * 1e7) / 1e7) } }));
++        trees = { type: 'FeatureCollection', features: feats };
++        if (feats.length > MAP_TREES) notes.push(`The map shows the ${MAP_TREES.toLocaleString()} tallest of ${feats.length.toLocaleString()} tree tops; the export holds all of them.`);
++      }
++      const finite = Float64Array.from(chm.filter(Number.isFinite)).sort();
++      const hi = Math.max(finite.length ? finite[Math.floor(0.98 * (finite.length - 1))] : 1, thr);
++      setDone({ name, source: sourceText, chm, width: w, height: h, res, notes, hi, trees });
++      const tallest = trees ? { type: 'FeatureCollection' as const, features: [...trees.features].sort((a, b) => (b.properties?.height_m ?? 0) - (a.properties?.height_m ?? 0)).slice(0, MAP_TREES) } : null;
++      onOutput({
++        tool: 'canopy',
++        name,
++        markdown: canopyMarkdown(name, sourceText, res, notes),
++        map: { bounds, geojson: tallest, image: bounds ? mapImage(chmRgba(chm, hi), w, h, bounds, 'Canopy height', []) : null },
++      });
++    } catch (err) {
++      fail(err instanceof Error ? err.message : 'The canopy analysis failed.');
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  const pick = (slot: 'cloud' | 'dsm' | 'dtm' | 'chm') => (f: File) => {
++    setFiles(fs => ({ ...fs, [slot]: f }));
++    setDone(null);
++    onOutput(null);
++  };
++
++  const c = done?.res;
++  return (
++    <div className="tool-body">
++      <p className="tool-intro">
++        Measure canopy height from airborne LiDAR (LAS/LAZ with ground points classified, ASPRS class 2), from a surface and a terrain model, or from a canopy height
++        model you already have. TerraX reports canopy cover, the height distribution and individual tree tops.
++      </p>
++      <div className="param-row">
++        <label className="param">
++          <span>Input</span>
++          <select id="canopy-source" value={source} onChange={e => setSource(e.target.value as Source)}>
++            <option value="cloud">Point cloud (LAS/LAZ)</option>
++            <option value="dsm">Surface + terrain models (DSM, DTM)</option>
++            <option value="chm">Canopy height model (CHM)</option>
++          </select>
++        </label>
++        {source === 'cloud' && (
++          <label className="param">
++            <span>Cell size (m)</span>
++            <input id="canopy-cell" type="number" min="0.1" step="0.5" value={cell} onChange={e => setCell(e.target.value)} />
++          </label>
++        )}
++        <label className="param" title="Cells at least this tall count as canopy.">
++          <span>Canopy from (m)</span>
++          <input id="canopy-threshold" type="number" min="0.1" step="0.5" value={threshold} onChange={e => setThreshold(e.target.value)} />
++        </label>
++        <label className="param" title="Tree tops lower than this are ignored.">
++          <span>Trees from (m)</span>
++          <input id="canopy-min-tree" type="number" min="0.5" step="0.5" value={minTree} onChange={e => setMinTree(e.target.value)} />
++        </label>
++      </div>
++      {source === 'cloud' && <FileDrop id="canopy-cloud" label="Point cloud" accept=".las,.laz" hint="LAS or LAZ · projected CRS · ground classified" busy={busy} loaded={files.cloud?.name} onFile={pick('cloud')} />}
++      {source === 'chm' && <FileDrop id="canopy-chm" label="Canopy height model" accept=".tif,.tiff" hint="GeoTIFF · heights in metres" busy={busy} loaded={files.chm?.name} onFile={pick('chm')} />}
++      {source === 'dsm' && (
++        <>
++          <FileDrop id="canopy-dsm" label="Surface model (DSM)" accept=".tif,.tiff" hint="GeoTIFF · first-return or photogrammetric heights" busy={busy} loaded={files.dsm?.name} onFile={pick('dsm')} />
++          <FileDrop id="canopy-dtm" label="Terrain model (DTM)" accept=".tif,.tiff" hint="Same grid as the DSM" compact loaded={files.dtm?.name} onFile={pick('dtm')} />
++        </>
++      )}
++      <div className="param-row">
++        <div className="button-row push-right">
++          <button
++            type="button"
++            className="btn"
++            disabled={busy}
++            onClick={async () => {
++              try {
++                setSource('cloud');
++                const f = await fetchSample('samples/lidar_forest_synthetic.laz', 'application/octet-stream');
++                const fs = { ...files, cloud: f };
++                setFiles(fs);
++                await run('cloud', fs);
++              } catch (err) {
++                fail(err instanceof Error ? err.message : 'The sample could not be loaded.');
++              }
++            }}
++          >
++            Try synthetic LiDAR
++          </button>
++          <button type="button" id="canopy-run" className="btn btn-primary" disabled={busy} onClick={() => run()}>
++            {busy ? 'Measuring…' : 'Measure canopy'}
++          </button>
++        </div>
++      </div>
++
++      {c && done && (
++        <div className="result-block">
++          <div className="stat-grid">
++            <Stat label={`Canopy cover (≥ ${fmt(c.threshold, 3)} m)`} value={`${(c.cover * 100).toFixed(1)} %`} />
++            <Stat label="Cover of trees ≥ 5 m" value={`${(c.coverFao * 100).toFixed(1)} %`} />
++            <Stat label="Median canopy height" value={c.height.median === null ? '—' : `${fmt(c.height.median, 3)} m`} />
++            <Stat label="95th percentile height" value={c.height.p95 === null ? '—' : `${fmt(c.height.p95, 3)} m`} />
++            <Stat label="Tree tops" value={`${c.trees.count.toLocaleString()}${c.trees.perHa === null ? '' : ` (${fmt(c.trees.perHa, 3)}/ha)`}`} />
++          </div>
++          <figure className="raster-figure">
++            <RgbaCanvas rgba={chmRgba(done.chm, done.hi)} width={done.width} height={done.height} label="Canopy height" />
++            <figcaption>
++              <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${COLORS.map(col => `rgb(${col.join(',')})`).join(', ')})` }} />
++              <div className="legend-labels">
++                <span>0 m</span>
++                <span>canopy height</span>
++                <span>{fmt(done.hi, 3)} m</span>
++              </div>
++            </figcaption>
++          </figure>
++          <div className="tabular-view">
++            <table>
++              <thead>
++                <tr>
++                  <th>Height class</th>
++                  <th>Area</th>
++                </tr>
++              </thead>
++              <tbody>
++                {c.classes.map(k => (
++                  <tr key={k.label}>
++                    <td>{k.label}</td>
++                    <td className="num">{fmt(k.ha, 4)} ha</td>
++                  </tr>
++                ))}
++              </tbody>
++            </table>
++          </div>
++          <div className="button-row">
++            {done.trees && (
++              <button type="button" className="btn btn-small" onClick={() => downloadText(JSON.stringify(done.trees), 'tree_tops.geojson', 'application/geo+json')}>
++                Export tree tops (GeoJSON)
++              </button>
++            )}
++            <button
++              type="button"
++              className="btn btn-small"
++              onClick={() => downloadText(['cell,row,col,height_m', ...c.trees.cells.map((k, i) => `${k},${Math.floor(k / done.width)},${k % done.width},${c.trees.heights[i].toFixed(2)}`)].join('\n'), 'tree_tops.csv', 'text/csv')}
++            >
++              Export tree tops (CSV)
++            </button>
++          </div>
++          <ul className="hint-list">
++            {[...new Set(done.notes)].map(n => (
++              <li key={n}>{n}</li>
++            ))}
++          </ul>
++        </div>
++      )}
++    </div>
++  );
++}
 diff --git a/src/components/tools/CarbonTool.tsx b/src/components/tools/CarbonTool.tsx
 index 9f9f658..b29a292 100644
 --- a/src/components/tools/CarbonTool.tsx
@@ -139,10 +574,281 @@ index 3012fba..3cdec4b 100644
              ))}
            </ul>
 diff --git a/src/components/tools/LandCoverTool.tsx b/src/components/tools/LandCoverTool.tsx
-index 17f7b95..35f11d6 100644
+index 17f7b95..8858311 100644
 --- a/src/components/tools/LandCoverTool.tsx
 +++ b/src/components/tools/LandCoverTool.tsx
-@@ -201,7 +201,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+@@ -6,7 +6,12 @@ import { openGeoTiff, type OpenRaster } from '../../lib/rasterio';
+ import { fetchSample } from '../../lib/samples';
+ import { fmt } from '../../lib/stats';
+ import { useToast } from '../../lib/toast';
+-import { PALETTE, classifyLandCover, landCoverMarkdown, type LandCoverResult } from '../../lib/tools/landcover';
++import { PALETTE, classifyLandCover, classifySupervised, landCoverMarkdown, type LandCoverResult } from '../../lib/tools/landcover';
++import { accuracyMarkdown, allocate, assess, stratifiedSample, type Accuracy } from '../../lib/tools/accuracy';
++import { parseSurveyFile } from '../../lib/tools/survey';
++import { unprojector } from '../../lib/patches';
++import type { FeatureCollection } from 'geojson';
++import Papa from 'papaparse';
+ import type { ToolOutput } from '../../lib/tools/registry';
+ import type { Boundary } from '../../lib/zonal';
+ import FileDrop from '../FileDrop';
+@@ -32,6 +37,35 @@ function classRgba(r: LandCoverResult): Uint8ClampedArray {
+   return out;
+ }
+ 
++type Method = 'kmeans' | 'rf';
++
++interface Sample {
++  points: { id: string; cell: number; cls: number }[];
++  labels: string[];
++  areas: number[];
++  unit: 'ha' | 'px';
++  allocation: { label: string; mapped: number; share: number; n: number }[];
++}
++
++const pct = (v: number | null, ci: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)} %${ci === null ? '' : ` ± ${(ci * 100).toFixed(1)}`}`);
++
++/** {sample id: reference label} from the returned CSV or GeoJSON. */
++async function readLabels(file: File): Promise<Map<string, string>> {
++  const text = await file.text();
++  const out = new Map<string, string>();
++  if (/\.(geo)?json$/i.test(file.name)) {
++    const fc = JSON.parse(text) as FeatureCollection;
++    for (const f of fc.features ?? []) {
++      const p = Object.fromEntries(Object.entries(f.properties ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
++      if (p.id !== undefined && p.id !== '') out.set(String(p.id).trim(), p.reference == null ? '' : String(p.reference).trim());
++    }
++    return out;
++  }
++  const rows = Papa.parse<Record<string, string>>(text.replace(/^\uFEFF/, ''), { header: true, skipEmptyLines: true, transformHeader: h => h.trim().toLowerCase() }).data;
++  for (const r of rows) if (r.id) out.set(r.id.trim(), (r.reference ?? '').trim());
++  return out;
++}
++
+ export default function LandCoverTool({ onOutput, boundary }: Props) {
+   const notify = useToast();
+   const [busy, setBusy] = useState(false);
+@@ -40,6 +74,24 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+   const [k, setK] = useState('5');
+   const [result, setResult] = useState<LandCoverResult | null>(null);
+   const [labels, setLabels] = useState<string[]>([]);
++  const [method, setMethod] = useState<Method>('kmeans');
++  const [training, setTraining] = useState<{ name: string; fc: FeatureCollection } | null>(null);
++  const [labelField, setLabelField] = useState('');
++  const [sampleTotal, setSampleTotal] = useState('');
++  const [minPerClass, setMinPerClass] = useState('50');
++  const [sample, setSample] = useState<Sample | null>(null);
++  const [accuracy, setAccuracy] = useState<(Accuracy & { unit: string; missing: number }) | null>(null);
++
++  const loadTraining = async (file: File) => {
++    try {
++      const { fc } = await parseSurveyFile(file, false);
++      setTraining({ name: file.name, fc });
++      return { name: file.name, fc };
++    } catch (err) {
++      notify(err instanceof Error ? err.message : `Could not read ${file.name}.`, 'error');
++      return null;
++    }
++  };
+ 
+   const load = async (file: File) => {
+     setBusy(true);
+@@ -59,18 +111,24 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+     }
+   };
+ 
+-  const run = async (r = raster, b = bands) => {
++  const run = async (r = raster, b = bands, m = method, t = training) => {
+     if (!r) return;
+     const kk = Number(k);
+-    if (!Number.isInteger(kk) || kk < 2 || kk > PALETTE.length) {
++    if (m === 'kmeans' && (!Number.isInteger(kk) || kk < 2 || kk > PALETTE.length)) {
+       notify(`Choose a whole number of classes from 2 to ${PALETTE.length}.`, 'error');
+       return;
+     }
++    if (m === 'rf' && !t) return notify('Add training shapes first: polygons or points with a property naming each one’s class.', 'error');
+     setBusy(true);
+     try {
+-      const res = await classifyLandCover(r, { bands: b, k: kk, roles: guessBandMap(r.meta.bands), boundary });
++      const res =
++        m === 'rf' && t
++          ? await classifySupervised(r, { bands: b, training: t.fc, labelField: labelField.trim() || null, roles: guessBandMap(r.meta.bands), boundary })
++          : await classifyLandCover(r, { bands: b, k: kk, roles: guessBandMap(r.meta.bands), boundary });
+       setResult(res);
+-      setLabels(res.stats.map(c => (c.suggestion ? `${c.suggestion} (suggested)` : `Class ${c.id}`)));
++      setSample(null);
++      setAccuracy(null);
++      setLabels(res.method === 'rf' && res.labels ? res.labels : res.stats.map(c => (c.suggestion ? `${c.suggestion} (suggested)` : `Class ${c.id}`)));
+     } catch (err) {
+       notify(err instanceof Error ? err.message : 'Classification failed.', 'error');
+       setResult(null);
+@@ -87,14 +145,75 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+     onOutput({
+       tool: 'landcover',
+       name: result.filename,
+-      markdown: landCoverMarkdown(result, labels),
++      markdown: landCoverMarkdown(result, labels) + (accuracy ? accuracyMarkdown(accuracy, accuracy.unit, accuracy.missing) : ''),
+       map: {
+         bounds: raster.meta.latLngBounds,
+-        image: mapImage(image, result.width, result.height, raster.meta.latLngBounds, 'Land-cover clusters', result.stats.map((c, i) => ({ color: PALETTE[c.id - 1], label: labels[i] || `Class ${c.id}` }))),
++        image: mapImage(image, result.width, result.height, raster.meta.latLngBounds, result.method === 'rf' ? 'Land-cover classes' : 'Land-cover clusters', result.stats.map((c, i) => ({ color: PALETTE[c.id - 1], label: labels[i] || `Class ${c.id}` }))),
+       },
+     });
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [result, labels]);
++  }, [result, labels, accuracy]);
++
++  const makeSample = () => {
++    if (!result || !raster) return;
++    const total = sampleTotal.trim() ? Number(sampleTotal) : Math.max(100 * result.k, Number(minPerClass) * result.k);
++    const min = Number(minPerClass);
++    if (!Number.isInteger(total) || total < 2 || !Number.isInteger(min) || min < 1) return notify('Set the sample size and minimum per class as whole numbers.', 'error');
++    const geoOk = result.stats.every(c => c.ha !== null);
++    const areas = result.stats.map(c => (geoOk ? c.ha! : c.pixels));
++    const sizes = allocate(areas, total, min);
++    const pts = stratifiedSample(result.classes, result.stats.map(c => c.id), sizes, 11)
++      .sort((a, b) => a.cls - b.cls || a.cell - b.cell)
++      .map((p, i) => ({ ...p, id: `S${String(i + 1).padStart(4, '0')}` }));
++    const un = unprojector(raster.meta), bb = raster.meta.bbox;
++    const ll = (cell: number): [number, number] | null => {
++      if (!un || !bb) return null;
++      const col = cell % result.width, row = Math.floor(cell / result.width);
++      const [lon, lat] = un(bb[0] + ((col + 0.5) / result.width) * (bb[2] - bb[0]), bb[3] - ((row + 0.5) / result.height) * (bb[3] - bb[1]));
++      return [Math.round(lon * 1e7) / 1e7, Math.round(lat * 1e7) / 1e7];
++    };
++    const base = safeFilename(result.filename);
++    const csv = ['id,lon,lat,row,col,map_class,reference', ...pts.map(p => {
++      const c = ll(p.cell);
++      return `${p.id},${c ? c[0] : ''},${c ? c[1] : ''},${Math.floor(p.cell / result.width)},${p.cell % result.width},"${(labels[p.cls - 1] ?? '').replace(/"/g, '""')}",`;
++    })].join('\n');
++    downloadText(csv, `${base}_validation_sample.csv`, 'text/csv');
++    if (un) {
++      const fc = { type: 'FeatureCollection', features: pts.map(p => ({ type: 'Feature', properties: { id: p.id, map_class: labels[p.cls - 1], reference: '' }, geometry: { type: 'Point', coordinates: ll(p.cell) } })) };
++      downloadText(JSON.stringify(fc), `${base}_validation_sample.geojson`, 'application/geo+json');
++    }
++    const sum = areas.reduce((a, b) => a + b, 0) || 1;
++    setSample({ points: pts, labels: [...labels], areas, unit: geoOk ? 'ha' : 'px', allocation: areas.map((a, i) => ({ label: labels[i], mapped: a, share: a / sum, n: sizes[i] })) });
++    setAccuracy(null);
++  };
++
++  const assessFile = async (file: File) => {
++    if (!sample) return;
++    try {
++      const refs = await readLabels(file);
++      const k2 = sample.labels.length;
++      const byName = new Map(sample.labels.map((l, i) => [l.trim().toLowerCase(), i]));
++      const counts = Array.from({ length: k2 }, () => new Array(k2).fill(0));
++      const unknown = new Set<string>();
++      let missing = 0;
++      for (const p of sample.points) {
++        const ref = refs.get(p.id) ?? '';
++        if (!ref) {
++          missing++;
++          continue;
++        }
++        let j = byName.get(ref.toLowerCase());
++        if (j === undefined && /^\d+$/.test(ref) && +ref >= 1 && +ref <= k2) j = +ref - 1;
++        if (j === undefined) unknown.add(ref);
++        else counts[p.cls - 1][j]++;
++      }
++      if (unknown.size) throw new Error(`Reference labels must be one of the map’s classes (${sample.labels.join(', ')}) or their numbers; found ${[...unknown].sort().join(', ')}.`);
++      if (!counts.flat().some(Boolean)) throw new Error('No sample point has a reference label yet. Fill in the “reference” column and load the file again.');
++      setAccuracy({ ...assess(counts, sample.areas, sample.labels), unit: sample.unit, missing });
++    } catch (err) {
++      notify(err instanceof Error ? err.message : 'The labelled sample could not be read.', 'error');
++    }
++  };
+ 
+   const lastBoundary = useRef(boundary);
+   useEffect(() => {
+@@ -115,8 +234,9 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+   return (
+     <div className="tool-body">
+       <p className="tool-intro">
+-        Upload a multispectral GeoTIFF (for example Sentinel-2 B2, B3, B4, B8, B11, B12). TerraX groups pixels with similar spectra into clusters (k-means), maps them and
+-        reports their areas. You then name each cluster.
++        Upload a multispectral GeoTIFF (for example Sentinel-2 B2, B3, B4, B8, B11, B12). TerraX either groups pixels with similar spectra into clusters (k-means) for you to
++        name, or learns your classes from training shapes (random forest). Then check the map with a stratified sample to get its accuracy and area estimates with
++        confidence intervals.
+       </p>
+       <FileDrop id="landcover-file" label="Multispectral image" accept=".tif,.tiff" hint="Multiband GeoTIFF" busy={busy && !raster} loaded={raster?.meta.filename} onFile={load} />
+       <div className="param-row">
+@@ -131,9 +251,23 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+           </fieldset>
+         )}
+         <label className="param">
+-          <span>Clusters</span>
+-          <input id="landcover-k" type="number" min="2" max={PALETTE.length} step="1" value={k} onChange={e => setK(e.target.value)} />
++          <span>Method</span>
++          <select id="landcover-method" value={method} onChange={e => setMethod(e.target.value as Method)}>
++            <option value="kmeans">k-means clusters (unsupervised)</option>
++            <option value="rf">Random forest (training shapes)</option>
++          </select>
+         </label>
++        {method === 'kmeans' ? (
++          <label className="param">
++            <span>Clusters</span>
++            <input id="landcover-k" type="number" min="2" max={PALETTE.length} step="1" value={k} onChange={e => setK(e.target.value)} />
++          </label>
++        ) : (
++          <label className="param" title="The property naming each shape's class; left empty, TerraX looks for class, label, landcover, type or name.">
++            <span>Class property</span>
++            <input id="landcover-label-field" placeholder="class" value={labelField} onChange={e => setLabelField(e.target.value)} />
++          </label>
++        )}
+         <div className="button-row push-right">
+           <button
+             type="button"
+@@ -142,7 +276,12 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+             onClick={async () => {
+               try {
+                 const r = await load(await fetchSample('samples/satellite_4band_synthetic.tif'));
+-                if (r) await run(r, Array.from({ length: r.meta.bands }, (_, i) => i));
++                if (!r) return;
++                const b = Array.from({ length: r.meta.bands }, (_, i) => i);
++                if (method === 'rf') {
++                  const t = await loadTraining(await fetchSample('samples/landcover_training_synthetic.geojson', 'application/geo+json'));
++                  if (t) await run(r, b, 'rf', t);
++                } else await run(r, b);
+               } catch (err) {
+                 notify(err instanceof Error ? err.message : 'Could not load the sample.', 'error');
+               }
+@@ -150,17 +289,33 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
+           >
+             Try synthetic scene
+           </button>
+-          <button type="button" id="landcover-run" className="btn btn-primary" disabled={!raster || busy || !bands.length} onClick={() => run()}>
++          <button type="button" id="landcover-run" className="btn btn-primary" disabled={!raster || busy || !bands.length || (method === 'rf' && !training)} onClick={() => run()}>
+             {busy && raster ? 'Classifying…' : 'Classify'}
+           </button>
+         </div>
+       </div>
+ 
++      {method === 'rf' && (
++        <FileDrop id="landcover-training" label="Training shapes" accept=".geojson,.json,.kml,.zip" hint="Polygons or points with a class property · at least two shapes per class" loaded={training?.name} onFile={loadTraining} />
++      )}
++
+       {result && image && (
+         <div className="result-block">
+           <figure className="raster-figure">
+-            <RgbaCanvas rgba={image} width={result.width} height={result.height} label="Land-cover clusters" />
++            <RgbaCanvas rgba={image} width={result.width} height={result.height} label={result.method === 'rf' ? 'Land-cover classes' : 'Land-cover clusters'} />
+           </figure>
++          {result.validation && (
++            <div className="stat-grid">
++              <div className="stat">
++                <div className="stat-label">Cross-validated by shape</div>
++                <div className="stat-value">{(result.validation.overall * 100).toFixed(1)} %</div>
++              </div>
++              <div className="stat">
++                <div className="stat-label">Folds</div>
++                <div className="stat-value">{result.validation.folds}</div>
++              </div>
++            </div>
++          )}
+           <div className="tabular-view">
+             <table>
+               <thead>
+@@ -201,10 +356,100 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
              </button>
            </div>
            <ul className="hint-list">
@@ -151,6 +857,99 @@ index 17f7b95..35f11d6 100644
                <li key={n}>{n}</li>
              ))}
            </ul>
++
++          <section className="sub-panel" aria-label="Accuracy assessment">
++            <div className="eyebrow">Accuracy and area</div>
++            <p className="field-hint">
++              Mapped areas include the map’s errors. Draw a stratified random sample, label each point’s true class from field visits or finer imagery (without looking at
++              the map), then load it for accuracy and area estimates with 95 % confidence intervals (Olofsson et al. 2014).
++            </p>
++            <div className="param-row">
++              <label className="param">
++                <span>Sample points</span>
++                <input id="landcover-sample-total" type="number" min="2" step="1" placeholder={String(100 * result.k)} value={sampleTotal} onChange={e => setSampleTotal(e.target.value)} />
++              </label>
++              <label className="param">
++                <span>Minimum per class</span>
++                <input id="landcover-sample-min" type="number" min="1" step="1" value={minPerClass} onChange={e => setMinPerClass(e.target.value)} />
++              </label>
++              <button type="button" id="landcover-sample" className="btn" disabled={busy} onClick={makeSample}>
++                {sample ? 'Draw a new sample' : 'Create validation sample'}
++              </button>
++            </div>
++            {sample && (
++              <>
++                <div className="tabular-view">
++                  <table>
++                    <thead>
++                      <tr>
++                        <th>Class</th>
++                        <th>Mapped</th>
++                        <th>Share</th>
++                        <th>Points</th>
++                      </tr>
++                    </thead>
++                    <tbody>
++                      {sample.allocation.map(a => (
++                        <tr key={a.label}>
++                          <td>{a.label}</td>
++                          <td className="num">{sample.unit === 'ha' ? `${fmt(a.mapped, 4)} ha` : `${a.mapped.toLocaleString()} px`}</td>
++                          <td className="num">{(a.share * 100).toFixed(1)} %</td>
++                          <td className="num">{a.n}</td>
++                        </tr>
++                      ))}
++                    </tbody>
++                  </table>
++                </div>
++                <p className="field-hint">The sample was downloaded as CSV{unprojector(raster!.meta) ? ' and GeoJSON' : ''}. Fill in each point’s “reference” column, then load the file here.</p>
++                <FileDrop id="landcover-reference" label="Labelled sample" accept=".csv,.geojson,.json" hint="The sample file with its “reference” column filled in" onFile={assessFile} />
++              </>
++            )}
++            {accuracy && (
++              <>
++                <div className="stat-grid">
++                  <div className="stat">
++                    <div className="stat-label">Overall accuracy</div>
++                    <div className="stat-value">{pct(accuracy.overallAccuracy, accuracy.overallCi)}</div>
++                  </div>
++                  <div className="stat">
++                    <div className="stat-label">Reference points</div>
++                    <div className="stat-value">{`${accuracy.samples}${accuracy.missing ? ` (${accuracy.missing} unlabelled)` : ''}`}</div>
++                  </div>
++                </div>
++                <div className="tabular-view">
++                  <table id="landcover-accuracy">
++                    <thead>
++                      <tr>
++                        <th>Class</th>
++                        <th>Mapped</th>
++                        <th>Estimated area (95 % CI)</th>
++                        <th>User’s</th>
++                        <th>Producer’s</th>
++                      </tr>
++                    </thead>
++                    <tbody>
++                      {accuracy.classes.map(c => (
++                        <tr key={c.label}>
++                          <td>{c.label}</td>
++                          <td className="num">{fmt(c.mappedArea, 4)} {accuracy.unit}</td>
++                          <td className="num">
++                            {fmt(c.area, 4)} {accuracy.unit}
++                            {c.areaCi === null ? '' : ` ± ${fmt(c.areaCi, 3)}`}
++                          </td>
++                          <td className="num">{pct(c.userAccuracy, c.userCi)}</td>
++                          <td className="num">{pct(c.producerAccuracy, c.producerCi)}</td>
++                        </tr>
++                      ))}
++                    </tbody>
++                  </table>
++                </div>
++              </>
++            )}
++          </section>
+         </div>
+       )}
+     </div>
 diff --git a/src/components/tools/PhotoTool.tsx b/src/components/tools/PhotoTool.tsx
 index 5e875cf..083a9cf 100644
 --- a/src/components/tools/PhotoTool.tsx
@@ -164,6 +963,236 @@ index 5e875cf..083a9cf 100644
                <li key={n}>{n}</li>
              ))}
            </ul>
+diff --git a/src/components/tools/RadarTool.tsx b/src/components/tools/RadarTool.tsx
+new file mode 100644
+index 0000000..3a9b46f
+--- /dev/null
++++ b/src/components/tools/RadarTool.tsx
+@@ -0,0 +1,224 @@
++import { useState } from 'react';
++import { mapImage } from '../../lib/overlay';
++import { groundGeometry, openGeoTiff, sameGrid, type OpenRaster } from '../../lib/rasterio';
++import { fetchSample } from '../../lib/samples';
++import { fmt } from '../../lib/stats';
++import { useToast } from '../../lib/toast';
++import type { ToolOutput } from '../../lib/tools/registry';
++import { CHANGE_CLASSES, ENL_IW_GRD, analyzeRadar, changeRgba, compositeRgba, radarMarkdown, type Quartiles, type RadarResult } from '../../lib/tools/radar';
++import { boundaryMask, type Boundary } from '../../lib/zonal';
++import FileDrop from '../FileDrop';
++import RgbaCanvas from '../RgbaCanvas';
++import { Stat } from './ForestLossTool';
++
++interface Props {
++  onOutput: (out: ToolOutput | null) => void;
++  boundary: Boundary | null;
++}
++
++type View = 'composite' | 'change';
++const SAMPLES = ['samples/s1_vv_vh_2023-01-08_synthetic.tif', 'samples/s1_vv_vh_2024-01-03_synthetic.tif'];
++
++function polIndex(r: OpenRaster, pol: 'VV' | 'VH'): number {
++  const names = r.meta.bandNames ?? [];
++  const i = names.findIndex(n => n.toUpperCase().includes(pol));
++  return i >= 0 ? i : pol === 'VV' ? 0 : Math.min(1, r.meta.bands - 1);
++}
++
++export default function RadarTool({ onOutput, boundary }: Props) {
++  const notify = useToast();
++  const [before, setBefore] = useState<OpenRaster | null>(null);
++  const [after, setAfter] = useState<OpenRaster | null>(null);
++  const [win, setWin] = useState('5');
++  const [threshold, setThreshold] = useState('3');
++  const [busy, setBusy] = useState(false);
++  const [res, setRes] = useState<{ r: RadarResult; areas: [number, number, number] | null; notes: string[] } | null>(null);
++  const [view, setView] = useState<View>('composite');
++  const fail = (m: string) => notify(m, 'error');
++
++  const open = async (file: File) => {
++    const r = await openGeoTiff(file);
++    if (r.meta.bands < 2) throw new Error(`${file.name} has one band; Sentinel-1 analysis needs VV and VH.`);
++    return r;
++  };
++
++  const run = async (a = before, b = after) => {
++    if (!a) return fail('Add a Sentinel-1 image first.');
++    const thr = Number(threshold);
++    if (!Number.isFinite(thr) || thr <= 0) return fail('Set the change threshold as a positive number of dB, for example 3.');
++    if (b && !sameGrid(a.meta, b.meta)) return fail('The two images are not on the same grid. Export both with the same region, scale and CRS (and from the same relative orbit).');
++    setBusy(true);
++    try {
++      const imgs = [];
++      for (const r of b ? [a, b] : [a]) {
++        const [vv, vh] = await r.readBands([polIndex(r, 'VV'), polIndex(r, 'VH')]);
++        imgs.push({ name: r.meta.filename, vv, vh });
++      }
++      let mask: Uint8Array | null = null;
++      const notes: string[] = [];
++      if (boundary) {
++        const m = boundaryMask(a.meta, imgs[0].vv, boundary);
++        mask = m.mask;
++        notes.push(`Limited to the analysis boundary (${m.inside.toLocaleString()} cells inside it).`);
++      }
++      const r = analyzeRadar(imgs, mask, Number(win), ENL_IW_GRD, thr);
++      const geo = groundGeometry(a.meta, imgs[0].vv);
++      let areas: [number, number, number] | null = null;
++      if (r.change && geo) {
++        areas = [0, 0, 0];
++        for (let k = 0; k < r.change.classes.length; k++) {
++          const c = r.change.classes[k];
++          if (c) areas[c - 1] += geo.cellArea(Math.floor(k / r.width)) / 1e4;
++        }
++      }
++      notes.unshift(
++        `Speckle: Lee (1980) filter, ${win} × ${win} window, ENL ${ENL_IW_GRD} (Sentinel-1 IW GRDH), computed in linear power; statistics are reported in dB.`,
++        `Inputs were read as ${r.dates.map(d => `${d.name}: ${d.scale === 'db' ? 'dB' : 'linear power'}`).join(', ')} (detected from the values).`,
++        'RVI = 4 σ⁰VH / (σ⁰VV + σ⁰VH), a dual-polarisation vegetation index: higher where volume scattering from canopies is strong.',
++      );
++      if (r.change)
++        notes.push(
++          `Change: VH log ratio 10·log₁₀(after / before); ≤ −${fmt(thr, 3)} dB is a decrease (the usual sign of clearing), ≥ +${fmt(thr, 3)} dB an increase. Soil moisture, rain, flooding and crop growth also move backscatter; compare images from the same season and relative orbit, and check flagged areas on optical imagery.`,
++        );
++      if (geo) notes.push(geo.note);
++      for (const im of b ? [a, b] : [a]) notes.push(...im.meta.warnings);
++      setRes({ r, areas, notes });
++      setView(r.change ? 'change' : 'composite');
++      const rgba = r.change ? changeRgba(r.change.classes) : compositeRgba(r);
++      onOutput({
++        tool: 'radar',
++        name: imgs.map(i => i.name).join(' → '),
++        markdown: radarMarkdown(r, areas, notes),
++        map: {
++          bounds: a.meta.latLngBounds,
++          image: mapImage(rgba, r.width, r.height, a.meta.latLngBounds, r.change ? 'Backscatter change (VH)' : 'Sentinel-1 false colour', r.change ? CHANGE_CLASSES.filter(c => c.id !== 2).map(c => ({ color: `rgb(${c.color.join(',')})`, label: c.label })) : []),
++        },
++      });
++    } catch (err) {
++      fail(err instanceof Error ? err.message : 'The radar analysis failed.');
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  const load = async (file: File, slot: 'before' | 'after') => {
++    try {
++      const r = await open(file);
++      if (slot === 'before') setBefore(r);
++      else setAfter(r);
++      setRes(null);
++      onOutput(null);
++    } catch (err) {
++      fail(err instanceof Error ? err.message : `${file.name} could not be read.`);
++    }
++  };
++
++  const r = res?.r;
++  const q = (s: Quartiles | null, unit = ' dB') => (s ? `${fmt(s.median, 3)}${unit}` : '—');
++  const area = (i: number) => (res?.areas ? `${fmt(res.areas[i], 4)} ha` : `${(r?.change?.counts[i] ?? 0).toLocaleString()} px`);
++  const share = (i: number) => (r?.change ? (r.change.counts[i] / (r.change.counts.reduce((x, y) => x + y, 0) || 1)) * 100 : 0);
++
++  return (
++    <div className="tool-body">
++      <p className="tool-intro">
++        Upload Sentinel-1 backscatter with VV and VH bands (for example COPERNICUS/S1_GRD exported from Earth Engine in dB, or ASF RTC in linear power). Radar sees
++        through cloud. Add a second image from the same relative orbit to map change: a drop in VH is the usual sign of clearing.
++      </p>
++      <FileDrop id="radar-before" label="Image (before, or the only one)" accept=".tif,.tiff" hint="GeoTIFF · VV and VH bands" busy={busy} loaded={before?.meta.filename} onFile={f => load(f, 'before')} />
++      <FileDrop id="radar-after" label="Second image (after, optional)" accept=".tif,.tiff" hint="Same grid and relative orbit" compact loaded={after?.meta.filename} onFile={f => load(f, 'after')} />
++      <div className="param-row">
++        <label className="param" title="Lee speckle filter window (pixels); 1 switches the filter off.">
++          <span>Filter window</span>
++          <select id="radar-window" value={win} onChange={e => setWin(e.target.value)}>
++            {['1', '3', '5', '7', '9'].map(v => (
++              <option key={v} value={v}>
++                {v === '1' ? 'off' : `${v} × ${v}`}
++              </option>
++            ))}
++          </select>
++        </label>
++        <label className="param">
++          <span>Change threshold (dB)</span>
++          <input id="radar-threshold" type="number" min="0.1" step="0.5" value={threshold} onChange={e => setThreshold(e.target.value)} />
++        </label>
++        <div className="button-row push-right">
++          <button
++            type="button"
++            className="btn"
++            disabled={busy}
++            onClick={async () => {
++              try {
++                const [a, b] = await Promise.all(SAMPLES.map(async p => open(await fetchSample(p, 'image/tiff'))));
++                setBefore(a);
++                setAfter(b);
++                await run(a, b);
++              } catch (err) {
++                fail(err instanceof Error ? err.message : 'The sample could not be loaded.');
++              }
++            }}
++          >
++            Try synthetic pair
++          </button>
++          <button type="button" id="radar-run" className="btn btn-primary" disabled={!before || busy} onClick={() => run()}>
++            {busy ? 'Filtering…' : after ? 'Analyse change' : 'Analyse'}
++          </button>
++        </div>
++      </div>
++
++      {r && res && (
++        <div className="result-block">
++          <div className="stat-grid">
++            <Stat label="Median VH" value={q(r.dates[r.dates.length - 1].vh)} />
++            <Stat label="Median VV" value={q(r.dates[r.dates.length - 1].vv)} />
++            {r.change && <Stat label="VH decrease" value={`${area(0)} (${share(0).toFixed(1)} %)`} tone={share(0) > 1 ? 'bad' : undefined} />}
++            {r.change && <Stat label="VH increase" value={`${area(2)} (${share(2).toFixed(1)} %)`} />}
++          </div>
++          {r.change && (
++            <div className="view-toggles" role="tablist">
++              {(['change', 'composite'] as View[]).map(v => (
++                <button key={v} type="button" role="tab" aria-selected={view === v} className={view === v ? 'active' : ''} onClick={() => setView(v)}>
++                  {v === 'change' ? 'Change' : 'False colour'}
++                </button>
++              ))}
++            </div>
++          )}
++          <figure className="raster-figure">
++            <RgbaCanvas rgba={view === 'change' && r.change ? changeRgba(r.change.classes) : compositeRgba(r)} width={r.width} height={r.height} label={view === 'change' ? 'Backscatter change' : 'Sentinel-1 false colour'} />
++            <figcaption className="field-hint">
++              {view === 'change' ? 'Red: VH decrease beyond the threshold; blue: increase; unchanged cells are clear.' : 'Red VV, green VH, blue VV/VH: vegetation looks green, bare and built ground magenta to white, water dark.'}
++            </figcaption>
++          </figure>
++          <div className="tabular-view">
++            <table>
++              <thead>
++                <tr>
++                  <th>Image</th>
++                  <th>VV (dB)</th>
++                  <th>VH (dB)</th>
++                  <th>VH/VV (dB)</th>
++                  <th>RVI</th>
++                </tr>
++              </thead>
++              <tbody>
++                {r.dates.map(d => (
++                  <tr key={d.name}>
++                    <td>{d.name}</td>
++                    <td className="num">{q(d.vv, '')}</td>
++                    <td className="num">{q(d.vh, '')}</td>
++                    <td className="num">{q(d.ratio, '')}</td>
++                    <td className="num">{q(d.rvi, '')}</td>
++                  </tr>
++                ))}
++              </tbody>
++            </table>
++          </div>
++          <ul className="hint-list">
++            {[...new Set(res.notes)].map(n => (
++              <li key={n}>{n}</li>
++            ))}
++          </ul>
++        </div>
++      )}
++    </div>
++  );
++}
 diff --git a/src/components/tools/ResidentialPlotTool.tsx b/src/components/tools/ResidentialPlotTool.tsx
 index ebf399e..dcbe20e 100644
 --- a/src/components/tools/ResidentialPlotTool.tsx
@@ -178,7 +1207,7 @@ index ebf399e..dcbe20e 100644
              ))}
            </ul>
 diff --git a/src/components/tools/TerrainTool.tsx b/src/components/tools/TerrainTool.tsx
-index 1963e1f..f8bd61e 100644
+index 1963e1f..43c0c2d 100644
 --- a/src/components/tools/TerrainTool.tsx
 +++ b/src/components/tools/TerrainTool.tsx
 @@ -3,7 +3,7 @@ import { downloadText, safeFilename } from '../../lib/download';
@@ -190,15 +1219,66 @@ index 1963e1f..f8bd61e 100644
  import { makeBoundary } from '../../lib/vector';
  import { viridis } from '../../lib/colormap';
  import { mapImage } from '../../lib/overlay';
-@@ -56,6 +56,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -26,7 +26,25 @@ interface Props {
+   onBoundary?: (b: Boundary) => void;
+ }
+ 
+-type Layer = 'hillshade' | 'slope' | 'elevation' | 'flow';
++type Layer = 'hillshade' | 'slope' | 'elevation' | 'flow' | 'wetness';
++type FlowMethod = 'd8' | 'dinf';
++const WETNESS_COLORS: [number, number, number][] = [[246, 239, 210], [166, 206, 227], [58, 135, 192], [11, 59, 120]]; // dry → wet
++
++/** Quartiles and the 2–98 % display range of the wetness index (finite cells only). */
++function wetnessStats(twi: Float32Array) {
++  const v = Float64Array.from(twi.filter(Number.isFinite)).sort();
++  const q = (p: number) => {
++    const h = (v.length - 1) * p, lo = Math.floor(h), hi = Math.ceil(h);
++    return v[lo] + (h - lo) * (v[hi] - v[lo]);
++  };
++  return v.length ? { min: v[0], max: v[v.length - 1], q1: q(0.25), median: q(0.5), q3: q(0.75), lo: q(0.02), hi: q(0.98) } : null;
++}
++
++function rampColor(t: number, stops: [number, number, number][]): [number, number, number] {
++  const x = Math.min(1, Math.max(0, t)) * (stops.length - 1);
++  const i = Math.min(stops.length - 2, Math.floor(x)), f = x - i;
++  return [0, 1, 2].map(c => stops[i][c] + (stops[i + 1][c] - stops[i][c]) * f) as [number, number, number];
++}
+ 
+ interface Basin {
+   outlet: number;
+@@ -55,7 +73,9 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+   const [result, setResult] = useState<TerrainResult | null>(null);
    const [layer, setLayer] = useState<Layer>('hillshade');
    const [thresholdKm2, setThresholdKm2] = useState('0.5');
++  const [flowMethod, setFlowMethod] = useState<FlowMethod>('d8');
    const [flow, setFlow] = useState<FlowResult | null>(null);
 +  const [streamNote, setStreamNote] = useState<string | null>(null);
    const [basin, setBasin] = useState<Basin | null>(null);
    const [interval, setInterval_] = useState('');
    const [showContours, setShowContours] = useState(false);
-@@ -133,8 +134,10 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -77,7 +97,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+       setBasin(null);
+       setShowContours(false);
+       setInterval_(String(niceInterval(t.relief)));
+-      if (layer === 'flow') setLayer('hillshade');
++      if (layer === 'flow' || layer === 'wetness') setLayer('hillshade');
+       publish({
+         tool: 'terrain',
+         name,
+@@ -125,6 +145,12 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+     lines.push(
+       '- Method: Priority-Flood depression filling with an ε gradient (Barnes et al. 2014), D8 steepest-descent flow (O’Callaghan & Mark 1984), Strahler (1957) stream order. The threshold sets where channels start and is a choice, not a measurement; D8 cannot split flow, so it draws parallel lines on planar slopes.',
+     );
++    const w = f.wetness ? wetnessStats(f.wetness) : null;
++    if (w)
++      lines.push(
++        `- Topographic wetness index ln(a / tan β): median ${fmt(w.median, 3)} (quartiles ${fmt(w.q1, 3)}–${fmt(w.q3, 3)}, range ${fmt(w.min, 3)} to ${fmt(w.max, 3)}).`,
++        '- Wetness method: D∞ flow (Tarboton 1997) splits each cell’s flow between the two cells of its steepest triangular facet, so it follows divergent and planar slopes that D8 cannot. a is the upslope area per metre of contour across the flow (a plane gives its exact upslope length), tan β the steepest facet slope, floored at 0.001 on filled flats (Beven & Kirkby 1979; Sørensen et al. 2006). Streams, Strahler orders and watersheds still use D8.',
++      );
+     return lines.join('\n');
+   };
+ 
+@@ -133,8 +159,10 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
      const base = baseOutput.current;
      if (!base || !raster || !result) return;
      const contours = showContours ? contoursGeoJson(demGrid(result), raster.meta, Number(interval)) : null;
@@ -211,7 +1291,89 @@ index 1963e1f..f8bd61e 100644
      onOutput({
        ...base,
        markdown: base.markdown + hydroMarkdown(flow, basin),
-@@ -316,6 +319,11 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -156,7 +184,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+     }
+     setFlowBusy(true);
+     try {
+-      setFlow(await flowRoutingAsync(demGrid(result), geo, km2 * 1e6));
++      setFlow(await flowRoutingAsync(demGrid(result), geo, km2 * 1e6, flowMethod === 'dinf'));
+       setBasin(null);
+       setLayer('flow');
+     } catch (err) {
+@@ -197,6 +225,8 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+ 
+   const base = raster ? safeFilename(raster.meta.filename) : 'dem';
+ 
++  const wet = useMemo(() => (flow?.wetness ? wetnessStats(flow.wetness) : null), [flow]);
++
+   const image = useMemo(() => {
+     if (!result) return null;
+     if (layer === 'flow' && flow) {
+@@ -219,11 +249,15 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+       if (basin) out.set([255, 255, 255, 255], basin.outlet * 4);
+       return out;
+     }
++    if (layer === 'wetness' && flow?.wetness && wet) {
++      const span = wet.hi - wet.lo || 1;
++      return gridToRgba(flow.wetness, v => rampColor((v - wet.lo) / span, WETNESS_COLORS));
++    }
+     if (layer === 'hillshade') return gridToRgba(result.hillshade, v => [v * 235 + 10, v * 240 + 12, v * 245 + 18]);
+     if (layer === 'slope') return slopeRgba(result);
+     const { min, max } = result.elevation;
+     return gridToRgba(result.elevationGrid, v => viridis((v - min) / (max - min || 1)));
+-  }, [result, layer, flow, basin]);
++  }, [result, layer, flow, basin, wet]);
+ 
+   const lastBoundary = useRef(boundary);
+   useEffect(() => {
+@@ -272,15 +306,25 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+           </div>
+ 
+           <div className="view-toggles" role="tablist">
+-            {((flow ? ['hillshade', 'slope', 'elevation', 'flow'] : ['hillshade', 'slope', 'elevation']) as Layer[]).map(l => (
++            {(['hillshade', 'slope', 'elevation', ...(flow ? ['flow'] : []), ...(flow?.wetness ? ['wetness'] : [])] as Layer[]).map(l => (
+               <button key={l} type="button" role="tab" aria-selected={layer === l} className={layer === l ? 'active' : ''} onClick={() => setLayer(l)}>
+-                {l === 'hillshade' ? 'Hillshade' : l === 'slope' ? 'Slope classes' : l === 'elevation' ? 'Elevation' : 'Flow & streams'}
++                {l === 'hillshade' ? 'Hillshade' : l === 'slope' ? 'Slope classes' : l === 'elevation' ? 'Elevation' : l === 'flow' ? 'Flow & streams' : 'Wetness (TWI)'}
+               </button>
+             ))}
+           </div>
+           <figure className="raster-figure">
+             <RgbaCanvas rgba={image} width={result.width} height={result.height} label={`${layer} of ${result.filename}`} onPick={layer === 'flow' ? pickOutlet : undefined} />
+             {layer === 'flow' && <figcaption className="field-hint">Streams are blue (darker = higher Strahler order). Click a stream to outline the watershed draining to that point.</figcaption>}
++            {layer === 'wetness' && wet && (
++              <figcaption>
++                <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${WETNESS_COLORS.map(c => `rgb(${c.join(',')})`).join(', ')})` }} />
++                <div className="legend-labels">
++                  <span>{fmt(wet.lo, 3)} dry</span>
++                  <span>ln(a / tan β)</span>
++                  <span>wet {fmt(wet.hi, 3)}</span>
++                </div>
++              </figcaption>
++            )}
+             {layer === 'elevation' && (
+               <figcaption className="legend-labels">
+                 <span>{fmt(result.elevation.min)} m</span>
+@@ -297,6 +341,13 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+                 <span>Channel threshold (km²)</span>
+                 <input id="terrain-threshold" type="number" step="0.1" min="0.01" value={thresholdKm2} onChange={e => setThresholdKm2(e.target.value)} />
+               </label>
++              <label className="param" title="D8 sends all flow to one neighbour; D∞ splits it between two, which also gives the topographic wetness index.">
++                <span>Flow accumulation</span>
++                <select id="terrain-flow-method" value={flowMethod} onChange={e => setFlowMethod(e.target.value as FlowMethod)}>
++                  <option value="d8">D8 (streams)</option>
++                  <option value="dinf">D∞ + wetness index</option>
++                </select>
++              </label>
+               <button type="button" id="terrain-flow" className="btn" onClick={computeFlow} disabled={flowBusy}>
+                 {flowBusy ? 'Routing flow…' : flow ? 'Recompute flow' : 'Compute flow & streams'}
+               </button>
+@@ -312,10 +363,16 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+               <div className="stat-grid">
+                 <Stat label="Highest stream order" value={String(flow.maxOrder)} />
+                 <Stat label="Channel length" value={`${fmt(flow.lengthByOrder.reduce((a, b) => a + b, 0) / 1000, 4)} km`} />
++                {wet && <Stat label="Median wetness index" value={fmt(wet.median, 3)} />}
+                 {basin && <Stat label="Watershed area" value={units === 'imperial' ? `${fmt((basin.areaM2 / 1e4) * ACRES_PER_HA / 640, 4)} mi²` : `${fmt(basin.areaM2 / 1e6, 4)} km²`} />}
                  {basin && <Stat label="Watershed mean slope" value={`${fmt(basin.meanSlope, 3)}°`} />}
                </div>
              )}
@@ -223,7 +1385,7 @@ index 1963e1f..f8bd61e 100644
              <div className="button-row">
                {basin && onBoundary && (
                  <button
-@@ -393,7 +401,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
+@@ -393,7 +450,7 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
            </div>
  
            <ul className="hint-list">
@@ -281,6 +1443,111 @@ index 728780c..3c3f850 100644
  
  export interface SpiResult {
    scale: number;
+diff --git a/src/lib/compute.ts b/src/lib/compute.ts
+index 664fb7e..b33ab3c 100644
+--- a/src/lib/compute.ts
++++ b/src/lib/compute.ts
+@@ -3,6 +3,7 @@
+ import type { Grid } from './rasterio';
+ import { flowRouting, type FlowResult, type Spacing } from './tools/hydrology';
+ import { kmeans } from './tools/kmeans';
++import { trainValidatePredict, type ForestJob, type ForestOutcome } from './tools/randomforest';
+ 
+ /** The worker itself failed (not the computation), so the caller may retry on the main thread. */
+ class WorkerFailure extends Error {}
+@@ -44,9 +45,9 @@ function run<T>(w: Worker, msg: Record<string, unknown>, transfer: Transferable[
+   });
+ }
+ 
+-export async function flowRoutingAsync(dem: Grid, geo: Spacing, thresholdM2: number): Promise<FlowResult> {
++export async function flowRoutingAsync(dem: Grid, geo: Spacing, thresholdM2: number, dinf = false): Promise<FlowResult> {
+   const w = await getWorker();
+-  if (!w) return flowRouting(dem, geo, thresholdM2);
++  if (!w) return flowRouting(dem, geo, thresholdM2, dinf);
+   const dx = new Float64Array(dem.height), dy = new Float64Array(dem.height), area = new Float64Array(dem.height);
+   for (let r = 0; r < dem.height; r++) {
+     const s = geo.spacing(r);
+@@ -56,10 +57,10 @@ export async function flowRoutingAsync(dem: Grid, geo: Spacing, thresholdM2: num
+   }
+   const data = new Float32Array(dem.data); // copy: the caller keeps its grid
+   try {
+-    return await run<FlowResult>(w, { kind: 'flow', width: dem.width, height: dem.height, data, dx, dy, area, threshold: thresholdM2 }, [data.buffer, dx.buffer, dy.buffer, area.buffer]);
++    return await run<FlowResult>(w, { kind: 'flow', width: dem.width, height: dem.height, data, dx, dy, area, threshold: thresholdM2, dinf }, [data.buffer, dx.buffer, dy.buffer, area.buffer]);
+   } catch (err) {
+     if (!(err instanceof WorkerFailure)) throw err;
+-    return flowRouting(dem, geo, thresholdM2); // e.g. a sandbox that blocks workers
++    return flowRouting(dem, geo, thresholdM2, dinf); // e.g. a sandbox that blocks workers
+   }
+ }
+ 
+@@ -74,3 +75,15 @@ export async function kmeansAsync(points: Float64Array, d: number, k: number, se
+     return kmeans(points, d, k, seed);
+   }
+ }
++
++export async function forestAsync(job: ForestJob): Promise<ForestOutcome> {
++  const w = await getWorker();
++  if (!w) return trainValidatePredict(job);
++  const copy = { ...job, X: new Float64Array(job.X), y: new Int32Array(job.y), groups: new Int32Array(job.groups), Q: new Float32Array(job.Q) };
++  try {
++    return await run(w, { kind: 'forest', ...copy }, [copy.X.buffer, copy.y.buffer, copy.groups.buffer, copy.Q.buffer]);
++  } catch (err) {
++    if (!(err instanceof WorkerFailure)) throw err;
++    return trainValidatePredict(job);
++  }
++}
+diff --git a/src/lib/crs.ts b/src/lib/crs.ts
+new file mode 100644
+index 0000000..0943fab
+--- /dev/null
++++ b/src/lib/crs.ts
+@@ -0,0 +1,46 @@
++// Any projected CRS a GeoTIFF declares (EPSG code or its own parameters), via its geokeys → a Proj4 definition
++// (geotiff-geokeys-to-proj4, which carries the EPSG parameters) → proj4js. WGS84, Web Mercator and WGS84 UTM keep
++// their exact built-in formulas; this is used only for the others.
++import proj4 from 'proj4';
++import { toProj4, type GeoKeys } from 'geotiff-geokeys-to-proj4';
++
++export interface CustomCrs {
++  /** Proj4 definition of the file's CRS. */
++  proj4: string;
++  /** Multipliers from the file's coordinates to the units Proj4 expects (for example feet to metres). */
++  mx: number;
++  my: number;
++  label: string;
++}
++
++/** The CRS of a GeoTIFF's geokeys, or null when it has none or it cannot be converted. */
++export function crsFromGeoKeys(keys: Record<string, unknown> | null, epsg: number | null): CustomCrs | null {
++  if (!keys) return null;
++  try {
++    const r = toProj4(keys as GeoKeys);
++    if (!r.proj4 || r.isGCS) return null;
++    // Check the definition works before trusting it.
++    proj4('WGS84', r.proj4).forward([0, 0]);
++    return { proj4: r.proj4, mx: r.conversionParameters.x || 1, my: r.conversionParameters.y || 1, label: epsg ? `EPSG:${epsg}` : 'custom CRS' };
++  } catch {
++    return null;
++  }
++}
++
++/** WGS84 longitude/latitude → the file's coordinates. */
++export function crsForward(c: CustomCrs): (lon: number, lat: number) => [number, number] {
++  const t = proj4('WGS84', c.proj4);
++  return (lon, lat) => {
++    const [x, y] = t.forward([lon, lat]);
++    return [x / c.mx, y / c.my];
++  };
++}
++
++/** The file's coordinates → WGS84 longitude/latitude. */
++export function crsInverse(c: CustomCrs): (x: number, y: number) => [number, number] {
++  const t = proj4('WGS84', c.proj4);
++  return (x, y) => {
++    const [lon, lat] = t.inverse([x * c.mx, y * c.my]);
++    return [lon, lat];
++  };
++}
 diff --git a/src/lib/geo.ts b/src/lib/geo.ts
 index 39edf78..348ec43 100644
 --- a/src/lib/geo.ts
@@ -313,11 +1580,36 @@ index 59ab690..061626a 100644
  - Map: Settings → Map (or the map's Layers button) picks one base map and any number of overlays with opacity: offline Natural Earth outlines; CARTO Dark/Positron/Voyager; OpenStreetMap; OpenFreeMap Liberty/Positron/Bright (vector, no key); Protomaps from a .pmtiles file or URL; OpenTopoMap; Esri World Topographic and World Imagery; Stadia (Alidade, Outdoors, Stamen Toner/Terrain/Watercolor; account or key); MapTiler (key); EOX Sentinel-2 cloudless 2016 (CC BY) and 2020 (non-commercial); NASA GIBS MODIS Terra and VIIRS daily true colour with a date picker, Black Marble 2016 and Earth at Night 2012; CARTO place labels; custom XYZ tiles and custom WMS (e.g. ISRO Bhuvan). The Layers panel also toggles the basemap, result overlay (with opacity and legend), features and analysis boundary.
  - Residential plot: property boundary (analysis boundary or a GeoJSON/KML/GPX/shapefile) plus images of the plot from different years: GeoTIFFs are resampled onto a UTM grid around the plot; same-view JPG/PNG screenshots work after tracing the plot on the latest image (with an optional ground width for scale). Relative radiometric normalisation (iterative linear fit on pseudo-invariant pixels), change magnitude from standardised residuals with a robust threshold, patches joined across small gaps, and classification into: crossing the boundary (possible encroachment; area inside and depth), thin strips along the line (likely misalignment), along the inside edge, elsewhere inside, outside. Swipe viewer, timeline against the current image, GeoJSON export. It is a screening aid, not proof of ownership or encroachment.
  - Weather & climate: CSV/TSV/XLSX time series or climate GeoTIFFs. Detects rainfall, temperature, humidity, soil moisture, evapotranspiration and solar radiation; Mann–Kendall trend with Theil–Sen slope, seasonal cycle, Seasonal Kendall test and monthly anomalies (records of two years or more), Standardized Precipitation Index at 1/3/6/12 months (precipitation, 10+ years; 30+ recommended), value classes (IMD rainfall categories, soil-moisture ranges) and daily rainfall indices (rainy days ≥ 2.5 mm, heaviest day, longest dry spell).
+diff --git a/src/lib/patches.ts b/src/lib/patches.ts
+index 3d7642e..f840f82 100644
+--- a/src/lib/patches.ts
++++ b/src/lib/patches.ts
+@@ -3,6 +3,7 @@
+ // pixel edges.
+ import type { Feature, FeatureCollection, MultiPolygon, Position } from 'geojson';
+ import { utmToLatLon } from './geo';
++import { crsInverse } from './crs';
+ import type { GeoMeta, Grid } from './rasterio';
+ 
+ export interface Labels {
+@@ -108,6 +109,7 @@ export function unprojector(meta: GeoMeta): ((x: number, y: number) => [number,
+       return [lon, lat];
+     };
+   }
++  if (meta.crs) return crsInverse(meta.crs);
+   return null;
+ }
+ 
 diff --git a/src/lib/rasterio.ts b/src/lib/rasterio.ts
-index 46febc4..ad7dfee 100644
+index 46febc4..a0c7967 100644
 --- a/src/lib/rasterio.ts
 +++ b/src/lib/rasterio.ts
-@@ -5,6 +5,8 @@ import { bboxToLatLng, type LatLngBounds } from './geo';
+@@ -2,9 +2,13 @@
+ // common grid (no-data → NaN), and ground geometry (pixel area and spacing
+ // in metres) so areas and slopes are computed in real units.
+ import { bboxToLatLng, type LatLngBounds } from './geo';
++import geodesic from 'geographiclib-geodesic';
++import { crsFromGeoKeys, crsInverse, type CustomCrs } from './crs';
  
  /** Pixel budget for analysis grids; larger rasters are resampled to this size. */
  export const ANALYSIS_PIXEL_LIMIT = 4_000_000;
@@ -326,7 +1618,18 @@ index 46febc4..ad7dfee 100644
  
  /** Mean radius of the WGS84 authalic sphere (equal-area), metres. */
  const R_AUTHALIC = 6371007.1809;
-@@ -51,10 +53,22 @@ export interface Grid {
+@@ -40,6 +44,10 @@ export interface GeoMeta {
+   /** Native pixel size in CRS units. */
+   pixelSize: [number, number] | null;
+   warnings: string[];
++  /** Band descriptions from GDAL metadata (for example "VV", "VH"), "" where none. */
++  bandNames?: string[];
++  /** Any other projected CRS, through Proj4 (WGS84, Web Mercator and UTM use exact built-in formulas). */
++  crs?: CustomCrs | null;
+ }
+ 
+ export interface Grid {
+@@ -51,10 +59,22 @@ export interface Grid {
    resampleFactor: number;
  }
  
@@ -349,22 +1652,53 @@ index 46febc4..ad7dfee 100644
  }
  
  function readEpsg(geoKeys: Record<string, unknown> | null): { epsg: number | null; geographic: boolean; userDefined: boolean } {
-@@ -114,8 +128,13 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+@@ -92,11 +112,14 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+   } catch {
+     warnings.push('The file has no georeferencing, so it cannot be placed on the map or measured in real units.');
+   }
+-  const { epsg, geographic, userDefined } = readEpsg(image.getGeoKeys() as Record<string, unknown> | null);
++  const keys = image.getGeoKeys() as Record<string, unknown> | null;
++  const { epsg, geographic, userDefined } = readEpsg(keys);
++  const builtIn = geographic || epsg === 3857 || epsg === 900913 || isUtm(epsg);
++  const crs = bbox && !builtIn && (epsg !== null || userDefined) ? crsFromGeoKeys(keys, epsg) : null;
+   let latLngBounds: LatLngBounds | null = null;
+   if (bbox) {
+     if (geographic && epsg !== 4326) warnings.push(`Geographic CRS EPSG:${epsg} was treated as WGS84 (offset is usually under a few metres).`);
+-    latLngBounds = userDefined ? null : bboxToLatLng(bbox, geographic ? 4326 : epsg);
++    latLngBounds = crs ? customBounds(bbox, crs) : userDefined ? null : bboxToLatLng(bbox, geographic ? 4326 : epsg);
+     if (!latLngBounds) {
+       warnings.push(
+         userDefined
+@@ -112,10 +135,26 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+   const gh = Math.max(1, Math.round(height * scale));
+   if (scale < 1) warnings.push(`The ${width}×${height} raster was resampled to ${gw}×${gh} (nearest neighbour) for analysis.`);
  
-   const meta: GeoMeta = { filename: file.name, sizeBytes: file.size, width, height, bands, noData, bbox, epsg, geographic: geographic || epsg === 4326, latLngBounds, pixelSize, warnings };
- 
--  const readBands = async (indices: number[]): Promise<Grid[]> => {
+-  const meta: GeoMeta = { filename: file.name, sizeBytes: file.size, width, height, bands, noData, bbox, epsg, geographic: geographic || epsg === 4326, latLngBounds, pixelSize, warnings };
++  const bandNames: string[] = [];
++  for (let i = 0; i < bands; i++) {
++    let name = '';
++    try {
++      const md = await image.getGDALMetadata(i);
++      name = typeof md?.DESCRIPTION === 'string' ? md.DESCRIPTION.trim() : '';
++    } catch {
++      // no GDAL metadata: the band keeps its number only
++    }
++    bandNames.push(name);
++  }
++  const meta: GeoMeta = { filename: file.name, sizeBytes: file.size, width, height, bands, noData, bbox, epsg, geographic: geographic || epsg === 4326, latLngBounds, pixelSize, warnings, bandNames, crs };
++
 +  const checkBands = (indices: number[]) => {
-     for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
++    for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
 +  };
 +  const clean = (v: number) => (Number.isFinite(v) && (noData === null || v !== noData) ? v : NaN);
-+
-+  const readBands = async (indices: number[]): Promise<Grid[]> => {
+ 
+   const readBands = async (indices: number[]): Promise<Grid[]> => {
+-    for (const i of indices) if (i < 0 || i >= bands) throw new Error(`Band ${i + 1} does not exist; the file has ${bands} band${bands === 1 ? '' : 's'}.`);
 +    checkBands(indices);
      const rasters = (await image.readRasters({ samples: indices, width: gw, height: gh, resampleMethod: 'nearest', interleave: false })) as unknown as ArrayLike<number>[];
      return rasters.map(band => {
        const data = new Float32Array(gw * gh);
-@@ -127,7 +146,30 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
+@@ -127,7 +166,30 @@ export async function openGeoTiff(file: File): Promise<OpenRaster> {
      });
    };
  
@@ -396,6 +1730,565 @@ index 46febc4..ad7dfee 100644
  }
  
  /** True when two rasters share a grid closely enough for pixel-by-pixel comparison. */
+@@ -138,6 +200,26 @@ export function sameGrid(a: GeoMeta, b: GeoMeta): boolean {
+   return a.bbox.every((v, i) => Math.abs(v - b.bbox![i]) <= tol) && a.epsg === b.epsg;
+ }
+ 
++/** WGS84 bounds of a bbox in a custom CRS, from 21 points along each edge. */
++function customBounds(bbox: [number, number, number, number], crs: CustomCrs): LatLngBounds | null {
++  const inv = crsInverse(crs);
++  const [x0, y0, x1, y1] = bbox;
++  const lats: number[] = [], lons: number[] = [];
++  for (let i = 0; i <= 20; i++) {
++    const t = i / 20;
++    for (const [x, y] of [[x0 + t * (x1 - x0), y0], [x0 + t * (x1 - x0), y1], [x0, y0 + t * (y1 - y0)], [x1, y0 + t * (y1 - y0)]]) {
++      const [lon, lat] = inv(x, y);
++      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
++      lons.push(lon);
++      lats.push(lat);
++    }
++  }
++  return [
++    [Math.min(...lats), Math.min(...lons)],
++    [Math.max(...lats), Math.max(...lons)],
++  ];
++}
++
+ function isUtm(epsg: number | null): boolean {
+   return epsg !== null && ((epsg >= 32601 && epsg <= 32660) || (epsg >= 32701 && epsg <= 32760));
+ }
+@@ -181,5 +263,41 @@ export function groundGeometry(meta: GeoMeta, grid: Pick<Grid, 'width' | 'height
+       note: `Pixel sizes are in metres (EPSG:${meta.epsg}); UTM scale error is below 0.1 % within a zone.`,
+     };
+   }
++  if (meta.crs) return geodesicGround(meta.crs, minX, maxY, cw, ch, grid.width, grid.height);
+   return null;
+ }
++
++/**
++ * Any other projected CRS, measured on the WGS84 ellipsoid row by row (as the server does): cells at 17 columns are
++ * mapped to longitude/latitude, the geodesic lengths of their east and north sides give the spacing, and side
++ * lengths × sin(angle between them) the area; the row mean is used.
++ */
++function geodesicGround(crs: CustomCrs, minX: number, maxY: number, cw: number, ch: number, w: number, h: number) {
++  const inv = crsInverse(crs);
++  const geod = geodesic.Geodesic.WGS84;
++  const cols = [...new Set(Array.from({ length: Math.min(17, w) }, (_, i) => Math.round((i * (w - 1)) / Math.max(1, Math.min(17, w) - 1))))];
++  const area = new Float64Array(h), dx = new Float64Array(h), dy = new Float64Array(h);
++  let lo = Infinity, hi = 0;
++  for (let r = 0; r < h; r++) {
++    let sa = 0, sx = 0, sy = 0;
++    for (const c of cols) {
++      const x = minX + c * cw, y = maxY - r * ch;
++      const [lon0, lat0] = inv(x, y), [lonE, latE] = inv(x + cw, y), [lonS, latS] = inv(x, y - ch);
++      const e = geod.Inverse(lat0, lon0, latE, lonE), sth = geod.Inverse(lat0, lon0, latS, lonS);
++      const a = e.s12! * sth.s12! * Math.abs(Math.sin(((sth.azi1! - e.azi1!) * Math.PI) / 180));
++      sa += a;
++      sx += e.s12!;
++      sy += sth.s12!;
++      lo = Math.min(lo, a);
++      hi = Math.max(hi, a);
++    }
++    area[r] = sa / cols.length;
++    dx[r] = sx / cols.length;
++    dy[r] = sy / cols.length;
++  }
++  return {
++    cellArea: (row: number) => area[row],
++    spacing: (row: number) => ({ dx: dx[row], dy: dy[row] }),
++    note: `Pixel sizes were measured on the WGS84 ellipsoid from the file's projection (${crs.label}, via Proj4), per row; cell areas vary by ${(((hi / lo) - 1) * 100).toPrecision(2)} % across the raster.`,
++  };
++}
+diff --git a/src/lib/samples.ts b/src/lib/samples.ts
+index 3e36f59..521391b 100644
+--- a/src/lib/samples.ts
++++ b/src/lib/samples.ts
+@@ -1,17 +1,17 @@
+ /**
+  * Fetches a bundled sample file (relative to the app, so it works under any base path).
+- * The sandboxed preview host does not serve .tif files, so the preview build
++ * The sandboxed preview host does not serve .tif or .las/.laz files, so the preview build
+  * publishes them base64-encoded as `<name>.b64.txt` and decodes them here.
+  */
+ export async function fetchSample(path: string, type = ''): Promise<File> {
+   const name = path.split('/').pop()!;
+-  if (__TERRAX_PREVIEW__ && /\.tiff?$/i.test(path)) {
++  if (__TERRAX_PREVIEW__ && /\.(tiff?|la[sz])$/i.test(path)) {
+     const res = await fetch(new URL(`data/${path}.b64.txt`, document.baseURI));
+     if (!res.ok) throw new Error(`The sample file ${name} could not be loaded (HTTP ${res.status}).`);
+     const bin = atob((await res.text()).trim());
+     const bytes = new Uint8Array(bin.length);
+     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+-    return new File([bytes], name, { type: 'image/tiff' });
++    return new File([bytes], name, { type: /\.tiff?$/i.test(name) ? 'image/tiff' : 'application/octet-stream' });
+   }
+   const res = await fetch(new URL(`data/${path}`, document.baseURI));
+   if (!res.ok) throw new Error(`The sample file ${name} could not be loaded (HTTP ${res.status}).`);
+diff --git a/src/lib/tools/accuracy.ts b/src/lib/tools/accuracy.ts
+new file mode 100644
+index 0000000..134df06
+--- /dev/null
++++ b/src/lib/tools/accuracy.ts
+@@ -0,0 +1,125 @@
++// Map accuracy and area estimation from a stratified random sample (Olofsson et al. 2014, Remote Sensing of
++// Environment 148: 42–57). With W_i the mapped area share of class i, n_ij the sample count of map class i with
++// reference class j and n_i· the stratum's sample size, the area proportions are p̂_ij = W_i n_ij / n_i· (eq. 4);
++// overall, user's and producer's accuracy and the area of each reference class follow, with standard errors
++// from eqs. 5–7 and 10. The area estimates correct the map's own pixel counts for its errors.
++import { rng } from './kmeans';
++
++const Z95 = 1.959964;
++
++/** At least nMin points per mapped class (or the whole class if smaller), the rest proportional to area; sums to nTotal. */
++export function allocate(areas: number[], nTotal: number, nMin = 50): number[] {
++  const base = areas.map(a => (a > 0 ? nMin : 0));
++  const rest = Math.max(0, nTotal - base.reduce((x, y) => x + y, 0));
++  const sum = areas.reduce((x, y) => x + y, 0);
++  const share = areas.map(a => (sum > 0 ? a / sum : 0));
++  const extra = share.map(s => Math.floor(s * rest));
++  let left = rest - extra.reduce((x, y) => x + y, 0);
++  // Largest remainders take the leftover points.
++  const order = share.map((s, i) => [s * rest - extra[i], i] as const).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
++  for (const [, i] of order) {
++    if (left <= 0) break;
++    extra[i]++;
++    left--;
++  }
++  return base.map((b, i) => b + extra[i]);
++}
++
++/** Cell indices drawn at random without replacement within each class id (1-based) of the class map. */
++export function stratifiedSample(classes: Uint8Array, ids: number[], sizes: number[], seed = 11): { cell: number; cls: number }[] {
++  const rand = rng(seed);
++  const out: { cell: number; cls: number }[] = [];
++  ids.forEach((id, i) => {
++    const cells: number[] = [];
++    for (let k = 0; k < classes.length; k++) if (classes[k] === id) cells.push(k);
++    const m = Math.min(sizes[i], cells.length);
++    for (let j = 0; j < m; j++) {
++      const p = j + Math.floor(rand() * (cells.length - j)); // partial Fisher–Yates
++      [cells[j], cells[p]] = [cells[p], cells[j]];
++      out.push({ cell: cells[j], cls: id });
++    }
++  });
++  return out;
++}
++
++export interface AccuracyClass {
++  label: string;
++  samples: number;
++  mappedArea: number;
++  userAccuracy: number | null;
++  userCi: number | null;
++  producerAccuracy: number | null;
++  producerCi: number | null;
++  area: number;
++  areaCi: number | null;
++}
++
++export interface Accuracy {
++  labels: string[];
++  counts: number[][];
++  samples: number;
++  totalArea: number;
++  overallAccuracy: number;
++  overallCi: number | null;
++  classes: AccuracyClass[];
++  unsampled: string[];
++}
++
++/** counts[i][j]: sample points of map class i with reference class j; mappedArea[i]: area of map class i. */
++export function assess(counts: number[][], mappedArea: number[], labels: string[]): Accuracy {
++  const k = counts.length;
++  const total = mappedArea.reduce((a, b) => a + b, 0);
++  if (!(total > 0)) throw new Error('The map has no area.');
++  const w = mappedArea.map(a => a / total);
++  const ni = counts.map(r => r.reduce((a, b) => a + b, 0));
++  const frac = counts.map((r, i) => r.map(v => (ni[i] ? v / ni[i] : 0)));
++  const p = frac.map((r, i) => r.map(v => w[i] * v));
++  const pRef = Array.from({ length: k }, (_, j) => p.reduce((s, r) => s + r[j], 0));
++  const pMap = p.map(r => r.reduce((a, b) => a + b, 0));
++  const diag = p.map((r, i) => r[i]);
++  const oa = diag.reduce((a, b) => a + b, 0);
++  const denom = ni.map(v => (v > 1 ? v - 1 : NaN));
++  const ua = pMap.map((m, i) => (m > 0 ? diag[i] / m : NaN));
++  const pa = pRef.map((m, j) => (m > 0 ? diag[j] / m : NaN));
++  const vUa = ua.map((u, i) => (u * (1 - u)) / denom[i]);
++  let vOa = 0;
++  for (let i = 0; i < k; i++) if (Number.isFinite(vUa[i])) vOa += w[i] ** 2 * vUa[i];
++  const vRef = Array.from({ length: k }, (_, j) => {
++    let s = 0;
++    for (let i = 0; i < k; i++) if (Number.isFinite(denom[i])) s += (w[i] ** 2 * frac[i][j] * (1 - frac[i][j])) / denom[i];
++    return s;
++  });
++  const nRef = Array.from({ length: k }, (_, j) => mappedArea.reduce((s, a, i) => s + a * frac[i][j], 0));
++  const vPa = Array.from({ length: k }, (_, j) => {
++    if (!(nRef[j] > 0) || !Number.isFinite(pa[j])) return NaN;
++    const own = Number.isFinite(ua[j]) && Number.isFinite(denom[j]) ? (mappedArea[j] ** 2 * (1 - pa[j]) ** 2 * ua[j] * (1 - ua[j])) / denom[j] : 0;
++    let others = 0;
++    for (let i = 0; i < k; i++) if (i !== j && Number.isFinite(denom[i])) others += (mappedArea[i] ** 2 * frac[i][j] * (1 - frac[i][j])) / denom[i];
++    return (own + pa[j] ** 2 * others) / nRef[j] ** 2;
++  });
++  const ci = (v: number) => (Number.isFinite(v) ? Z95 * Math.sqrt(Math.max(0, v)) : null);
++  const fin = (v: number) => (Number.isFinite(v) ? v : null);
++  return {
++    labels, counts, samples: ni.reduce((a, b) => a + b, 0), totalArea: total, overallAccuracy: oa, overallCi: ci(vOa),
++    classes: labels.map((label, j) => {
++      const s = ci(vRef[j]);
++      return { label, samples: ni[j], mappedArea: mappedArea[j], userAccuracy: fin(ua[j]), userCi: ci(vUa[j]), producerAccuracy: fin(pa[j]), producerCi: ci(vPa[j]), area: pRef[j] * total, areaCi: s === null ? null : s * total };
++    }),
++    unsampled: labels.filter((_, i) => !ni[i] && mappedArea[i] > 0),
++  };
++}
++
++export function accuracyMarkdown(a: Accuracy, unit: string, missing: number): string {
++  const f = (v: number) => (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en') : v.toPrecision(4));
++  const pct = (v: number | null, c: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)} %${c === null ? '' : ` ± ${(c * 100).toFixed(1)}`}`);
++  return [
++    '', '## Accuracy and area (stratified sample)', '',
++    `- ${a.samples} reference points${missing ? ` (${missing} unlabelled points were left out)` : ''}; overall accuracy ${pct(a.overallAccuracy, a.overallCi)} (95 % CI).`, '',
++    `| Class | Mapped (${unit}) | Estimated area (${unit}, 95 % CI) | User’s accuracy | Producer’s accuracy | Points |`, '|---|---|---|---|---|---|',
++    ...a.classes.map(c => `| ${c.label} | ${f(c.mappedArea)} | ${f(c.area)}${c.areaCi === null ? '' : ` ± ${f(c.areaCi)}`} | ${pct(c.userAccuracy, c.userCi)} | ${pct(c.producerAccuracy, c.producerCi)} | ${c.samples} |`),
++    '', 'Error matrix of sample counts (rows: map, columns: reference):', '', `| | ${a.labels.join(' | ')} |`, `${'|---'.repeat(a.labels.length + 1)}|`,
++    ...a.counts.map((r, i) => `| **${a.labels[i]}** | ${r.join(' | ')} |`), '',
++    '- Method: Olofsson et al. (2014) stratified estimators: cell proportions p̂ᵢⱼ = Wᵢ nᵢⱼ / nᵢ· weight each stratum by its mapped area, so the estimated areas correct the map’s own pixel counts for its errors. Report these estimates with their confidence intervals rather than the mapped areas.',
++    ...(a.unsampled.length ? [`- No sample points in: ${a.unsampled.join(', ')}; their accuracy and area cannot be estimated.`] : []),
++  ].join('\n');
++}
+diff --git a/src/lib/tools/canopy.ts b/src/lib/tools/canopy.ts
+new file mode 100644
+index 0000000..7ca4858
+--- /dev/null
++++ b/src/lib/tools/canopy.ts
+@@ -0,0 +1,328 @@
++// Canopy height from a point cloud (LAS/LAZ) or from surface and terrain models.
++//  • DSM: highest first return per cell; DTM: lowest ground return (ASPRS class 2), empty cells filled by
++//    linear interpolation on a Delaunay triangulation of the ground cells (nearest ground cell outside it).
++//    CHM = DSM − DTM, negatives set to 0.
++//  • Canopy cover: share of cells at or above a height threshold (2 m by default; FAO's forest definition uses 5 m).
++//  • Tree tops: local maxima of the lightly smoothed CHM, each the highest cell within half its expected crown
++//    width CW = 3.75105 − 0.17919 H + 0.01241 H² (Popescu & Wynne 2004). A lower bound in dense stands.
++import Delaunator from 'delaunator';
++import { fmt } from '../stats';
++
++export const HEIGHT_CLASSES: [number, number][] = [[0, 2], [2, 5], [5, 10], [10, 20], [20, 30], [30, Infinity]];
++
++export interface LasHeader {
++  version: string;
++  pointFormat: number;
++  compressed: boolean;
++  recordLength: number;
++  count: number;
++  dataOffset: number;
++  scale: [number, number, number];
++  offset: [number, number, number];
++  min: [number, number, number];
++  max: [number, number, number];
++  epsg: number | null;
++  /** Metres per horizontal (and vertical) unit, from the CRS (1 when unknown). */
++  unit: number;
++  crsNote: string;
++}
++
++const cstr = (b: Uint8Array) => new TextDecoder().decode(b.subarray(0, b.indexOf(0) >= 0 ? b.indexOf(0) : b.length));
++
++/** Reads the LAS/LAZ public header and its CRS records (GeoTIFF keys or LAS 1.4 WKT). */
++export function parseLasHeader(buf: ArrayBuffer): LasHeader {
++  const v = new DataView(buf), u8 = new Uint8Array(buf);
++  if (cstr(u8.subarray(0, 4)) !== 'LASF') throw new Error('This is not a LAS or LAZ file (no LASF signature).');
++  const major = v.getUint8(24), minor = v.getUint8(25);
++  const headerSize = v.getUint16(94, true), dataOffset = v.getUint32(96, true), nVlr = v.getUint32(100, true);
++  const fmtByte = v.getUint8(104);
++  const pointFormat = fmtByte & 0x3f, compressed = (fmtByte & 0xc0) !== 0;
++  const recordLength = v.getUint16(105, true);
++  let count = v.getUint32(107, true);
++  if (major === 1 && minor >= 4 && headerSize >= 375) count = Number(v.getBigUint64(247, true)) || count;
++  const d = (o: number) => v.getFloat64(o, true);
++  const header: LasHeader = {
++    version: `${major}.${minor}`, pointFormat, compressed, recordLength, count, dataOffset,
++    scale: [d(131), d(139), d(147)], offset: [d(155), d(163), d(171)],
++    max: [d(179), d(195), d(211)], min: [d(187), d(203), d(219)],
++    epsg: null, unit: 1, crsNote: 'The point cloud declares no CRS: coordinates were taken as metres and it cannot be placed on the map.',
++  };
++  let p = headerSize;
++  for (let i = 0; i < nVlr && p + 54 <= buf.byteLength; i++) {
++    const user = cstr(u8.subarray(p + 2, p + 18)), id = v.getUint16(p + 18, true), len = v.getUint16(p + 20, true);
++    const body = p + 54;
++    if (user === 'LASF_Projection' && id === 34735) {
++      // GeoKeyDirectory: header of 4 shorts, then entries (key, location, count, value).
++      const keys = v.getUint16(body + 6, true);
++      for (let k = 0; k < keys; k++) {
++        const e = body + 8 + k * 8, key = v.getUint16(e, true), val = v.getUint16(e + 6, true);
++        if (key === 3072 || (key === 2048 && header.epsg === null)) header.epsg = val; // projected, else geographic CRS
++        if (key === 3076 && val === 9002) header.unit = 0.3048; // ProjLinearUnits: foot
++        if (key === 3076 && val === 9003) header.unit = 1200 / 3937; // US survey foot
++      }
++    }
++    if (user === 'LASF_Projection' && id === 2112) {
++      const wkt = cstr(u8.subarray(body, body + len));
++      const ids = [...wkt.matchAll(/(?:AUTHORITY\["EPSG",\s*"?|ID\["EPSG",\s*)(\d+)/g)];
++      if (ids.length) header.epsg = Number(ids[ids.length - 1][1]); // the outermost CRS's id comes last
++      if (/US survey foot/i.test(wkt)) header.unit = 1200 / 3937;
++      else if (/LENGTHUNIT\["foot"|UNIT\["foot"/i.test(wkt)) header.unit = 0.3048;
++      if (/GEOGCRS\[|^GEOGCS\[/.test(wkt.trim())) header.epsg = header.epsg ?? 4326;
++    }
++    p = body + len;
++  }
++  if (header.epsg) header.crsNote = `CRS EPSG:${header.epsg}${header.unit !== 1 ? ' (feet; heights converted to metres)' : ''}.`;
++  return header;
++}
++
++/** Calls fn(x, y, z, firstReturn, classification) for every point (file units), decompressing LAZ with laz-perf. */
++export async function forEachPoint(buf: ArrayBuffer, h: LasHeader, fn: (x: number, y: number, z: number, first: boolean, cls: number) => void): Promise<boolean> {
++  const modern = h.pointFormat >= 6;
++  const read = (v: DataView, o: number) => {
++    const x = v.getInt32(o, true) * h.scale[0] + h.offset[0], y = v.getInt32(o + 4, true) * h.scale[1] + h.offset[1], z = v.getInt32(o + 8, true) * h.scale[2] + h.offset[2];
++    const ret = modern ? v.getUint8(o + 14) & 0x0f : v.getUint8(o + 14) & 0x07;
++    const cls = modern ? v.getUint8(o + 16) : v.getUint8(o + 15) & 0x1f;
++    fn(x, y, z, ret <= 1, cls); // return number 0 (unset) counts as first
++  };
++  if (!h.compressed) {
++    const v = new DataView(buf);
++    for (let i = 0; i < h.count; i++) read(v, h.dataOffset + i * h.recordLength);
++    return true;
++  }
++  const { createLazPerf } = await import('laz-perf');
++  let lp: Awaited<ReturnType<typeof createLazPerf>>;
++  if (typeof window === 'undefined') lp = await createLazPerf(); // Node (tests): the package loads its own .wasm
++  else {
++    // The browser build embeds the WebAssembly, so a single-file page needs no extra request.
++    const wasm = (await import('laz-perf/lib/web/laz-perf.wasm?base64')).default;
++    const bin = atob(wasm);
++    const wasmBinary = new Uint8Array(bin.length);
++    for (let i = 0; i < bin.length; i++) wasmBinary[i] = bin.charCodeAt(i);
++    lp = await createLazPerf({ wasmBinary } as never);
++  }
++  const file = lp._malloc(buf.byteLength);
++  const point = lp._malloc(h.recordLength);
++  const zip = new lp.LASZip();
++  try {
++    lp.HEAPU8.set(new Uint8Array(buf), file);
++    zip.open(file, buf.byteLength);
++    for (let i = 0; i < h.count; i++) {
++      zip.getPoint(point);
++      read(new DataView(lp.HEAPU8.buffer, point, h.recordLength), 0);
++    }
++  } finally {
++    zip.delete();
++    lp._free(point);
++    lp._free(file);
++  }
++  return true;
++}
++
++export interface ChmGrid {
++  chm: Float32Array;
++  width: number;
++  height: number;
++  /** Cell size in metres and in file units; origin (west, north) in file units. */
++  cell: number;
++  cellUnits: number;
++  x0: number;
++  y1: number;
++  epsg: number | null;
++  points: number;
++  ground: number;
++  filled: number;
++  notes: string[];
++}
++
++/** Linear interpolation on a Delaunay triangulation of the known cells; cells outside it take the nearest known cell (grid distance). */
++export function fillHoles(z: Float64Array, w: number, h: number): number {
++  const known: number[] = [];
++  let holes = 0;
++  for (let k = 0; k < z.length; k++) (Number.isNaN(z[k]) ? holes++ : known.push(k));
++  if (!holes || known.length < 3) return holes;
++  const coords = new Float64Array(known.length * 2);
++  known.forEach((k, i) => {
++    coords[2 * i] = (k % w) + 0.5;
++    coords[2 * i + 1] = Math.floor(k / w) + 0.5;
++  });
++  const t = new Delaunator(coords).triangles;
++  const out = z.slice();
++  for (let i = 0; i < t.length; i += 3) {
++    const [a, b, c] = [t[i], t[i + 1], t[i + 2]];
++    const ax = coords[2 * a], ay = coords[2 * a + 1], bx = coords[2 * b], by = coords[2 * b + 1], cx = coords[2 * c], cy = coords[2 * c + 1];
++    const det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
++    if (det === 0) continue;
++    const c0 = Math.max(0, Math.floor(Math.min(ax, bx, cx))), c1 = Math.min(w - 1, Math.ceil(Math.max(ax, bx, cx)));
++    const r0 = Math.max(0, Math.floor(Math.min(ay, by, cy))), r1 = Math.min(h - 1, Math.ceil(Math.max(ay, by, cy)));
++    for (let r = r0; r <= r1; r++) for (let cc = c0; cc <= c1; cc++) {
++      const k = r * w + cc;
++      if (!Number.isNaN(z[k]) || !Number.isNaN(out[k])) continue;
++      const px = cc + 0.5, py = r + 0.5;
++      const l1 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / det, l2 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / det, l3 = 1 - l1 - l2;
++      if (l1 < -1e-9 || l2 < -1e-9 || l3 < -1e-9) continue;
++      out[k] = l1 * z[known[a]] + l2 * z[known[b]] + l3 * z[known[c]];
++    }
++  }
++  // Outside the triangulation: nearest filled cell by breadth-first search (8-connected).
++  const queue: number[] = [];
++  for (let k = 0; k < out.length; k++) if (!Number.isNaN(out[k])) queue.push(k);
++  for (let qi = 0; qi < queue.length; qi++) {
++    const k = queue[qi], r = Math.floor(k / w), c = k % w;
++    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
++      const rr = r + dr, cc = c + dc;
++      if (rr < 0 || cc < 0 || rr >= h || cc >= w) continue;
++      const m = rr * w + cc;
++      if (Number.isNaN(out[m])) (out[m] = out[k]), queue.push(m);
++    }
++  }
++  z.set(out);
++  return holes;
++}
++
++export async function chmFromLas(buf: ArrayBuffer, cellM = 1): Promise<ChmGrid> {
++  if (!(cellM >= 0.1 && cellM <= 50)) throw new Error('Choose a cell size between 0.1 and 50 m.');
++  const hd = parseLasHeader(buf);
++  if (hd.epsg === 4326 || (hd.epsg !== null && hd.epsg >= 4000 && hd.epsg < 5000)) throw new Error('The point cloud is in longitude/latitude. Reproject it to a projected CRS in metres or feet (for example UTM) first.');
++  const c = cellM / hd.unit;
++  const [x0, , ] = hd.min, y1 = hd.max[1];
++  const w = Math.max(1, Math.ceil((hd.max[0] - x0) / c)), h = Math.max(1, Math.ceil((y1 - hd.min[1]) / c));
++  if (w * h > 25_000_000) throw new Error(`A ${fmt(cellM, 3)} m grid over this point cloud would have ${(w * h).toLocaleString()} cells; choose a larger cell size (the browser keeps the grid in memory).`);
++  const dsm = new Float64Array(w * h).fill(NaN), dtm = new Float64Array(w * h).fill(NaN);
++  let points = 0, ground = 0;
++  await forEachPoint(buf, hd, (x, y, z, first, cls) => {
++    points++;
++    const ix = Math.min(w - 1, Math.floor((x - x0) / c)), iy = Math.min(h - 1, Math.floor((y1 - y) / c));
++    if (ix < 0 || iy < 0) return;
++    const k = iy * w + ix;
++    if (first && !(dsm[k] >= z)) dsm[k] = z;
++    if (cls === 2) {
++      ground++;
++      if (!(dtm[k] <= z)) dtm[k] = z;
++    }
++  });
++  if (!ground) throw new Error('The point cloud has no ground points (ASPRS class 2). Classify ground first (for example with PDAL’s SMRF or lasground), then load it again.');
++  const filled = fillHoles(dtm, w, h);
++  const chm = new Float32Array(w * h);
++  for (let k = 0; k < chm.length; k++) chm[k] = Number.isNaN(dsm[k]) || Number.isNaN(dtm[k]) ? NaN : Math.max(dsm[k] - dtm[k], 0) * hd.unit;
++  return {
++    chm, width: w, height: h, cell: cellM, cellUnits: c, x0, y1, epsg: hd.epsg, points, ground, filled,
++    notes: [
++      `DSM: highest first return per ${fmt(cellM, 3)} m cell; DTM: lowest ground return, ${filled.toLocaleString()} empty cells filled from a TIN of ground cells (nearest outside it). CHM = DSM − DTM, negatives set to 0.`,
++      hd.crsNote,
++    ],
++  };
++}
++
++/** Separable Gaussian (σ in cells, truncated at 4σ) with scipy's "reflect" edges (d c b a | a b c d). */
++export function gaussianSmooth(z: Float64Array, w: number, h: number, sigma: number): Float64Array {
++  const r = Math.floor(4 * sigma + 0.5);
++  const kern = Array.from({ length: 2 * r + 1 }, (_, i) => Math.exp(-0.5 * ((i - r) / sigma) ** 2));
++  const sum = kern.reduce((a, b) => a + b, 0);
++  for (let i = 0; i < kern.length; i++) kern[i] /= sum;
++  const refl = (i: number, n: number) => {
++    const p = 2 * n;
++    let j = ((i % p) + p) % p;
++    if (j >= n) j = p - 1 - j;
++    return j;
++  };
++  const tmp = new Float64Array(z.length), out = new Float64Array(z.length);
++  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
++    let s = 0;
++    for (let i = -r; i <= r; i++) s += kern[i + r] * z[y * w + refl(x + i, w)];
++    tmp[y * w + x] = s;
++  }
++  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
++    let s = 0;
++    for (let i = -r; i <= r; i++) s += kern[i + r] * tmp[refl(y + i, h) * w + x];
++    out[y * w + x] = s;
++  }
++  return out;
++}
++
++export function crownWidth(h: number): number {
++  return 3.75105 - 0.17919 * h + 0.01241 * h * h;
++}
++
++/** Cells that are the highest within half their expected crown width (ties go to the first in scan order). */
++export function treeTops(s: Float64Array, w: number, h: number, minH: number, cell: number): number[] {
++  const out: number[] = [];
++  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
++    const v = s[r * w + c];
++    if (!(v >= minH)) continue;
++    const rad = Math.max(1, Math.floor(crownWidth(v) / 2 / cell + 0.5));
++    let top = true;
++    for (let dr = -rad; dr <= rad && top; dr++) {
++      const rr = r + dr;
++      if (rr < 0 || rr >= h) continue;
++      for (let dc = -rad; dc <= rad; dc++) {
++        const cc = c + dc;
++        if (cc < 0 || cc >= w || (dr === 0 && dc === 0) || dr * dr + dc * dc > rad * rad) continue;
++        const u = s[rr * w + cc];
++        if (u > v || (u === v && (dr < 0 || (dr === 0 && dc < 0)))) {
++          top = false;
++          break;
++        }
++      }
++    }
++    if (top) out.push(r * w + c);
++  }
++  return out;
++}
++
++export interface CanopyResult {
++  areaHa: number;
++  threshold: number;
++  cover: number;
++  coverFao: number;
++  height: { median: number | null; q1: number | null; q3: number | null; p95: number | null; max: number | null; mean: number | null };
++  classes: { label: string; ha: number }[];
++  trees: { cells: number[]; heights: number[]; count: number; perHa: number | null; minHeight: number; meanHeight: number | null };
++}
++
++export function analyzeCanopy(chm: Float32Array, w: number, h: number, cellArea: (row: number) => number, cellM: number, threshold = 2, minTree = 5): CanopyResult {
++  let area = 0, canopy = 0, fao = 0;
++  const heights: number[] = [];
++  const cls = HEIGHT_CLASSES.map(() => 0);
++  for (let k = 0; k < chm.length; k++) {
++    const v = chm[k];
++    if (Number.isNaN(v)) continue;
++    const a = cellArea(Math.floor(k / w));
++    area += a;
++    if (v >= threshold) (canopy += a), heights.push(v);
++    if (v >= 5) fao += a;
++    const i = HEIGHT_CLASSES.findIndex(([lo, hi]) => v >= lo && v < hi);
++    if (i >= 0) cls[i] += a;
++  }
++  if (!area) throw new Error('The canopy height model has no valid cells.');
++  heights.sort((a, b) => a - b);
++  const q = (p: number) => {
++    if (!heights.length) return null;
++    const hh = (heights.length - 1) * p, lo = Math.floor(hh), hi = Math.ceil(hh);
++    return heights[lo] + (hh - lo) * (heights[hi] - heights[lo]);
++  };
++  const z = Float64Array.from(chm, v => (Number.isNaN(v) ? 0 : v));
++  const s = gaussianSmooth(z, w, h, 0.67);
++  for (let k = 0; k < s.length; k++) if (Number.isNaN(chm[k])) s[k] = NaN;
++  const cells = treeTops(s, w, h, minTree, cellM);
++  const th = cells.map(k => chm[k]);
++  return {
++    areaHa: area / 1e4, threshold, cover: canopy / area, coverFao: fao / area,
++    height: { median: q(0.5), q1: q(0.25), q3: q(0.75), p95: q(0.95), max: heights.length ? heights[heights.length - 1] : null, mean: heights.length ? heights.reduce((a, b) => a + b, 0) / heights.length : null },
++    classes: HEIGHT_CLASSES.map(([lo, hi], i) => ({ label: Number.isFinite(hi) ? `${lo}–${hi} m` : `≥ ${lo} m`, ha: cls[i] / 1e4 })),
++    trees: { cells, heights: th, count: cells.length, perHa: cells.length / (area / 1e4), minHeight: minTree, meanHeight: th.length ? th.reduce((a, b) => a + b, 0) / th.length : null },
++  };
++}
++
++export function canopyMarkdown(name: string, source: string, r: CanopyResult, notes: string[]): string {
++  const hgt = r.height, t = r.trees;
++  return [
++    '## Dataset', '', `- ${name} (${source})`, `- Area with heights: ${fmt(r.areaHa, 4)} ha`, '', '## Results', '', '| Measure | Value |', '|---|---|',
++    `| Canopy cover (≥ ${fmt(r.threshold, 3)} m) | ${(r.cover * 100).toFixed(1)} % |`,
++    `| Cover of trees ≥ 5 m (FAO forest height) | ${(r.coverFao * 100).toFixed(1)} % |`,
++    `| Canopy height, median (quartiles) | ${fmt(hgt.median, 3)} m (${fmt(hgt.q1, 3)}–${fmt(hgt.q3, 3)}) |`,
++    `| 95th percentile / maximum | ${fmt(hgt.p95, 3)} m / ${fmt(hgt.max, 3)} m |`,
++    `| Tree tops ≥ ${fmt(t.minHeight, 3)} m | ${t.count.toLocaleString()} (${fmt(t.perHa, 3)} per ha; mean height ${fmt(t.meanHeight, 3)} m) |`, '',
++    '| Height class | Area (ha) |', '|---|---|', ...r.classes.map(c => `| ${c.label} | ${fmt(c.ha, 4)} |`), '',
++    '## Method and limits', '', ...notes.map(n => `- ${n}`),
++  ].join('\n');
++}
 diff --git a/src/lib/tools/carbon.ts b/src/lib/tools/carbon.ts
 index e9e687e..70b8084 100644
 --- a/src/lib/tools/carbon.ts
@@ -473,11 +2366,53 @@ index e9e687e..70b8084 100644
  
  function estimate(values: number[]): Estimate {
 diff --git a/src/lib/tools/encroachment.ts b/src/lib/tools/encroachment.ts
-index 5ac3737..0bc3629 100644
+index 5ac3737..2cd82cb 100644
 --- a/src/lib/tools/encroachment.ts
 +++ b/src/lib/tools/encroachment.ts
-@@ -133,21 +133,38 @@ export async function prepareGeoStack(images: { raster: OpenRaster; label: strin
-     if (!proj || !meta.bbox) throw new Error(`${meta.filename} is not in a supported CRS (WGS84, Web Mercator or UTM).`);
+@@ -27,6 +27,7 @@ import { labelPatches } from '../patches';
+ import type { GeoMeta, OpenRaster } from '../rasterio';
+ import { projector, boundaryRings, type Boundary } from '../zonal';
+ import { fmt } from '../stats';
++import { crsForward, crsInverse } from '../crs';
+ 
+ export interface Layer {
+   label: string;
+@@ -50,9 +51,17 @@ export interface Stack {
+ 
+ // ── Grid preparation ───────────────────────────────────────────────────────
+ 
+-function nativeCellM(meta: GeoMeta, lat: number): number | null {
++function nativeCellM(meta: GeoMeta, lat: number, lon = 0, toEN?: (lon: number, lat: number) => [number, number]): number | null {
+   if (!meta.pixelSize) return null;
+   const [px, py] = meta.pixelSize;
++  if (meta.crs && toEN) {
++    // Any other CRS: the file's pixel at the property, measured in metres of the property's UTM grid.
++    const fwd = crsForward(meta.crs), inv = crsInverse(meta.crs);
++    const [x, y] = fwd(lon, lat);
++    const p0 = toEN(...inv(x, y)), pe = toEN(...inv(x + px, y)), ps = toEN(...inv(x, y - py));
++    const s = Math.min(Math.hypot(pe[0] - p0[0], pe[1] - p0[1]), Math.hypot(ps[0] - p0[0], ps[1] - p0[1]));
++    return Number.isFinite(s) && s > 0 ? s : null;
++  }
+   if (meta.geographic) return Math.min(px * 111_320 * Math.cos(lat * (Math.PI / 180)), py * 110_574);
+   if (meta.epsg === 3857 || meta.epsg === 900913) return Math.min(px, py) * Math.cos(lat * (Math.PI / 180));
+   return Math.min(px, py);
+@@ -105,8 +114,8 @@ export async function prepareGeoStack(images: { raster: OpenRaster; label: strin
+   let minE = Math.min(...en.map(p => p[0])) - bufferM, maxE = Math.max(...en.map(p => p[0])) + bufferM;
+   let minN = Math.min(...en.map(p => p[1])) - bufferM, maxN = Math.max(...en.map(p => p[1])) + bufferM;
+   const notes: string[] = [];
+-  const sizes = images.map(i => nativeCellM(i.raster.meta, cLat)).filter((v): v is number => v !== null && v > 0);
+-  if (sizes.length !== images.length) throw new Error('Every image must be georeferenced (WGS84, Web Mercator or UTM) to be placed on the property.');
++  const sizes = images.map(i => nativeCellM(i.raster.meta, cLat, cLon, toEN)).filter((v): v is number => v !== null && v > 0);
++  if (sizes.length !== images.length) throw new Error('Every image must be georeferenced (with a coordinate reference system) to be placed on the property.');
+   let cell = Math.max(0.1, Math.min(...sizes));
+   const span = Math.max(maxE - minE, maxN - minN);
+   if (span / cell > maxSide) {
+@@ -130,24 +139,41 @@ export async function prepareGeoStack(images: { raster: OpenRaster; label: strin
+   for (const img of images) {
+     const meta = img.raster.meta;
+     const proj = projector(meta);
+-    if (!proj || !meta.bbox) throw new Error(`${meta.filename} is not in a supported CRS (WGS84, Web Mercator or UTM).`);
++    if (!proj || !meta.bbox) throw new Error(`${meta.filename} has no coordinate reference system the browser can convert, so it cannot be placed on the property.`);
      const idx = rgbBands(meta.bands);
      const uniq = [...new Set(idx)];
 -    const grids = await img.raster.readBands(uniq);
@@ -525,10 +2460,106 @@ index 5ac3737..0bc3629 100644
      layers.push({ label: img.label, date: img.date, rgb: out });
    }
 diff --git a/src/lib/tools/hydrology.ts b/src/lib/tools/hydrology.ts
-index 646dc93..3ff9139 100644
+index 646dc93..c6cb0c9 100644
 --- a/src/lib/tools/hydrology.ts
 +++ b/src/lib/tools/hydrology.ts
-@@ -286,6 +286,33 @@ export function streamLines(f: FlowResult, meta: GeoMeta): FeatureCollection<Lin
+@@ -5,6 +5,9 @@
+ //    ground distances from the raster geometry.
+ //  • Flow accumulation: upslope contributing area (m²), and Strahler (1957)
+ //    stream order on cells above an area threshold.
++//  • Optional D∞ flow (Tarboton 1997): flow split between the two cells of the
++//    steepest triangular facet, giving upslope area that follows divergent and
++//    planar slopes, and the topographic wetness index ln(a / tan β).
+ //  • Contours: marching squares on cell centres, chained into lines.
+ import type { Feature, FeatureCollection, LineString } from 'geojson';
+ import { unprojector } from '../patches';
+@@ -118,6 +121,66 @@ export interface FlowResult {
+   lengthByOrder: number[];
+   raisedCells: number;
+   maxRaise: number;
++  /** D∞ results when requested: topographic wetness index ln(a / tan β) per cell (NaN for no-data). */
++  wetness?: Float32Array;
++}
++
++// D∞ facets (Tarboton 1997, Table 1): cardinal neighbour e1, diagonal e2.
++const F_R1 = [0, -1, -1, 0, 0, 1, 1, 0], F_C1 = [1, 0, 0, -1, -1, 0, 0, 1];
++const F_R2 = [-1, -1, -1, -1, 1, 1, 1, 1], F_C2 = [1, 1, -1, -1, -1, -1, 1, 1];
++/** Slope floor for the wetness index: filled flats keep only an ε gradient. */
++export const TAN_FLOOR = 0.001;
++
++/**
++ * D∞ upslope area (m²), specific catchment area (m² per m of contour across the flow, so a plane gives its exact
++ * upslope length) and tan β of the steepest facet, on a depression-filled DEM. Cells go in descending elevation,
++ * so every donor is processed before its receivers.
++ */
++export function dinfFlow(filled: Float64Array, w: number, h: number, geo: Spacing): { acc: Float64Array; sca: Float32Array; tanb: Float32Array; twi: Float32Array } {
++  const n = w * h;
++  const acc = new Float64Array(n), tanb = new Float32Array(n), width = new Float32Array(n).fill(1);
++  const order: number[] = [];
++  for (let k = 0; k < n; k++) {
++    if (Number.isNaN(filled[k])) continue;
++    acc[k] = geo.cellArea(Math.floor(k / w));
++    order.push(k);
++  }
++  order.sort((a, b) => filled[b] - filled[a] || a - b);
++  for (const k of order) {
++    const r = Math.floor(k / w), c = k - r * w, e0 = filled[k];
++    const sp = geo.spacing(r);
++    let bestS = 0, bestK = -1, bestR = 0, bestMax = 0;
++    for (let f = 0; f < 8; f++) {
++      const r1 = r + F_R1[f], c1 = c + F_C1[f], r2 = r + F_R2[f], c2 = c + F_C2[f];
++      if (r1 < 0 || r1 >= h || c1 < 0 || c1 >= w || r2 < 0 || r2 >= h || c2 < 0 || c2 >= w) continue;
++      const e1 = filled[r1 * w + c1], e2 = filled[r2 * w + c2];
++      if (Number.isNaN(e1) || Number.isNaN(e2)) continue;
++      const d1 = F_R1[f] === 0 ? sp.dx : sp.dy, d2 = F_R1[f] === 0 ? sp.dy : sp.dx;
++      const s1 = (e0 - e1) / d1, s2 = (e1 - e2) / d2;
++      const rmax = Math.atan2(d2, d1);
++      let ang = Math.atan2(s2, s1), sl: number;
++      if (ang < 0) (ang = 0), (sl = s1);
++      else if (ang > rmax) (ang = rmax), (sl = (e0 - e2) / Math.hypot(d1, d2));
++      else sl = Math.hypot(s1, s2);
++      if (sl > bestS) (bestS = sl), (bestK = f), (bestR = ang), (bestMax = rmax);
++    }
++    if (bestK < 0) continue; // outlet: nothing lower inside the grid
++    tanb[k] = bestS;
++    width[k] = (F_R1[bestK] === 0 ? sp.dy : sp.dx) * Math.cos(bestR);
++    const p2 = bestR / bestMax, a = acc[k];
++    if (p2 < 1) acc[(r + F_R1[bestK]) * w + c + F_C1[bestK]] += a * (1 - p2);
++    if (p2 > 0) acc[(r + F_R2[bestK]) * w + c + F_C2[bestK]] += a * p2;
++  }
++  const sca = new Float32Array(n), twi = new Float32Array(n);
++  for (let k = 0; k < n; k++) {
++    if (Number.isNaN(filled[k])) {
++      sca[k] = twi[k] = NaN;
++      continue;
++    }
++    sca[k] = acc[k] / width[k];
++    twi[k] = Math.log(sca[k] / Math.max(tanb[k], TAN_FLOOR));
++  }
++  return { acc, sca, tanb, twi };
+ }
+ 
+ export interface Spacing {
+@@ -130,7 +193,7 @@ function stepLength(d: number, sp: { dx: number; dy: number }): number {
+   return dr && dc ? Math.hypot(sp.dx, sp.dy) : dr ? sp.dy : sp.dx;
+ }
+ 
+-export function flowRouting(dem: Grid, geo: Spacing, thresholdM2: number): FlowResult {
++export function flowRouting(dem: Grid, geo: Spacing, thresholdM2: number, dinf = false): FlowResult {
+   const { width: w, height: h, data: z } = dem;
+   const { filled, raisedCells, maxRaise } = fillDepressions(z, w, h);
+   const n = w * h;
+@@ -195,7 +258,8 @@ export function flowRouting(dem: Grid, geo: Spacing, thresholdM2: number): FlowR
+   // A junction on the last cell before the grid edge has no channel length
+   // of its own; report the highest order that forms an actual channel.
+   while (maxOrder > 0 && lengthByOrder[maxOrder] === 0) lengthByOrder.pop(), maxOrder--;
+-  return { width: w, height: h, dir, acc, order, thresholdM2, maxOrder, lengthByOrder, raisedCells, maxRaise };
++  const wetness = dinf ? dinfFlow(filled, w, h, geo).twi : undefined;
++  return { width: w, height: h, dir, acc, order, thresholdM2, maxOrder, lengthByOrder, raisedCells, maxRaise, wetness };
+ }
+ 
+ /** Snaps a clicked cell to the highest-accumulation cell within `radius` cells. */
+@@ -286,6 +350,33 @@ export function streamLines(f: FlowResult, meta: GeoMeta): FeatureCollection<Lin
    return { type: 'FeatureCollection', features };
  }
  
@@ -562,6 +2593,640 @@ index 646dc93..3ff9139 100644
  /** A "nice" contour interval giving about `target` levels over the relief. */
  export function niceInterval(relief: number, target = 10): number {
    if (!(relief > 0)) return 1;
+diff --git a/src/lib/tools/landcover.ts b/src/lib/tools/landcover.ts
+index 73cb8bd..bb65e22 100644
+--- a/src/lib/tools/landcover.ts
++++ b/src/lib/tools/landcover.ts
+@@ -7,8 +7,9 @@ import { groundGeometry, type OpenRaster } from '../rasterio';
+ import { fmt } from '../stats';
+ import type { BandMap, QaMaskRef } from '../types';
+ import { applyQa } from '../qa';
+-import { clipToBoundary, type Boundary } from '../zonal';
+-import { kmeansAsync } from '../compute';
++import { boundaryMask, clipToBoundary, projector, type Boundary } from '../zonal';
++import type { Feature, FeatureCollection } from 'geojson';
++import { forestAsync, kmeansAsync } from '../compute';
+ export { kmeans } from './kmeans';
+ import { rng } from './kmeans';
+ 
+@@ -38,6 +39,11 @@ export interface LandCoverResult {
+   iterations: number;
+   trainingPixels: number;
+   notes: string[];
++  method?: 'kmeans' | 'rf';
++  /** Class names from the training shapes (random forest). */
++  labels?: string[];
++  labelField?: string;
++  validation?: { folds: number; confusion: number[][]; overall: number; user: (number | null)[]; producer: (number | null)[] } | null;
+ }
+ 
+ function suggest(ndvi: number | null): string | null {
+@@ -160,19 +166,166 @@ export async function classifyLandCover(
+ }
+ 
+ export function landCoverMarkdown(r: LandCoverResult, labels: string[]): string {
+-  return [
++  const rf = r.method === 'rf';
++  const out = [
+     '## Dataset',
+     '',
+-    `- File: ${r.filename}; bands ${r.bands.map(b => b + 1).join(', ')}; ${r.k} clusters`,
++    `- File: ${r.filename}; bands ${r.bands.map(b => b + 1).join(', ')}; ${rf ? `random forest, ${r.k} classes from training shapes` : `${r.k} clusters`}`,
+     '',
+     '## Results',
+     '',
+-    `| Class | Label | Area | Share | Mean NDVI | Band means |`,
++    `| Class | Label | Mapped area | Share | Mean NDVI | Band means |`,
+     '|---|---|---|---|---|---|',
+     ...r.stats.map((c, i) => `| ${c.id} | ${labels[i] || '—'} | ${c.ha === null ? `${c.pixels.toLocaleString()} px` : `${fmt(c.ha, 4)} ha`} | ${(c.share * 100).toFixed(1)} % | ${c.ndvi === null ? '—' : fmt(c.ndvi, 3)} | ${c.bandMeans.map(v => fmt(v, 4)).join(' · ')} |`),
+     '',
+-    '## Method and limits',
+-    '',
+-    ...r.notes.map(n => `- ${n}`),
+-  ].join('\n');
++  ];
++  const v = r.validation;
++  if (rf && v) {
++    const names = r.stats.map((_, i) => labels[i] || r.labels?.[i] || `Class ${i + 1}`);
++    out.push(
++      '### Cross-validation by training shape (pixels; rows: predicted, columns: reference)',
++      '',
++      `| | ${names.join(' | ')} | User’s |`,
++      `${'|---'.repeat(names.length + 2)}|`,
++      ...v.confusion.map((row, i) => `| **${names[i]}** | ${row.map(x => x.toLocaleString()).join(' | ')} | ${v.user[i] === null ? '—' : `${(v.user[i]! * 100).toFixed(1)} %`} |`),
++      `| **Producer’s** | ${v.producer.map(p => (p === null ? '—' : `${(p * 100).toFixed(1)} %`)).join(' | ')} | **${(v.overall * 100).toFixed(1)} %** |`,
++      '',
++    );
++  }
++  out.push('## Method and limits', '', ...r.notes.map(n => `- ${n}`));
++  return out.join('\n');
++}
++
++const LABEL_FIELDS = ['class', 'label', 'landcover', 'land_cover', 'lc', 'type', 'name'];
++
++/** The class property (given, or the first common one present) and each usable shape with its label. */
++export function trainingLabels(fc: FeatureCollection, field?: string | null): { field: string; shapes: { feature: Feature; label: string }[] } {
++  const feats = fc.features.filter(f => f.geometry && ['Polygon', 'MultiPolygon', 'Point', 'MultiPoint'].includes(f.geometry.type));
++  if (!feats.length) throw new Error('The training file has no polygons or points.');
++  const fields = [...new Set(feats.flatMap(f => Object.keys(f.properties ?? {})))].sort();
++  const pick = field || fields.find(k => LABEL_FIELDS.includes(k.toLowerCase()));
++  if (!pick || !fields.includes(pick)) throw new Error(`Choose the property that holds each shape’s class. Properties in the file: ${fields.join(', ') || 'none'}.`);
++  const shapes = feats.filter(f => f.properties?.[pick] !== undefined && f.properties?.[pick] !== null && f.properties?.[pick] !== '').map(f => ({ feature: f, label: String(f.properties![pick]).trim() }));
++  if (!shapes.length) throw new Error(`No training shape has a value in “${pick}”.`);
++  return { field: pick, shapes };
++}
++
++/** Random forest trained on labelled polygons or points, cross-validated by shape (browser settings: 50 trees, ≤ 2,000 pixels per class). */
++export async function classifySupervised(
++  raster: OpenRaster,
++  opts: { bands: number[]; training: FeatureCollection; labelField?: string | null; roles: BandMap; boundary?: Boundary | null; qa?: QaMaskRef; seed?: number; trees?: number; maxPerClass?: number },
++): Promise<LandCoverResult> {
++  const { bands } = opts;
++  if (!bands.length) throw new Error('Choose at least one band.');
++  const { field, shapes } = trainingLabels(opts.training, opts.labelField);
++  const labels = [...new Set(shapes.map(s => s.label))].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
++  if (labels.length < 2) throw new Error('Training needs at least two classes.');
++  if (labels.length > PALETTE.length) throw new Error(`Use at most ${PALETTE.length} classes (${labels.length} found in “${field}”).`);
++  const grids = await raster.readBands(bands);
++  const notes: string[] = [];
++  if (opts.qa) notes.push((await applyQa(raster, grids, opts.qa)).note);
++  if (opts.boundary) {
++    const note = clipToBoundary(raster.meta, grids[0], opts.boundary);
++    for (let b = 1; b < grids.length; b++) for (let i = 0; i < grids[0].data.length; i++) if (Number.isNaN(grids[0].data[i])) grids[b].data[i] = NaN;
++    if (note) notes.unshift(note);
++  }
++  const { width, height } = grids[0];
++  const n = width * height, d = bands.length, k = labels.length;
++  const isValid = (i: number) => grids.every(g => !Number.isNaN(g.data[i]));
++  // Pixels under each shape (cell centres; where shapes overlap, the later one wins).
++  const code = new Uint8Array(n), group = new Int32Array(n);
++  const proj = projector(raster.meta);
++  const [bx0, , bx1, by1] = raster.meta.bbox ?? [0, 0, 0, 0];
++  const by0 = raster.meta.bbox?.[1] ?? 0;
++  shapes.forEach(({ feature, label }, si) => {
++    const c = labels.indexOf(label) + 1, g = feature.geometry!;
++    if (g.type === 'Point' || g.type === 'MultiPoint') {
++      if (!proj) return;
++      const pts = g.type === 'Point' ? [g.coordinates] : g.coordinates;
++      for (const p of pts) {
++        const [x, y] = proj(p[0], p[1]);
++        const col = Math.floor(((x - bx0) / (bx1 - bx0)) * width), row = Math.floor(((by1 - y) / (by1 - by0)) * height);
++        if (col >= 0 && row >= 0 && col < width && row < height) (code[row * width + col] = c), (group[row * width + col] = si + 1);
++      }
++      return;
++    }
++    if (g.type !== 'Polygon' && g.type !== 'MultiPolygon') return;
++    try {
++      const { mask } = boundaryMask(raster.meta, grids[0], { name: label, areaM2: 0, geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: g }] } });
++      for (let i = 0; i < n; i++) if (mask[i]) (code[i] = c), (group[i] = si + 1);
++    } catch {
++      // a shape that misses the image adds no pixels; classes left without pixels are reported below
++    }
++  });
++  const byClass: number[][] = Array.from({ length: k }, () => []);
++  for (let i = 0; i < n; i++) if (code[i] && isValid(i)) byClass[code[i] - 1].push(i);
++  const missing = labels.filter((_, c) => !byClass[c].length);
++  if (missing.length) throw new Error(`No valid pixels fall inside the training shapes for: ${missing.join(', ')}. Check that the shapes lie on the image.`);
++  const underShapes = byClass.reduce((a, b) => a + b.length, 0);
++  const maxPerClass = opts.maxPerClass ?? 2000, trees = opts.trees ?? 50, seed = opts.seed ?? 7;
++  const rand = rng(seed + 202);
++  const picked: number[] = [];
++  for (const cells of byClass) {
++    const a = cells.slice();
++    const m = Math.min(maxPerClass, a.length);
++    for (let j = 0; j < m; j++) {
++      const p = j + Math.floor(rand() * (a.length - j));
++      [a[j], a[p]] = [a[p], a[j]];
++    }
++    picked.push(...a.slice(0, m));
++  }
++  picked.sort((a, b) => a - b);
++  const X = new Float64Array(picked.length * d), y = new Int32Array(picked.length), groups = new Int32Array(picked.length);
++  picked.forEach((i, r) => {
++    for (let a = 0; a < d; a++) X[r * d + a] = grids[a].data[i];
++    y[r] = code[i] - 1;
++    groups[r] = group[i];
++  });
++  const valid: number[] = [];
++  for (let i = 0; i < n; i++) if (isValid(i)) valid.push(i);
++  const Q = new Float32Array(valid.length * d);
++  valid.forEach((i, r) => {
++    for (let a = 0; a < d; a++) Q[r * d + a] = grids[a].data[i];
++  });
++  const out = await forestAsync({ X, y, groups, d, k, Q, trees, seed });
++  const classes = new Uint8Array(n);
++  valid.forEach((i, r) => (classes[i] = out.pred[r] + 1));
++
++  const geo = groundGeometry(raster.meta, grids[0]);
++  const px = new Float64Array(k), m2 = new Float64Array(k), sums = Array.from({ length: k }, () => new Float64Array(d));
++  const redIdx = opts.roles.red !== undefined ? bands.indexOf(opts.roles.red) : -1;
++  const nirIdx = opts.roles.nir !== undefined ? bands.indexOf(opts.roles.nir) : -1;
++  const ndviSum = new Float64Array(k), ndviN = new Float64Array(k);
++  for (const i of valid) {
++    const j = classes[i] - 1;
++    px[j]++;
++    if (geo) m2[j] += geo.cellArea(Math.floor(i / width));
++    for (let a = 0; a < d; a++) sums[j][a] += grids[a].data[i];
++    if (redIdx >= 0 && nirIdx >= 0) {
++      const r = grids[redIdx].data[i], nr = grids[nirIdx].data[i];
++      if (r + nr !== 0) (ndviSum[j] += (nr - r) / (nr + r)), ndviN[j]++;
++    }
++  }
++  const stats: LandCoverClass[] = labels.map((_, j) => ({
++    id: j + 1, pixels: px[j], ha: geo ? m2[j] / 10_000 : null, share: px[j] / (valid.length || 1),
++    bandMeans: Array.from(sums[j], v => v / (px[j] || 1)), ndvi: ndviN[j] ? ndviSum[j] / ndviN[j] : null, suggestion: null,
++  }));
++  let validation: LandCoverResult['validation'] = null;
++  if (out.confusion) {
++    const cm = out.confusion, rows = cm.map(r => r.reduce((a, b) => a + b, 0)), cols = labels.map((_, j) => cm.reduce((s, r) => s + r[j], 0));
++    const hits = cm.map((r, i) => r[i]);
++    validation = { folds: out.folds, confusion: cm, overall: hits.reduce((a, b) => a + b, 0) / rows.reduce((a, b) => a + b, 0), user: hits.map((h, i) => (rows[i] ? h / rows[i] : null)), producer: hits.map((h, j) => (cols[j] ? h / cols[j] : null)) };
++  }
++  notes.push(
++    `Random forest (Breiman 2001; ${trees} trees in the browser, √bands features per split) on ${d} band${d === 1 ? '' : 's'} (${bands.map(b => `band ${b + 1}`).join(', ')}), trained on ${picked.length.toLocaleString()} pixels from ${shapes.length} shapes labelled by “${field}” (${underShapes.toLocaleString()} under the shapes; at most ${maxPerClass.toLocaleString()} per class, drawn at random). The server version uses 100 trees and 5,000 pixels per class.`,
++  );
++  if (validation)
++    notes.push(`Cross-validation by shape (${out.folds} folds; a shape’s pixels are never split between training and test): ${(validation.overall * 100).toFixed(1)} % of held-out training pixels classified correctly. Training shapes are chosen, not a random sample, so this is not the map’s accuracy: estimate that with a stratified sample.`);
++  else {
++    const few = labels.filter((_, c) => new Set(byClass[c].map(i => group[i])).size < 2);
++    notes.push(`No cross-validation: ${few.join(', ')} ${few.length === 1 ? 'has' : 'have'} only one training shape. Draw at least two per class, apart from each other.`);
++  }
++  if (geo) notes.push(geo.note);
++  if (grids[0].resampleFactor > 1) notes.push(`Classified on a resampled grid (each cell = ${fmt(grids[0].resampleFactor, 3)} original pixels).`);
++  return { filename: raster.meta.filename, bands, k, width, height, classes, stats, iterations: 0, trainingPixels: picked.length, notes, method: 'rf', labels, labelField: field, validation };
+ }
+diff --git a/src/lib/tools/radar.ts b/src/lib/tools/radar.ts
+new file mode 100644
+index 0000000..253f0dc
+--- /dev/null
++++ b/src/lib/tools/radar.ts
+@@ -0,0 +1,197 @@
++// Sentinel-1 (C-band SAR) backscatter: speckle filtering, polarisation indices and change between two dates.
++//  • Inputs: VV and VH backscatter (σ⁰ or γ⁰), in dB (Earth Engine COPERNICUS/S1_GRD) or linear power (ASF RTC),
++//    detected from the values. Speckle is multiplicative, so averages are taken in linear power.
++//  • Lee (1980) filter: x̂ = x̄ + b (z − x̄), b = var(x)/var(z), var(x) = (var(z) − x̄² C_v²)/(1 + C_v²), C_v² = 1/ENL
++//    (ENL ≈ 4.4 for IW GRDH, ESA Sentinel-1 Product Definition).
++//  • Dual-pol RVI = 4 σ⁰VH / (σ⁰VV + σ⁰VH).
++//  • Change: VH log ratio 10·log₁₀(after/before) (Rignot & van Zyl 1993); ≤ −t dB decrease, ≥ +t dB increase.
++import type { Grid } from '../rasterio';
++import { fmt } from '../stats';
++
++export const ENL_IW_GRD = 4.4;
++export const CHANGE_CLASSES = [
++  { id: 1, label: 'Backscatter decrease', color: [239, 68, 68] as [number, number, number] },
++  { id: 2, label: 'No significant change', color: [148, 163, 184] as [number, number, number] },
++  { id: 3, label: 'Backscatter increase', color: [59, 130, 246] as [number, number, number] },
++];
++
++export interface Quartiles {
++  n: number;
++  mean: number;
++  median: number;
++  q1: number;
++  q3: number;
++  min: number;
++  max: number;
++}
++
++/** "db" when the band looks logarithmic (land backscatter in dB is mostly negative), else "linear". */
++export function detectScale(g: Grid): 'db' | 'linear' {
++  const step = Math.max(1, Math.floor(g.data.length / 65536));
++  const v: number[] = [];
++  for (let k = 0; k < g.data.length; k += step) if (Number.isFinite(g.data[k])) v.push(g.data[k]);
++  v.sort((a, b) => a - b);
++  return v.length && v[v.length >> 1] < 0 ? 'db' : 'linear';
++}
++
++export function toLinear(g: Grid, scale: 'db' | 'linear'): Float64Array {
++  const out = new Float64Array(g.data.length);
++  for (let k = 0; k < out.length; k++) {
++    const v = g.data[k];
++    out[k] = !Number.isFinite(v) ? NaN : scale === 'db' ? 10 ** (v / 10) : v > 0 ? v : NaN;
++  }
++  return out;
++}
++
++/** Lee (1980) speckle filter on linear power, size × size window (odd), NaN cells left out of the local statistics. */
++export function leeFilter(z: Float64Array, w: number, h: number, size = 5, enl = ENL_IW_GRD): Float64Array {
++  if (size <= 1) return z.slice();
++  const r = size >> 1, W = w + 1;
++  // Summed-area tables of count, value and value² (O(n) for any window).
++  const sn = new Float64Array(W * (h + 1)), s1 = new Float64Array(W * (h + 1)), s2 = new Float64Array(W * (h + 1));
++  for (let y = 0; y < h; y++) {
++    let rn = 0, r1 = 0, r2 = 0;
++    for (let x = 0; x < w; x++) {
++      const v = z[y * w + x];
++      if (Number.isFinite(v)) (rn += 1), (r1 += v), (r2 += v * v);
++      const k = (y + 1) * W + x + 1;
++      sn[k] = sn[k - W] + rn;
++      s1[k] = s1[k - W] + r1;
++      s2[k] = s2[k - W] + r2;
++    }
++  }
++  const box = (t: Float64Array, x0: number, y0: number, x1: number, y1: number) => t[y1 * W + x1] - t[y0 * W + x1] - t[y1 * W + x0] + t[y0 * W + x0];
++  const cv2 = 1 / enl, out = new Float64Array(z.length);
++  for (let y = 0; y < h; y++) {
++    // At the grid edge the window is truncated to the cells inside it (the server version reflects the grid there, so
++    // the two differ only within size/2 cells of the edge).
++    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
++    for (let x = 0; x < w; x++) {
++      const k = y * w + x, v = z[k];
++      if (!Number.isFinite(v)) {
++        out[k] = NaN;
++        continue;
++      }
++      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
++      const n = box(sn, x0, y0, x1, y1), mean = box(s1, x0, y0, x1, y1) / n;
++      const varZ = Math.max(box(s2, x0, y0, x1, y1) / n - mean * mean, 0);
++      const varX = Math.max((varZ - mean * mean * cv2) / (1 + cv2), 0);
++      const b = varZ > 0 ? varX / varZ : 0;
++      out[k] = mean + b * (v - mean);
++    }
++  }
++  return out;
++}
++
++export function quartiles(values: Float64Array | number[]): Quartiles | null {
++  const v = Float64Array.from(values).sort();
++  if (!v.length) return null;
++  const q = (p: number) => {
++    const hh = (v.length - 1) * p, lo = Math.floor(hh), hi = Math.ceil(hh);
++    return v[lo] + (hh - lo) * (v[hi] - v[lo]);
++  };
++  let s = 0;
++  for (const x of v) s += x;
++  return { n: v.length, mean: s / v.length, median: q(0.5), q1: q(0.25), q3: q(0.75), min: v[0], max: v[v.length - 1] };
++}
++
++const db = (x: number) => 10 * Math.log10(x);
++
++export interface RadarDate {
++  name: string;
++  scale: 'db' | 'linear';
++  vv: Quartiles | null;
++  vh: Quartiles | null;
++  ratio: Quartiles | null;
++  rvi: Quartiles | null;
++}
++
++export interface RadarResult {
++  width: number;
++  height: number;
++  dates: RadarDate[];
++  /** Filtered VV and VH (dB) of the last image, for display. */
++  vvDb: Float32Array;
++  vhDb: Float32Array;
++  change: { classes: Uint8Array; counts: [number, number, number]; logRatio: Quartiles | null } | null;
++  size: number;
++  enl: number;
++  thresholdDb: number;
++}
++
++/** Per-date statistics and, for two images, the VH log-ratio change classes (1 decrease, 2 stable, 3 increase; 0 no data). */
++export function analyzeRadar(images: { name: string; vv: Grid; vh: Grid; scale?: 'db' | 'linear' }[], mask: Uint8Array | null, size = 5, enl = ENL_IW_GRD, thresholdDb = 3): RadarResult {
++  const { width: w, height: h } = images[0].vv;
++  const filtered = images.map(im => {
++    const scale = im.scale ?? detectScale(im.vv);
++    const lin = [toLinear(im.vv, scale), toLinear(im.vh, scale)];
++    if (mask) for (const a of lin) for (let k = 0; k < a.length; k++) if (!mask[k]) a[k] = NaN;
++    return { name: im.name, scale, vv: leeFilter(lin[0], w, h, size, enl), vh: leeFilter(lin[1], w, h, size, enl) };
++  });
++  const dates: RadarDate[] = filtered.map(f => {
++    const vv: number[] = [], vh: number[] = [], ratio: number[] = [], rvi: number[] = [];
++    for (let k = 0; k < f.vv.length; k++) {
++      const a = f.vv[k], b = f.vh[k];
++      if (!(Number.isFinite(a) && Number.isFinite(b))) continue;
++      vv.push(db(a));
++      vh.push(db(b));
++      ratio.push(db(b / a));
++      rvi.push((4 * b) / (a + b));
++    }
++    return { name: f.name, scale: f.scale, vv: quartiles(vv), vh: quartiles(vh), ratio: quartiles(ratio), rvi: quartiles(rvi) };
++  });
++  const last = filtered[filtered.length - 1];
++  const vvDb = Float32Array.from(last.vv, db), vhDb = Float32Array.from(last.vh, db);
++  let change: RadarResult['change'] = null;
++  if (filtered.length === 2) {
++    const classes = new Uint8Array(w * h);
++    const counts: [number, number, number] = [0, 0, 0];
++    const lr: number[] = [];
++    for (let k = 0; k < classes.length; k++) {
++      const d = db(filtered[1].vh[k] / filtered[0].vh[k]);
++      if (!Number.isFinite(d)) continue;
++      lr.push(d);
++      const c = d <= -thresholdDb ? 1 : d >= thresholdDb ? 3 : 2;
++      classes[k] = c;
++      counts[c - 1]++;
++    }
++    change = { classes, counts, logRatio: quartiles(lr) };
++  }
++  return { width: w, height: h, dates, vvDb, vhDb, change, size, enl, thresholdDb };
++}
++
++/** Sentinel-1 false colour: R = VV (−25…0 dB), G = VH (−30…−5 dB), B = VV/VH (0…15 dB). */
++export function compositeRgba(r: RadarResult): Uint8ClampedArray {
++  const out = new Uint8ClampedArray(r.width * r.height * 4);
++  const s = (v: number, lo: number, hi: number) => ((v - lo) / (hi - lo)) * 255;
++  for (let k = 0; k < r.vvDb.length; k++) {
++    const a = r.vvDb[k], b = r.vhDb[k];
++    if (!(Number.isFinite(a) && Number.isFinite(b))) continue;
++    out.set([s(a, -25, 0), s(b, -30, -5), s(a - b, 0, 15), 255], k * 4);
++  }
++  return out;
++}
++
++export function changeRgba(classes: Uint8Array): Uint8ClampedArray {
++  const out = new Uint8ClampedArray(classes.length * 4);
++  for (let k = 0; k < classes.length; k++) {
++    const c = classes[k];
++    if (c === 1 || c === 3) out.set([...CHANGE_CLASSES[c - 1].color, 220], k * 4);
++  }
++  return out;
++}
++
++export function radarMarkdown(r: RadarResult, areas: [number, number, number] | null, notes: string[]): string {
++  const q = (s: Quartiles | null) => (s ? `${fmt(s.median, 3)} (${fmt(s.q1, 3)} to ${fmt(s.q3, 3)})` : '—');
++  const lines = ['## Dataset', '', ...r.dates.map((d, i) => `- Image ${i + 1}: ${d.name}`), '', '## Results', '', '| Image | VV dB | VH dB | VH/VV dB | RVI |', '|---|---|---|---|---|'];
++  for (const d of r.dates) lines.push(`| ${d.name} | ${q(d.vv)} | ${q(d.vh)} | ${q(d.ratio)} | ${q(d.rvi)} |`);
++  lines.push('', 'Values are medians (quartiles) over the area.');
++  if (r.change) {
++    const valid = r.change.counts.reduce((a, b) => a + b, 0) || 1;
++    lines.push('', '### Change (VH log ratio)', '', '| Class | Area | Share |', '|---|---|---|');
++    CHANGE_CLASSES.forEach((c, i) => lines.push(`| ${c.label} | ${areas ? `${fmt(areas[i], 4)} ha` : `${r.change!.counts[i].toLocaleString()} px`} | ${((r.change!.counts[i] / valid) * 100).toFixed(1)} % |`));
++    if (r.change.logRatio) lines.push('', `Median log ratio ${fmt(r.change.logRatio.median, 3)} dB (quartiles ${fmt(r.change.logRatio.q1, 3)} to ${fmt(r.change.logRatio.q3, 3)}).`);
++  }
++  lines.push('', '## Method and limits', '', ...notes.map(n => `- ${n}`));
++  return lines.join('\n');
++}
+diff --git a/src/lib/tools/randomforest.ts b/src/lib/tools/randomforest.ts
+new file mode 100644
+index 0000000..9ca0ab6
+--- /dev/null
++++ b/src/lib/tools/randomforest.ts
+@@ -0,0 +1,173 @@
++// Random forest classifier (Breiman 2001): CART trees on bootstrap samples, Gini splits over √d random features
++// per node, grown to purity; prediction averages the leaves' class fractions (as scikit-learn's predict).
++import { rng } from './kmeans';
++
++export interface Forest {
++  classes: number;
++  d: number;
++  /** Per node: feature (−1 = leaf), threshold, left and right child (absolute indices). */
++  feature: Int32Array;
++  threshold: Float64Array;
++  left: Int32Array;
++  right: Int32Array;
++  /** Leaf class fractions, `classes` per node. */
++  value: Float64Array;
++  roots: Int32Array;
++}
++
++/** Fits `trees` CART trees; X is n × d row-major, y holds class indices 0..classes−1. */
++export function fitForest(X: Float64Array, y: Int32Array, d: number, classes: number, trees = 100, seed = 7): Forest {
++  const n = y.length;
++  const rand = rng(seed);
++  const mtry = Math.max(1, Math.floor(Math.sqrt(d)));
++  const feature: number[] = [], threshold: number[] = [], left: number[] = [], right: number[] = [], value: number[] = [], roots: number[] = [];
++  const counts = new Float64Array(classes), leftCounts = new Float64Array(classes);
++
++  const leaf = (idx: Int32Array, w: Float64Array) => {
++    const at = feature.length;
++    feature.push(-1), threshold.push(0), left.push(-1), right.push(-1);
++    counts.fill(0);
++    let total = 0;
++    for (const i of idx) (counts[y[i]] += w[i]), (total += w[i]);
++    for (let c = 0; c < classes; c++) value.push(total ? counts[c] / total : 0);
++    return at;
++  };
++
++  const grow = (idx: Int32Array, w: Float64Array): number => {
++    counts.fill(0);
++    let total = 0;
++    for (const i of idx) (counts[y[i]] += w[i]), (total += w[i]);
++    let pure = 0;
++    for (let c = 0; c < classes; c++) if (counts[c] > 0) pure++;
++    if (pure <= 1 || idx.length < 2) return leaf(idx, w);
++    let parentGini = 1;
++    for (let c = 0; c < classes; c++) parentGini -= (counts[c] / total) ** 2;
++    // √d features drawn without replacement (partial Fisher–Yates).
++    const feats = Array.from({ length: d }, (_, a) => a);
++    for (let a = 0; a < mtry; a++) {
++      const b = a + Math.floor(rand() * (d - a));
++      [feats[a], feats[b]] = [feats[b], feats[a]];
++    }
++    let bestGain = 1e-12, bestF = -1, bestT = 0;
++    const order = Array.from(idx);
++    for (let fi = 0; fi < mtry; fi++) {
++      const f = feats[fi];
++      order.sort((a, b) => X[a * d + f] - X[b * d + f]);
++      leftCounts.fill(0);
++      let lw = 0;
++      for (let p = 0; p < order.length - 1; p++) {
++        const i = order[p];
++        leftCounts[y[i]] += w[i];
++        lw += w[i];
++        const v = X[i * d + f], next = X[order[p + 1] * d + f];
++        if (v === next) continue;
++        const rw = total - lw;
++        let gl = 1, gr = 1;
++        for (let c = 0; c < classes; c++) {
++          gl -= (leftCounts[c] / lw) ** 2;
++          gr -= ((counts[c] - leftCounts[c]) / rw) ** 2;
++        }
++        const gain = parentGini - (lw / total) * gl - (rw / total) * gr;
++        if (gain > bestGain) (bestGain = gain), (bestF = f), (bestT = (v + next) / 2);
++      }
++    }
++    if (bestF < 0) return leaf(idx, w);
++    const at = feature.length;
++    feature.push(bestF), threshold.push(bestT), left.push(-1), right.push(-1);
++    for (let c = 0; c < classes; c++) value.push(0);
++    const l: number[] = [], r: number[] = [];
++    for (const i of idx) (X[i * d + bestF] <= bestT ? l : r).push(i);
++    const li = grow(Int32Array.from(l), w);
++    left[at] = li;
++    const ri = grow(Int32Array.from(r), w);
++    right[at] = ri;
++    return at;
++  };
++
++  for (let t = 0; t < trees; t++) {
++    // Bootstrap: n draws with replacement, kept as integer weights on the distinct rows.
++    const w = new Float64Array(n);
++    for (let i = 0; i < n; i++) w[Math.floor(rand() * n)]++;
++    const idx: number[] = [];
++    for (let i = 0; i < n; i++) if (w[i] > 0) idx.push(i);
++    roots.push(grow(Int32Array.from(idx), w));
++  }
++  return { classes, d, feature: Int32Array.from(feature), threshold: Float64Array.from(threshold), left: Int32Array.from(left), right: Int32Array.from(right), value: Float64Array.from(value), roots: Int32Array.from(roots) };
++}
++
++/** Class index per row of X (n × d): argmax of the summed leaf fractions, first maximum on ties. */
++export function predictForest(f: Forest, X: Float64Array | Float32Array, n: number, out = new Int32Array(n)): Int32Array {
++  const { d, classes: k, feature, threshold, left, right, value, roots } = f;
++  const acc = new Float64Array(k);
++  for (let i = 0; i < n; i++) {
++    acc.fill(0);
++    const o = i * d;
++    for (let t = 0; t < roots.length; t++) {
++      let node = roots[t];
++      while (feature[node] >= 0) node = X[o + feature[node]] <= threshold[node] ? left[node] : right[node];
++      for (let c = 0; c < k; c++) acc[c] += value[node * k + c];
++    }
++    let best = 0;
++    for (let c = 1; c < k; c++) if (acc[c] > acc[best]) best = c;
++    out[i] = best;
++  }
++  return out;
++}
++
++export interface ForestJob {
++  /** Training pixels (n × d), classes 0..k−1, and the training shape each pixel came from. */
++  X: Float64Array;
++  y: Int32Array;
++  groups: Int32Array;
++  d: number;
++  k: number;
++  /** Pixels to classify (m × d). */
++  Q: Float32Array;
++  trees: number;
++  seed: number;
++}
++
++export interface ForestOutcome {
++  pred: Int32Array;
++  folds: number;
++  /** Cross-validation counts by shape, rows: predicted, columns: reference; null with fewer than two shapes in a class. */
++  confusion: number[][] | null;
++}
++
++/**
++ * Cross-validation grouped by training shape (a shape's pixels never split between training and test; each class's
++ * shapes are dealt to the folds in turn, so every fold holds every class), then the forest on all pixels.
++ */
++export function trainValidatePredict(j: ForestJob): ForestOutcome {
++  const { X, y, groups, d, k } = j;
++  const byClass: number[][] = Array.from({ length: k }, () => []);
++  const seen = new Set<number>();
++  for (let i = 0; i < y.length; i++) if (!seen.has(groups[i])) seen.add(groups[i]), byClass[y[i]].push(groups[i]);
++  const folds = Math.min(5, ...byClass.map(g => g.length));
++  let confusion: number[][] | null = null;
++  if (folds >= 2) {
++    const rand = rng(j.seed + 303);
++    const foldOf = new Map<number, number>();
++    for (const g of byClass) {
++      for (let a = g.length - 1; a > 0; a--) {
++        const b = Math.floor(rand() * (a + 1));
++        [g[a], g[b]] = [g[b], g[a]];
++      }
++      g.forEach((id, p) => foldOf.set(id, p % folds));
++    }
++    confusion = Array.from({ length: k }, () => new Array(k).fill(0));
++    for (let f = 0; f < folds; f++) {
++      const tr: number[] = [], te: number[] = [];
++      for (let i = 0; i < y.length; i++) (foldOf.get(groups[i]) === f ? te : tr).push(i);
++      const Xt = new Float64Array(tr.length * d), yt = new Int32Array(tr.length);
++      tr.forEach((i, r) => (Xt.set(X.subarray(i * d, i * d + d), r * d), (yt[r] = y[i])));
++      const model = fitForest(Xt, yt, d, k, j.trees, j.seed + f);
++      const Xe = new Float64Array(te.length * d);
++      te.forEach((i, r) => Xe.set(X.subarray(i * d, i * d + d), r * d));
++      const p = predictForest(model, Xe, te.length);
++      te.forEach((i, r) => confusion![p[r]][y[i]]++);
++    }
++  }
++  const forest = fitForest(X, y, d, k, j.trees, j.seed);
++  return { pred: predictForest(forest, j.Q, j.Q.length / d), folds, confusion };
++}
+diff --git a/src/lib/tools/registry.ts b/src/lib/tools/registry.ts
+index 1ece22e..5b0d990 100644
+--- a/src/lib/tools/registry.ts
++++ b/src/lib/tools/registry.ts
+@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
+ import type { LatLngBounds } from '../geo';
+ import type { Dataset } from '../types';
+ 
+-export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'terrain' | 'photo';
++export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'radar' | 'canopy' | 'terrain' | 'photo';
+ 
+ export interface ToolInfo {
+   id: ToolId;
+@@ -76,16 +76,34 @@ export const TOOLS: ToolInfo[] = [
+     name: 'Land cover',
+     group: 'Remote sensing',
+     summary: 'Group pixels into spectral classes, name them and measure their areas.',
+-    measures: ['k-means clusters on chosen bands', 'Area and share per class', 'Editable class names and CSV export'],
++    measures: ['k-means clusters or a random forest from training shapes', 'Area and share per class', 'Validation sample, accuracy and area estimates with 95 % CIs'],
+     formats: 'Multiband GeoTIFF',
+     mark: 'Lc',
+   },
++  {
++    id: 'radar',
++    name: 'Radar (Sentinel-1)',
++    group: 'Remote sensing',
++    summary: 'Backscatter through cloud: speckle filtering, polarisation indices and change between two dates.',
++    measures: ['Lee speckle filter, VV, VH, VH/VV and RVI', 'VH log-ratio change map with areas', 'Works on dB or linear inputs'],
++    formats: 'Sentinel-1 GeoTIFF (VV, VH; dB or linear)',
++    mark: 'Sa',
++  },
++  {
++    id: 'canopy',
++    name: 'Canopy height',
++    group: 'Elevation',
++    summary: 'Canopy height, cover and tree tops from LiDAR or surface and ground models.',
++    measures: ['Canopy height model from LAS/LAZ', 'Canopy cover (2 m and FAO 5 m) and height classes', 'Tree tops with heights (GeoJSON)'],
++    formats: 'LAS · LAZ · DSM + DTM or CHM GeoTIFF',
++    mark: 'Ch',
++  },
+   {
+     id: 'terrain',
+     name: 'Terrain',
+     group: 'Elevation',
+     summary: 'Derive slope, aspect, relief, streams and watersheds from an elevation model.',
+-    measures: ['Slope, aspect, hillshade and relief', 'Streams, Strahler order and watersheds', 'Contours (GeoJSON)'],
++    measures: ['Slope, aspect, hillshade and relief', 'Streams, Strahler order, watersheds; D∞ wetness index', 'Contours (GeoJSON)'],
+     formats: 'DEM GeoTIFF (SRTM, ASTER, Copernicus)',
+     mark: 'Te',
+   },
 diff --git a/src/lib/tools/survey.ts b/src/lib/tools/survey.ts
 index 365425d..a2558d1 100644
 --- a/src/lib/tools/survey.ts
@@ -798,6 +3463,188 @@ index 365425d..a2558d1 100644
      ...(r.features.some(f => elevationProfile(f))
        ? ['- Elevations come from the file (GPS or a DEM in the source software). GPS heights are typically about 1.5–3 times less precise than horizontal positions, and that noise inflates a summed ascent, so a 5 m threshold is also shown.']
        : []),
+diff --git a/src/lib/zonal.ts b/src/lib/zonal.ts
+index 81feba8..75eace5 100644
+--- a/src/lib/zonal.ts
++++ b/src/lib/zonal.ts
+@@ -4,6 +4,7 @@
+ // inside the polygon (even-odd rule, so holes are excluded).
+ import type { Feature, FeatureCollection, MultiPolygon, Polygon, Position } from 'geojson';
+ import { latLonToUtm } from './geo';
++import { crsForward } from './crs';
+ import type { GeoMeta, Grid } from './rasterio';
+ 
+ export interface Boundary {
+@@ -35,6 +36,7 @@ export function projector(meta: GeoMeta): ((lon: number, lat: number) => [number
+       return [u.easting, south ? (u.south ? u.northing : u.northing + 10_000_000) : u.south ? u.northing - 10_000_000 : u.northing];
+     };
+   }
++  if (meta.crs) return crsForward(meta.crs);
+   return null;
+ }
+ 
+@@ -63,7 +65,7 @@ export interface MaskResult {
+ export function boundaryMask(meta: GeoMeta, grid: Grid, boundary: Boundary): MaskResult {
+   if (!meta.bbox) throw new Error('This raster has no georeferencing, so it cannot be clipped to a boundary.');
+   const proj = projector(meta);
+-  if (!proj) throw new Error(`Clipping to a boundary needs a WGS84, Web Mercator or UTM raster (this one is ${meta.epsg ? `EPSG:${meta.epsg}` : 'in an unknown CRS'}).`);
++  if (!proj) throw new Error(`Clipping to a boundary needs a raster with a coordinate reference system Proj4 can convert (this one is ${meta.epsg ? `EPSG:${meta.epsg}` : 'in an unknown CRS'}).`);
+   const [minX, minY, maxX, maxY] = meta.bbox;
+   const cw = (maxX - minX) / grid.width;
+   const ch = (maxY - minY) / grid.height;
+diff --git a/src/vite-env.d.ts b/src/vite-env.d.ts
+index 0f99c87..551ee03 100644
+--- a/src/vite-env.d.ts
++++ b/src/vite-env.d.ts
+@@ -25,3 +25,9 @@ declare module 'world-atlas/land-50m.json' {
+   const topology: import('topojson-specification').Topology;
+   export default topology;
+ }
++
++/** WebAssembly embedded as base64 by the wasm-base64 plugin in vite.config.ts. */
++declare module '*.wasm?base64' {
++  const base64: string;
++  export default base64;
++}
+diff --git a/src/workers/compute.worker.ts b/src/workers/compute.worker.ts
+index c5faac7..764e717 100644
+--- a/src/workers/compute.worker.ts
++++ b/src/workers/compute.worker.ts
+@@ -1,10 +1,12 @@
+ // Runs heavy raster computations off the main thread so the page stays responsive.
+ import { flowRouting } from '../lib/tools/hydrology';
+ import { kmeans } from '../lib/tools/kmeans';
++import { trainValidatePredict, type ForestJob } from '../lib/tools/randomforest';
+ 
+ type Msg =
+-  | { id: number; kind: 'flow'; width: number; height: number; data: Float32Array; dx: Float64Array; dy: Float64Array; area: Float64Array; threshold: number }
+-  | { id: number; kind: 'kmeans'; points: Float64Array; d: number; k: number; seed: number };
++  | { id: number; kind: 'flow'; width: number; height: number; data: Float32Array; dx: Float64Array; dy: Float64Array; area: Float64Array; threshold: number; dinf: boolean }
++  | { id: number; kind: 'kmeans'; points: Float64Array; d: number; k: number; seed: number }
++  | ({ id: number; kind: 'forest' } & ForestJob);
+ 
+ self.onmessage = (e: MessageEvent<Msg>) => {
+   const m = e.data;
+@@ -15,8 +17,12 @@ self.onmessage = (e: MessageEvent<Msg>) => {
+         { width: m.width, height: m.height, data: m.data, resampleFactor: 1 },
+         { spacing: r => ({ dx: m.dx[r], dy: m.dy[r] }), cellArea: r => m.area[r] },
+         m.threshold,
++        m.dinf,
+       );
+-      post({ id: m.id, ok: true, result: f }, [f.dir.buffer, f.acc.buffer, f.order.buffer]);
++      post({ id: m.id, ok: true, result: f }, [f.dir.buffer, f.acc.buffer, f.order.buffer, ...(f.wetness ? [f.wetness.buffer] : [])]);
++    } else if (m.kind === 'forest') {
++      const r = trainValidatePredict(m);
++      post({ id: m.id, ok: true, result: r }, [r.pred.buffer]);
+     } else {
+       const r = kmeans(m.points, m.d, m.k, m.seed);
+       post({ id: m.id, ok: true, result: r }, [r.centroids.buffer]);
+diff --git a/tests/accuracy.test.ts b/tests/accuracy.test.ts
+new file mode 100644
+index 0000000..6196073
+--- /dev/null
++++ b/tests/accuracy.test.ts
+@@ -0,0 +1,68 @@
++import assert from 'node:assert/strict';
++import { test } from 'node:test';
++import { allocate, assess, stratifiedSample } from '../src/lib/tools/accuracy';
++import { fitForest, predictForest } from '../src/lib/tools/randomforest';
++
++test('Olofsson et al. (2014) worked example: areas, user’s, producer’s and overall accuracy', () => {
++  const counts = [[66, 0, 5, 4], [0, 55, 8, 12], [1, 0, 153, 11], [2, 1, 9, 313]];
++  const px = [200_000, 150_000, 3_200_000, 6_450_000];
++  const r = assess(counts, px.map(p => p * 0.09), ['Deforestation', 'Forest gain', 'Stable forest', 'Stable non-forest']);
++  const published: [number, number][] = [[21_158, 6_158], [11_686, 3_756], [285_770, 15_510], [581_386, 16_282]];
++  r.classes.forEach((c, i) => {
++    assert.ok(Math.abs(c.area - published[i][0]) <= 1, `${c.label} area ${c.area}`);
++    assert.ok(Math.abs(c.areaCi! - published[i][1]) <= 2, `${c.label} CI ${c.areaCi}`);
++  });
++  assert.ok(Math.abs(r.overallAccuracy - 0.95) < 0.005 && Math.abs(r.overallCi! - 0.02) < 0.005);
++  assert.ok(Math.abs(r.classes[0].userAccuracy! - 0.88) < 0.005 && Math.abs(r.classes[0].userCi! - 0.07) < 0.005);
++  assert.ok(Math.abs(r.classes[0].producerAccuracy! - 0.75) < 0.005);
++});
++
++test('allocation and stratified sampling', () => {
++  const sizes = allocate([700, 200, 100], 300, 50);
++  assert.deepEqual(sizes.reduce((a, b) => a + b, 0), 300);
++  assert.ok(sizes.every(s => s >= 50));
++  const map = new Uint8Array(1000).map((_, k) => (k < 700 ? 1 : k < 900 ? 2 : 3));
++  const pts = stratifiedSample(map, [1, 2, 3], sizes, 3);
++  assert.equal(pts.length, 300);
++  assert.equal(new Set(pts.map(p => p.cell)).size, 300);
++  assert.ok(pts.every(p => map[p.cell] === p.cls));
++  // A class smaller than its allocation gives all its cells, as on the server.
++  assert.equal(stratifiedSample(map, [3], [150], 3).length, 100);
++});
++
++test('random forest separates learnable classes', () => {
++  let s = 3;
++  const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
++  const n = 3000, d = 3, X = new Float64Array(n * d), y = new Int32Array(n);
++  for (let i = 0; i < n; i++) {
++    for (let a = 0; a < d; a++) X[i * d + a] = r();
++    y[i] = X[i * d] > 0.6 ? 2 : X[i * d + 1] > 0.5 ? 1 : 0;
++  }
++  const f = fitForest(X, y, d, 3, 30, 7);
++  const Q = new Float64Array(2000 * d).map(() => r());
++  const p = predictForest(f, Q, 2000);
++  let ok = 0;
++  for (let i = 0; i < 2000; i++) ok += +(p[i] === (Q[i * d] > 0.6 ? 2 : Q[i * d + 1] > 0.5 ? 1 : 0));
++  assert.ok(ok / 2000 > 0.97, `accuracy ${ok / 2000}`);
++});
++
++test('supervised land cover on the sample scene matches its true geometry', async () => {
++  const { readFileSync } = await import('node:fs');
++  const { openGeoTiff } = await import('../src/lib/rasterio');
++  const { classifySupervised } = await import('../src/lib/tools/landcover');
++  const dir = new URL('../public/data/samples/', import.meta.url);
++  const raster = await openGeoTiff(new File([readFileSync(new URL('satellite_4band_synthetic.tif', dir))], 'scene.tif'));
++  const training = JSON.parse(readFileSync(new URL('landcover_training_synthetic.geojson', dir), 'utf8'));
++  const r = await classifySupervised(raster, { bands: [0, 1, 2, 3], training, roles: { red: 2, nir: 3 } });
++  assert.deepEqual(r.labels, ['Built-up', 'Forest', 'Water']);
++  assert.equal(r.validation?.folds, 2);
++  assert.ok(r.validation!.overall > 0.95);
++  // scripts/make_samples.py: river |x − 60 − 0.2y| < 4, town within 22 px of (200, 40), forest elsewhere.
++  let ok = 0;
++  for (let row = 0; row < r.height; row++) for (let col = 0; col < r.width; col++) {
++    const x = col + 0.5, y = row + 0.5;
++    const truth = Math.abs(x - 60 - y * 0.2) < 4 ? 3 : (x - 200) ** 2 + (y - 40) ** 2 < 22 ** 2 ? 1 : 2;
++    ok += +(r.classes[row * r.width + col] === truth);
++  }
++  assert.ok(ok / (r.width * r.height) > 0.95, `agreement ${ok / (r.width * r.height)}`);
++});
+diff --git a/tests/canopy.test.ts b/tests/canopy.test.ts
+new file mode 100644
+index 0000000..8e33247
+--- /dev/null
++++ b/tests/canopy.test.ts
+@@ -0,0 +1,26 @@
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import { test } from 'node:test';
++import { analyzeCanopy, chmFromLas, parseLasHeader } from '../src/lib/tools/canopy';
++
++const laz = readFileSync(new URL('../public/data/samples/lidar_forest_synthetic.laz', import.meta.url));
++const buf = laz.buffer.slice(laz.byteOffset, laz.byteOffset + laz.byteLength);
++
++test('LAZ header: format, count, CRS', () => {
++  const h = parseLasHeader(buf);
++  assert.equal(h.compressed, true);
++  assert.equal(h.count, 297_949);
++  assert.equal(h.epsg, 32646);
++  assert.equal(h.unit, 1);
++});
++
++test('canopy from the LAZ sample matches the Python server (laspy + numpy) result', async () => {
++  const g = await chmFromLas(buf, 1);
++  assert.deepEqual([g.width, g.height, g.points, g.ground, g.filled], [120, 120, 297_949, 264_812, 3]);
++  const r = analyzeCanopy(g.chm, g.width, g.height, () => 1, 1, 2, 5);
++  // Server: cover 0.138333, FAO 0.137292, median 13.26 m, max 29.1 m, 25 tree tops.
++  assert.ok(Math.abs(r.cover - 0.138333) < 1e-4, `cover ${r.cover}`);
++  assert.ok(Math.abs(r.coverFao - 0.137292) < 1e-4, `FAO cover ${r.coverFao}`);
++  assert.ok(Math.abs(r.height.median! - 13.26) < 0.01 && Math.abs(r.height.max! - 29.1) < 0.01);
++  assert.equal(r.trees.count, 25);
++});
 diff --git a/tests/carbon.test.ts b/tests/carbon.test.ts
 index c0945a3..1becb15 100644
 --- a/tests/carbon.test.ts
@@ -846,6 +3693,131 @@ index 8922f0e..54f52f4 100644
    // Zero months: probability of zero enters H, so a dry month gets a negative SPI.
    const dry = computeSpi(monthlySeries(40, (y, m) => (m === 0 && y % 4 === 0 ? 0 : 50 + ((y * 7 + m * 3) % 11))), 1, false);
    const jan0 = dry.rows.find(x => x.month === 0 && x.year === 2000)!;
+diff --git a/tests/crs.test.ts b/tests/crs.test.ts
+new file mode 100644
+index 0000000..2e982a8
+--- /dev/null
++++ b/tests/crs.test.ts
+@@ -0,0 +1,30 @@
++import assert from 'node:assert/strict';
++import { test } from 'node:test';
++import { writeArrayBuffer } from 'geotiff';
++import { groundGeometry, openGeoTiff } from '../src/lib/rasterio';
++import { projector } from '../src/lib/zonal';
++import { unprojector } from '../src/lib/patches';
++
++async function grid(epsg: number, x0: number, y1: number, cell: number, n = 50) {
++  const buf = await writeArrayBuffer(new Float32Array(n * n).fill(1), { width: n, height: n, ModelPixelScale: [cell, cell, 0], ModelTiepoint: [0, 0, 0, x0, y1, 0], GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: epsg });
++  return openGeoTiff(new File([buf], `epsg${epsg}.tif`));
++}
++
++// Expected values from the Python server (pyproj Geod on the same grids, terrax.processing.rio._geodesic_ground).
++for (const [epsg, x0, y1, cell, dx, area0, areaLast] of [
++  [2263, 980_000, 220_000, 100, 30.48018713551553, 929.0418047885818, 929.0411503740414], // NY Long Island, US survey feet
++  [7755, 7_000_000, 3_000_000, 30, 29.965786580983814, 897.9480327900723, 897.8665745869852], // WGS 84 / India NSF LCC, metres
++] as const) {
++  test(`EPSG:${epsg}: ground units match the server's geodesic measurement`, async () => {
++    const r = await grid(epsg, x0, y1, cell);
++    assert.ok(r.meta.crs, 'custom CRS read from the geokeys');
++    assert.ok(r.meta.latLngBounds, 'footprint on the map');
++    const g = groundGeometry(r.meta, { width: 50, height: 50 })!;
++    assert.ok(Math.abs(g.spacing(0).dx / dx - 1) < 1e-6, `dx ${g.spacing(0).dx}`);
++    assert.ok(Math.abs(g.cellArea(0) / area0 - 1) < 1e-6 && Math.abs(g.cellArea(49) / areaLast - 1) < 1e-6, `area ${g.cellArea(0)}`);
++    // Projection round trip.
++    const [lon, lat] = unprojector(r.meta)!(x0 + 5 * cell, y1 - 7 * cell);
++    const [x, y] = projector(r.meta)!(lon, lat);
++    assert.ok(Math.abs(x - (x0 + 5 * cell)) < 1e-4 && Math.abs(y - (y1 - 7 * cell)) < 1e-4);
++  });
++}
+diff --git a/tests/e2e/helpers.ts b/tests/e2e/helpers.ts
+index ddae1ec..f6c4a32 100644
+--- a/tests/e2e/helpers.ts
++++ b/tests/e2e/helpers.ts
+@@ -12,7 +12,8 @@ export async function start(page: Page, name = 'Test Operator') {
+ }
+ 
+ export async function openTool(page: Page, name: string) {
+-  await page.locator('.tool-card', { hasText: name }).click();
++  // The exact card title: hasText matches any card whose text mentions the name.
++  await page.locator(`.tool-card[data-name="${name}"]`).click();
+   await expect(page.locator('.tool-workspace h2', { hasText: name })).toBeVisible();
+ }
+ 
+diff --git a/tests/e2e/newtools.spec.ts b/tests/e2e/newtools.spec.ts
+new file mode 100644
+index 0000000..9f2894b
+--- /dev/null
++++ b/tests/e2e/newtools.spec.ts
+@@ -0,0 +1,69 @@
++import { expect, test } from '@playwright/test';
++import { readFile } from 'node:fs/promises';
++import { openTool, start } from './helpers';
++
++test('terrain: D∞ flow adds a wetness index layer', async ({ page }) => {
++  const errors = await start(page);
++  await openTool(page, 'Terrain');
++  await page.click('button:has-text("Try synthetic DEM")');
++  await page.selectOption('#terrain-flow-method', 'dinf');
++  await page.click('#terrain-flow');
++  await expect(page.locator('.stat', { hasText: 'Median wetness index' })).toBeVisible();
++  await page.click('[role="tab"]:has-text("Wetness (TWI)")');
++  await expect(page.locator('figcaption .legend-labels')).toContainText('ln(a / tan β)');
++  await expect(page.locator('.report-card')).toContainText('Topographic wetness index');
++  expect(errors).toEqual([]);
++});
++
++test('radar: speckle-filtered Sentinel-1 pair maps the clearing', async ({ page }) => {
++  const errors = await start(page);
++  await openTool(page, 'Radar (Sentinel-1)');
++  await page.click('button:has-text("Try synthetic pair")');
++  const stat = page.locator('.stat', { hasText: 'VH decrease' }).locator('.stat-value');
++  await expect(stat).toContainText('ha');
++  const ha = Number((await stat.innerText()).split(' ')[0]);
++  expect(ha).toBeGreaterThan(25);
++  expect(ha).toBeLessThan(35); // the 600 m × 500 m clearing is 30 ha
++  await expect(page.locator('.report-card')).toContainText('Lee (1980)');
++  expect(errors).toEqual([]);
++});
++
++test('canopy: LiDAR point cloud (LAZ) gives height, cover and 25 tree tops', async ({ page }) => {
++  const errors = await start(page);
++  await openTool(page, 'Canopy height');
++  await page.click('button:has-text("Try synthetic LiDAR")');
++  await expect(page.locator('.stat', { hasText: 'Tree tops' })).toContainText('25', { timeout: 60_000 });
++  await expect(page.locator('.stat', { hasText: 'Canopy cover' })).toContainText('13.8 %');
++  await expect(page.locator('.report-card')).toContainText('Popescu & Wynne');
++  // The GeoJSON export is offered only when the point cloud's CRS can be placed on the map.
++  await expect(page.locator('button:has-text("Export tree tops (GeoJSON)")')).toBeVisible();
++  expect(errors).toEqual([]);
++});
++
++test('land cover: random forest, validation sample and accuracy', async ({ page }) => {
++  const errors = await start(page);
++  await openTool(page, 'Land cover');
++  await page.selectOption('#landcover-method', 'rf');
++  await page.click('button:has-text("Try synthetic scene")');
++  await expect(page.locator('.stat', { hasText: 'Cross-validated by shape' })).toBeVisible({ timeout: 60_000 });
++  await expect(page.locator('#landcover-label-1')).toHaveValue('Built-up');
++  await page.fill('#landcover-sample-total', '90');
++  await page.fill('#landcover-sample-min', '20');
++  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#landcover-sample')]);
++  expect(dl.suggestedFilename()).toMatch(/_validation_sample\.csv$/);
++  const csv = await readFile((await dl.path())!, 'utf8');
++  const [head, ...lines] = csv.trim().split(/\r?\n/);
++  const cols = head.split(',');
++  const at = (n: string) => cols.indexOf(n);
++  expect(lines).toHaveLength(90);
++  const labelled = [head, ...lines.map(l => {
++    const v = l.split(',');
++    const x = Number(v[at('col')]) + 0.5, y = Number(v[at('row')]) + 0.5;
++    v[at('reference')] = Math.abs(x - 60 - y * 0.2) < 4 ? 'Water' : (x - 200) ** 2 + (y - 40) ** 2 < 22 ** 2 ? 'Built-up' : 'Forest';
++    return v.join(',');
++  })].join('\n');
++  await page.setInputFiles('#landcover-reference', { name: 'labelled.csv', mimeType: 'text/csv', buffer: Buffer.from(labelled) });
++  await expect(page.locator('#landcover-accuracy tbody tr')).toHaveCount(3);
++  await expect(page.locator('.report-card')).toContainText('Accuracy and area (stratified sample)');
++  expect(errors).toEqual([]);
++});
 diff --git a/tests/encroachment.test.ts b/tests/encroachment.test.ts
 index 20ff148..7234fb1 100644
 --- a/tests/encroachment.test.ts
@@ -890,10 +3862,10 @@ index 20ff148..7234fb1 100644
 +  for (let i = 0; i < thin.height; i++) for (let j = 0; j < thin.width; j++) assert.equal(thin.data[0][i * thin.width + j], full.data[0][i * 4 * full.width + j * 4]);
 +});
 diff --git a/tests/hydrology.test.ts b/tests/hydrology.test.ts
-index 79048b8..032a95f 100644
+index 79048b8..8d969d2 100644
 --- a/tests/hydrology.test.ts
 +++ b/tests/hydrology.test.ts
-@@ -66,3 +66,18 @@ test('contours: a plane gives one straight chained line per level', () => {
+@@ -66,3 +66,56 @@ test('contours: a plane gives one straight chained line per level', () => {
    assert.equal(niceInterval(730), 50);
    assert.equal(niceInterval(18), 2);
  });
@@ -911,6 +3883,97 @@ index 79048b8..032a95f 100644
 +  const none = mapStreams(fc(line(4, MAP_STREAM_POINTS + 1)));
 +  assert.equal(none.fc.features.length, 0);
 +  assert.match(none.note ?? '', /\(1 line\) is too large to draw/);
++});
++
++test('D∞ specific catchment area on a cone (a = r/2) and planes (a = upslope length), with mass balance', async () => {
++  const { dinfFlow, fillDepressions, flowRouting } = await import('../src/lib/tools/hydrology');
++  const n = 201, c0 = 100;
++  const geo = { spacing: () => ({ dx: 1, dy: 1 }), cellArea: () => 1 };
++  const cone = new Float32Array(n * n);
++  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) cone[r * n + c] = 1000 - Math.hypot(r - c0, c - c0);
++  const d = dinfFlow(fillDepressions(cone, n, n).filled, n, n, geo);
++  const d8 = flowRouting({ width: n, height: n, data: cone, resampleFactor: 1 }, geo, 1e12);
++  const errs: number[] = [], errs8: number[] = [];
++  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
++    const rad = Math.hypot(r - c0, c - c0);
++    if (rad <= 10 || rad >= 80) continue;
++    errs.push(Math.abs(d.sca[r * n + c] / (rad / 2) - 1));
++    errs8.push(Math.abs(d8.acc[r * n + c] / (rad / 2) - 1));
++  }
++  const median = (a: number[]) => [...a].sort((x, y) => x - y)[a.length >> 1];
++  assert.ok(median(errs) < 0.1, `D∞ median error ${median(errs)}`);
++  assert.ok(median(errs) < median(errs8) / 4, `D8 median error ${median(errs8)}`);
++  for (const deg of [0, 30, 45, 60]) {
++    const t = (deg * Math.PI) / 180;
++    const z = new Float32Array(n * n);
++    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) z[r * n + c] = -(c * Math.cos(t) + -r * Math.sin(t));
++    const p = dinfFlow(fillDepressions(z, n, n).filled, n, n, geo);
++    const e: number[] = [];
++    let out = 0;
++    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
++      if (p.tanb[r * n + c] === 0) out += p.acc[r * n + c];
++      if (r <= 20 || r >= n - 20 || c <= 20 || c >= n - 20) continue;
++      let len = Infinity;
++      if (Math.cos(t) > 1e-9) len = Math.min(len, (c + 0.5) / Math.cos(t));
++      if (Math.sin(t) > 1e-9) len = Math.min(len, (n - 0.5 - r) / Math.sin(t));
++      e.push(Math.abs(p.sca[r * n + c] / len - 1));
++    }
++    assert.ok(median(e) < 0.02, `plane ${deg}°: ${median(e)}`);
++    assert.ok(Math.abs(out - n * n) < 1e-6 * n * n, `mass balance at ${deg}°: ${out}`);
++  }
++});
+diff --git a/tests/radar.test.ts b/tests/radar.test.ts
+new file mode 100644
+index 0000000..f661108
+--- /dev/null
++++ b/tests/radar.test.ts
+@@ -0,0 +1,47 @@
++import assert from 'node:assert/strict';
++import { readFileSync } from 'node:fs';
++import { test } from 'node:test';
++import { openGeoTiff } from '../src/lib/rasterio';
++import { analyzeRadar, leeFilter } from '../src/lib/tools/radar';
++
++const dir = new URL('../public/data/samples/', import.meta.url);
++
++test('Lee filter keeps the mean, cuts speckle about √n-fold and keeps a 6 dB edge', () => {
++  let seed = 7;
++  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
++  // Speckle with ENL 4.4: Gamma(4.4, 1/4.4), mean 1 (Marsaglia & Tsang 2000 generator).
++  const normal = () => Math.sqrt(-2 * Math.log(rnd() || 1e-12)) * Math.cos(2 * Math.PI * rnd());
++  const gamma = (k: number) => {
++    const d = k - 1 / 3, c = 1 / Math.sqrt(9 * d);
++    for (;;) {
++      const x = normal(), v = (1 + c * x) ** 3;
++      if (v > 0 && Math.log(rnd() || 1e-12) < 0.5 * x * x + d - d * v + d * Math.log(v)) return d * v;
++    }
++  };
++  const w = 300, h = 300, z = new Float64Array(w * h);
++  for (let k = 0; k < z.length; k++) z[k] = 0.05 * (gamma(4.4) / 4.4) * (k % w >= 150 ? 4 : 1);
++  const f = leeFilter(z, w, h, 7, 4.4);
++  let s = 0, s2 = 0, n = 0, zs = 0, zs2 = 0;
++  for (let y = 10; y < h - 10; y++) for (let x = 10; x < 140; x++) {
++    const v = f[y * w + x], u = z[y * w + x];
++    s += v; s2 += v * v; zs += u; zs2 += u * u; n++;
++  }
++  const mean = s / n, cv = Math.sqrt(s2 / n - mean * mean) / mean, cvz = Math.sqrt(zs2 / n - (zs / n) ** 2) / (zs / n);
++  assert.ok(Math.abs(mean / 0.05 - 1) < 0.02, `mean ${mean}`);
++  assert.ok(cv < cvz / 4, `cv ${cv} vs ${cvz}`);
++  let east = 0, m = 0;
++  for (let y = 10; y < h - 10; y++) for (let x = 154; x < 160; x++) (east += f[y * w + x]), m++;
++  assert.ok(Math.abs(east / m / 0.2 - 1) < 0.05, `east of the edge ${east / m}`);
++});
++
++test('Sentinel-1 pair: the 30 ha clearing shows as a VH decrease', async () => {
++  const open = async (n: string) => openGeoTiff(new File([readFileSync(new URL(n, dir))], n));
++  const a = await open('s1_vv_vh_2023-01-08_synthetic.tif'), b = await open('s1_vv_vh_2024-01-03_synthetic.tif');
++  const [avv, avh] = await a.readBands([0, 1]), [bvv, bvh] = await b.readBands([0, 1]);
++  const r = analyzeRadar([{ name: 'a', vv: avv, vh: avh }, { name: 'b', vv: bvv, vh: bvh }], null, 5);
++  assert.equal(r.dates[0].scale, 'db');
++  const ha = r.change!.counts[0] * 0.01; // 10 m cells
++  assert.ok(Math.abs(ha - 30) / 30 < 0.15, `decrease ${ha} ha`);
++  assert.ok(r.change!.counts[2] / r.change!.classes.length < 0.01);
++  assert.ok(Math.abs(r.dates[0].vh!.median - -13.4) < 0.6, `VH median ${r.dates[0].vh!.median}`);
 +});
 diff --git a/tests/survey-geodesic.test.ts b/tests/survey-geodesic.test.ts
 new file mode 100644
@@ -942,3 +4005,44 @@ index 0000000..36fd02f
 +  const fc = { type: 'FeatureCollection', features: geoms.map(geometry => ({ type: 'Feature', properties: {}, geometry })) } as unknown as FeatureCollection;
 +  assert.throws(() => measureSurvey('plot.geojson', 'GeoJSON', fc, []), /no measurable|no polygons|nothing to measure/i);
 +});
+diff --git a/vite.config.ts b/vite.config.ts
+index 6dd55ab..bea3a93 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -1,8 +1,27 @@
+ import react from '@vitejs/plugin-react';
+ import { defineConfig, loadEnv, type Plugin } from 'vite';
+ import { viteSingleFile } from 'vite-plugin-singlefile';
++import { readFileSync } from 'node:fs';
+ import { createApiHandler } from './server/api';
+ 
++// `import wasm from 'x.wasm?base64'` gives the file as a base64 string, so a single-file build can embed WebAssembly
++// (laz-perf for LAZ point clouds) and hand it to Emscripten as wasmBinary, with no extra request.
++function wasmBase64(): Plugin {
++  return {
++    name: 'wasm-base64',
++    enforce: 'pre',
++    async resolveId(id, importer) {
++      if (!id.endsWith('.wasm?base64')) return null;
++      const r = await this.resolve(id.slice(0, -'?base64'.length), importer, { skipSelf: true });
++      return r ? `${r.id}?base64` : null;
++    },
++    load(id) {
++      if (!id.endsWith('.wasm?base64')) return null;
++      return `export default ${JSON.stringify(readFileSync(id.slice(0, -'?base64'.length)).toString('base64'))};`;
++    },
++  };
++}
++
+ // Serves /api (the Gemini proxy) from the Vite dev and preview servers, so
+ // `npm run dev` works without a second process. The key stays server-side.
+ function terraxApi(): Plugin {
+@@ -30,7 +49,7 @@ export default defineConfig(({ mode }) => {
+ 
+   return {
+     base: './',
+-    plugins: [react(), terraxApi(), ...(isPreviewBuild ? [viteSingleFile()] : [])],
++    plugins: [wasmBase64(), react(), terraxApi(), ...(isPreviewBuild ? [viteSingleFile()] : [])],
+     define: {
+       __TERRAX_PREVIEW__: JSON.stringify(isPreviewBuild),
+     },

@@ -17,6 +17,23 @@ fixes made since:
   reporting the native cell size (same fix as the server).
 - Hydrology draws the highest whole stream orders that fit 250,000 vertices
   on the map, with a note; Export streams keeps every line.
+- Hydrology can also run D∞ flow (Tarboton 1997) with the topographic wetness
+  index; it passes the server's analytic tests (cone a = r/2, planes, mass
+  balance).
+- Radar (Sentinel-1): Lee speckle filter in linear power, VV, VH, VH/VV and
+  RVI, and the VH log-ratio change between two dates.
+- Canopy height: LAS/LAZ point clouds (LAZ through laz-perf, with its
+  WebAssembly embedded in the page), DSM + DTM or a CHM; cover, height
+  classes and tree tops. On the sample it gives exactly the server's grid,
+  cover, heights and 25 trees.
+- Land cover: a random forest from training shapes (50 trees and at most
+  2,000 pixels per class in the browser; the server uses 100 and 5,000),
+  cross-validated by shape, and the stratified validation sample with
+  Olofsson et al. (2014) accuracy and area estimates (the paper's worked
+  example is a test).
+- Any projected CRS a GeoTIFF declares (EPSG code or its own parameters)
+  through proj4 and geotiff-geokeys-to-proj4, with ground units measured
+  geodesically per row as on the server (they agree to 1e-6).
 - The build escapes the two U+FFFD string literals of bundled libraries,
   which the artifact publisher otherwise rejects.
 
@@ -26,8 +43,10 @@ Rebuild it:
 git worktree add ../terrax-browser 0254a69
 cd ../terrax-browser
 git apply ../TerraX/deploy/browser-preview/terrax-browser.patch
+cp ../TerraX/backend/data/samples/{s1_vv_vh_2023-01-08,s1_vv_vh_2024-01-03}_synthetic.tif \
+   ../TerraX/backend/data/samples/{lidar_forest_synthetic.laz,landcover_training_synthetic.geojson} public/data/samples/
 npm ci
-npx tsx --test tests/*.test.ts      # 90 unit tests
+npx tsx --test tests/*.test.ts      # 99 unit tests
 npm run build:preview               # → dist-preview/
 ```
 
