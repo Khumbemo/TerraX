@@ -50,18 +50,38 @@ def test_sentinel1_search_read_two_dates_and_change(client):
     assert res["radar"]["dates"][0]["scale"] == "linear" and "change" in res["radar"]
 
 
-def test_sentinel2_search_and_read(client):
+def test_sentinel2_reflectance_is_physical(client):
+    """Up to three scenes: over pixels the scene classes as vegetation (SCL 4), red reflectance is small and positive and
+    NIR is well above it (the red edge). A failure lists each scene's processing baseline, metadata scale/offset and raw
+    digital numbers, which is what decides whether the offset is right."""
+    import rasterio
+    from rasterio.windows import from_bounds
+
     from terrax import storage
 
     r = client.post("/api/live/sentinel/search", json={"bbox": BBOX, "start": "2024-01-01", "end": "2024-03-31", "maxCloud": 40, "limit": 10})
     assert r.status_code == 200, r.text
     items = r.json()["items"]
     assert items, "no Sentinel-2 scene under 40 % cloud in three months of the dry season"
-    res = run(client, "sentinel", {}, {"item": items[0], "bbox": BBOX})
-    meta = res["file"]["meta"]
-    assert meta["bands"] == 5 and meta["width"] > 100
-    import rasterio
-
-    with rasterio.open(storage.get_file(res["file"]["id"]).path) as d:
-        red = d.read(3).astype(float)
-    assert np.isfinite(red).mean() > 0.5 and np.nanmedian(red) > 0
+    report, ok = [], []
+    for item in items[:3]:
+        res = run(client, "sentinel", {}, {"item": item, "bbox": BBOX})
+        assert res["file"]["meta"]["bands"] == 5
+        with rasterio.open(storage.get_file(res["file"]["id"]).path) as d:
+            red, nir, scl = d.read(3), d.read(4), d.read(5)
+            bounds, crs = d.bounds, d.crs
+        with rasterio.open(item["assets"]["red"]["href"]) as src:  # the raw digital numbers of the same window
+            assert src.crs == crs
+            dn = src.read(1, window=from_bounds(*bounds, src.transform)).astype(float)
+        dn = dn[dn > 0]
+        veg = scl == 4
+        classes = {int(k): int(v) for k, v in zip(*np.unique(scl[np.isfinite(scl)], return_counts=True), strict=True)}
+        line = (f"{item['id']} baseline {item['processingBaseline']} red scale/offset {item['assets']['red']['scale']}/{item['assets']['red']['offset']} "
+                f"raw DN p5/p50/p95 {np.percentile(dn, [5, 50, 95]).round().tolist()} SCL {classes}")
+        if veg.sum() >= 100:
+            rv, nv = float(np.nanmedian(red[veg])), float(np.nanmedian(nir[veg]))
+            line += f" vegetation red {rv:.4f} nir {nv:.4f}"
+            ok.append(0 < rv < 0.15 and nv > rv + 0.1)
+        report.append(line)
+    assert ok, "no scene had 100 vegetation pixels:\n" + "\n".join(report)
+    assert all(ok), "reflectance is not physical:\n" + "\n".join(report)
