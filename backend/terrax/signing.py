@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import threading
 import time
@@ -78,6 +79,29 @@ def sign_urls(obj: Any, job_id: str) -> Any:
     def walk(v: Any) -> Any:
         if isinstance(v, str) and v.startswith(prefix) and "t=" not in v:
             return f"{v}{'&' if '?' in v else '?'}t={token}"
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(obj)
+
+
+# A signed token in one of TerraX's own links, anywhere in a string (a URL field, or a link inside report text).
+_TOKEN = re.compile(r"(/api/[^\s\"'()<>?#]*(?:\?[^\s\"'()<>#]*?)?)([?&])t=\d+\.[A-Za-z0-9_-]+(&?)")
+
+
+def strip_tokens(obj: Any) -> Any:
+    """A copy with the signed tokens taken out of TerraX's own /api/ links (for documents that may be shared: a
+    project must not carry its owner's access to pictures; the owner's own session still opens them)."""
+
+    def clean(v: str) -> str:
+        return _TOKEN.sub(lambda m: m.group(1) + (m.group(2) if m.group(3) else ""), v) if "/api/" in v else v
+
+    def walk(v: Any) -> Any:
+        if isinstance(v, str):
+            return clean(v)
         if isinstance(v, dict):
             return {k: walk(x) for k, x in v.items()}
         if isinstance(v, list):

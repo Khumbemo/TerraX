@@ -33,7 +33,14 @@ interface CanopyJob {
     coverFao: number;
     height: { mean: number | null; median: number | null; q1: number | null; q3: number | null; p95: number | null; max: number | null };
     classes: { label: string; ha: number }[];
-    trees: { count: number; perHa: number | null; minHeight: number; meanHeight: number | null };
+    trees: {
+      count: number;
+      perHa: number | null;
+      minHeight: number;
+      meanHeight: number | null;
+      /** Ratio estimate from field plots (Cochran 1977, ch. 6), when plots were given. */
+      calibrated?: { plots: number; fieldTrees: number; detectedInPlots: number; ratio: number; detectionRate: number | null; total: number; perHa: number | null; se: number | null; ci95: [number, number] | null };
+    };
   };
   downloads: Download[];
   map: { bounds: LatLngBounds | null; image: ResultImage | null; geojson: FeatureCollection | null } | null;
@@ -47,6 +54,9 @@ export default function CanopyTool({ onOutput }: Props) {
   const busy = Boolean(job.busy);
   const clouds = useUpload(['pointcloud'], 'a LAS or LAZ point cloud');
   const rasters = useUpload<RasterMeta>(['raster'], 'a GeoTIFF elevation or height model');
+  const plotFiles = useUpload(['vector'], 'field plots as polygons (GeoJSON, KML or a zipped shapefile)');
+  const [plots, setPlots] = useState<StoredFile | null>(null);
+  const [countField, setCountField] = useState('');
   const [source, setSource] = useState<Source>('cloud');
   const [files, setFiles] = useState<Partial<Record<'cloud' | 'chm' | 'dsm' | 'dtm', StoredFile>>>({});
   const [cell, setCell] = useState('1');
@@ -70,8 +80,9 @@ export default function CanopyTool({ onOutput }: Props) {
     const inputs = src === 'cloud' ? { cloud: fs.cloud?.id } : src === 'chm' ? { chm: fs.chm?.id } : { dsm: fs.dsm?.id, dtm: fs.dtm?.id };
     if (Object.values(inputs).some(v => !v)) return fail(src === 'dsm' ? 'Add both the surface (DSM) and the terrain (DTM) model.' : 'Add the file first.');
     const params = { cell: Number(cell), threshold: Number(threshold), minTree: Number(minTree) };
+    const withPlots = plots ? { ...inputs, plots: plots.id } : inputs;
     if (Object.values(params).some(v => !Number.isFinite(v) || v <= 0)) return fail('Cell size and heights must be positive numbers of metres.');
-    const res = await job.run('run', (signal, onProgress) => runJob<CanopyJob>('canopy', inputs, params, { signal, onProgress }), fail);
+    const res = await job.run('run', (signal, onProgress) => runJob<CanopyJob>('canopy', withPlots, { ...params, ...(countField.trim() ? { countField: countField.trim() } : {}) }, { signal, onProgress }), fail);
     if (!res) return;
     setOut(res);
     onOutput({ tool: 'canopy', name: res.name, markdown: res.markdown, map: res.map ?? undefined, summary: res.canopy, figures: [{ title: 'Canopy height', url: res.layer }] });
@@ -118,6 +129,30 @@ export default function CanopyTool({ onOutput }: Props) {
           <FileDrop id="canopy-dtm" label="Terrain model (DTM)" accept=".tif,.tiff" hint="Same grid as the DSM" compact loaded={files.dtm?.name} onFile={f => load(f, 'dtm')} />
         </>
       )}
+      <FileDrop
+        id="canopy-plots"
+        label="Field plots (optional)"
+        accept=".geojson,.json,.kml,.zip"
+        hint="Polygons with the trees counted in each · corrects the count for trees hidden under taller crowns"
+        compact
+        busy={job.busy === 'plots'}
+        loaded={plots?.name}
+        onFile={async f => {
+          const up = await job.run('plots', signal => plotFiles.upload(f, signal), fail);
+          if (up) setPlots(up);
+        }}
+      />
+      {plots && (
+        <div className="param-row">
+          <label className="param" title="The property with each plot's tree count; left empty, TerraX looks for trees, tree_count, field_count, count, stems or n.">
+            <span>Count property</span>
+            <input id="canopy-count-field" placeholder="trees" value={countField} onChange={e => setCountField(e.target.value)} />
+          </label>
+          <button type="button" className="btn btn-small" onClick={() => setPlots(null)}>
+            Remove plots
+          </button>
+        </div>
+      )}
       <div className="param-row">
         <div className="button-row push-right">
           <button
@@ -147,6 +182,12 @@ export default function CanopyTool({ onOutput }: Props) {
             <Stat label="Median canopy height" value={c.height.median === null ? '—' : `${fmt(c.height.median, 3)} m`} />
             <Stat label="95th percentile height" value={c.height.p95 === null ? '—' : `${fmt(c.height.p95, 3)} m`} />
             <Stat label="Tree tops" value={`${c.trees.count.toLocaleString()}${c.trees.perHa === null ? '' : ` (${fmt(c.trees.perHa, 3)}/ha)`}`} />
+            {c.trees.calibrated && (
+              <Stat
+                label={`Trees, calibrated by ${c.trees.calibrated.plots} plot${c.trees.calibrated.plots === 1 ? '' : 's'}`}
+                value={`${Math.round(c.trees.calibrated.total).toLocaleString()}${c.trees.calibrated.ci95 ? ` (95 % CI ${Math.round(c.trees.calibrated.ci95[0]).toLocaleString()}–${Math.round(c.trees.calibrated.ci95[1]).toLocaleString()})` : ''}`}
+              />
+            )}
           </div>
           <figure className="raster-figure">
             <ArtifactImage url={out.layer} width={out.width} height={out.height} label="Canopy height" />

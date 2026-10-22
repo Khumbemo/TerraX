@@ -191,6 +191,44 @@ def analyze_canopy(chm: np.ndarray, cell_area: np.ndarray, cell_m: float, thresh
     }
 
 
+def calibrate_count(field: np.ndarray, detected: np.ndarray, detected_total: int, area_ha: float | None = None) -> dict:
+    """Ratio estimate of the true number of trees from field plots (Cochran 1977, sections 6.2-6.4).
+
+    Detected tree tops undercount where crowns overlap. In plots counted on the ground, the ratio
+    R = sum(field) / sum(detected) measures that undercount. The total is R x (trees detected over the whole area,
+    a known auxiliary total). The variance ignores the finite-population correction, as plots cover a tiny share
+    of the area. The interval uses Student's t with n - 1 degrees of freedom.
+    """
+    from scipy import stats
+
+    y, x = np.asarray(field, dtype=np.float64), np.asarray(detected, dtype=np.float64)
+    n = int(y.size)
+    if n == 0:
+        raise ValueError("No field plot lies on the canopy height model.")
+    if np.any(y < 0) or not np.all(np.isfinite(y)):
+        raise ValueError("Field counts must be whole numbers of trees, zero or more.")
+    sy, sx = float(y.sum()), float(x.sum())
+    if sx <= 0:
+        raise ValueError("No tree tops were detected inside the field plots, so their counts cannot calibrate the detection. Check that the plots lie on the forest.")
+    r = sy / sx
+    total = r * detected_total
+    out: dict = {"plots": n, "fieldTrees": round(sy), "detectedInPlots": round(sx), "ratio": r, "detectionRate": sx / sy if sy else None,
+                 "total": total, "perHa": total / area_ha if area_ha else None, "se": None, "ci95": None}
+    if n >= 2:
+        xbar = x.mean()
+        v = float(np.sum((y - r * x) ** 2) / (n - 1) / (n * xbar**2))
+        se = detected_total * math.sqrt(v)
+        t = float(stats.t.ppf(0.975, n - 1))
+        out |= {"se": se, "ci95": [max(0.0, total - t * se), total + t * se]}
+    return out
+
+
+def _calibrated_row(c: dict) -> str:
+    ci = f"; 95 % CI {c['ci95'][0]:,.0f}–{c['ci95'][1]:,.0f}" if c["ci95"] else "; one plot, so no interval"
+    per = f", {fmt(c['perHa'], 3)} per ha" if c["perHa"] else ""
+    return f"| Trees, calibrated by {c['plots']} field plot{'' if c['plots'] == 1 else 's'} | {c['total']:,.0f}{per}{ci} |"
+
+
 def canopy_markdown(name: str, source: str, r: dict, notes: list[str]) -> str:
     hgt, t = r["height"], r["trees"]
     lines = ["## Dataset", "", f"- {name} ({source})", f"- Area with heights: {fmt(r['areaHa'], 4)} ha", "", "## Results", "",
@@ -199,7 +237,8 @@ def canopy_markdown(name: str, source: str, r: dict, notes: list[str]) -> str:
              f"| Cover of trees ≥ 5 m (FAO forest height) | {r['coverFao'] * 100:.1f} % |",
              f"| Canopy height, median (quartiles) | {fmt(hgt['median'], 3)} m ({fmt(hgt['q1'], 3)}–{fmt(hgt['q3'], 3)}) |",
              f"| 95th percentile / maximum | {fmt(hgt['p95'], 3)} m / {fmt(hgt['max'], 3)} m |",
-             f"| Tree tops ≥ {fmt(t['minHeight'], 3)} m | {t['count']:,} ({fmt(t['perHa'], 3)} per ha; mean height {fmt(t['meanHeight'], 3)} m) |", "",
+             f"| Tree tops ≥ {fmt(t['minHeight'], 3)} m | {t['count']:,} ({fmt(t['perHa'], 3)} per ha; mean height {fmt(t['meanHeight'], 3)} m) |",
+             *([_calibrated_row(t["calibrated"])] if t.get("calibrated") else []), "",
              "| Height class | Area (ha) |", "|---|---|", *[f"| {c['label']} | {fmt(c['ha'], 4)} |" for c in r["classes"]], "",
              "## Method and limits", "", *[f"- {n}" for n in notes]]
     return "\n".join(lines)

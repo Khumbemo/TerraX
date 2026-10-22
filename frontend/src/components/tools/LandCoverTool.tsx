@@ -85,6 +85,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
   const [k, setK] = useState('5');
   const [training, setTraining] = useState<StoredFile | null>(null);
   const [labelField, setLabelField] = useState('');
+  const [trees, setTrees] = useState('100');
   const [out, setOut] = useState<LandCoverJob | null>(null);
   const result = out?.landcover ?? null;
   const [labels, setLabels] = useState<string[]>([]);
@@ -130,7 +131,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
     if (m === 'kmeans' && (!Number.isInteger(kk) || kk < 2 || kk > MAX_K)) return fail(`Choose a whole number of classes from 2 to ${MAX_K}.`);
     if (m === 'rf' && !shapes) return fail('Add training shapes first: polygons or points with a property naming each one’s class.');
     const inputs = m === 'rf' && shapes ? { file: r.id, training: shapes.id } : { file: r.id };
-    const params = { method: m, bands: b, k: kk, roles: r.meta.guessedBands, boundary, labels: names, labelField: labelField.trim() || undefined, seed: 7 };
+    const params = { method: m, bands: b, k: kk, roles: r.meta.guessedBands, boundary, labels: names, labelField: labelField.trim() || undefined, trees: Number(trees), seed: 7 };
     const res = await job.run('run', (signal, onProgress) => runJob<LandCoverJob>('landcover', inputs, params, { signal, onProgress }), msg => {
       fail(msg);
       setOut(null);
@@ -235,6 +236,16 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
           <label className="param" title="The property naming each shape's class; left empty, TerraX looks for class, label, landcover, type or name.">
             <span>Class property</span>
             <input id="landcover-label-field" placeholder="class" value={labelField} onChange={e => setLabelField(e.target.value)} />
+          </label>
+        )}
+        {method === 'rf' && (
+          <label className="param" title="Time grows with the number of trees; accuracy barely changes beyond about 100 (Probst & Boulesteix 2018). 50 runs in half the time.">
+            <span>Trees</span>
+            <select id="landcover-trees" value={trees} onChange={e => setTrees(e.target.value)}>
+              <option value="50">50 (about twice as fast)</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
           </label>
         )}
       </div>

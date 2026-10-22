@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..config import settings
-from ..processing.landcover import PALETTE, classify_land_cover, classify_supervised, land_cover_markdown
+from ..processing.landcover import FOREST_SIZES, PALETTE, classify_land_cover, classify_supervised, land_cover_markdown
 from ..processing.render import hex_rgb
 from ..processing.survey import parse_survey_file
 from . import tool
@@ -36,8 +36,12 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
             fc, _, _ = parse_survey_file(f.path, f.name, close_ring=False)
         except ValueError as e:
             raise ToolError(str(e)) from None
+        trees = params.get("trees", 100)
+        if trees not in FOREST_SIZES:
+            raise ToolError(f"Choose {', '.join(map(str, FOREST_SIZES))} trees.")
         ctx.progress(0.2, "Training the random forest")
-        res = classify_supervised(r, bands, fc, roles, params.get("labelField") or None, boundary(params), params.get("qa"), seed, threads=settings().tile_threads)
+        res = classify_supervised(r, bands, fc, roles, params.get("labelField") or None, boundary(params), params.get("qa"), seed, trees=int(trees),
+                                  threads=settings().tile_threads)
         default = res["labels"]
     elif method == "kmeans":
         ctx.progress(0.2, "Clustering pixels")
