@@ -120,8 +120,10 @@ export default function DataTool({ variant, onOutput, boundary, target }: Props)
     if (await openTable(f as StoredFile<TableMeta>, (f.meta as TableMeta).defaultMetric, note)) notify(`Loaded ${((f.meta as TableMeta).rowCount ?? 0).toLocaleString()} days of data.`, 'success');
   };
 
-  const loadLiveRaster = async (f: StoredFile<RasterMeta>, notes: string[]) => {
-    if (await openRaster(f, { mode: 'index', index: 'ndvi', bands: { blue: 0, green: 1, red: 2, nir: 3 }, qa: { band: 4, kind: 'scl' } }, notes)) notify(`Loaded ${f.name}.`, 'success');
+  const loadLiveRaster = async (f: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite') => {
+    // A scene's band 5 is its SCL cloud classification (applied as a mask); a composite is already cloud-free and its band 5 counts clear observations.
+    const qa = kind === 'scene' ? ({ band: 4, kind: 'scl' } as const) : undefined;
+    if (await openRaster(f, { mode: 'index', index: 'ndvi', bands: { blue: 0, green: 1, red: 2, nir: 3 }, ...(qa ? { qa } : {}) }, notes)) notify(`Loaded ${f.name}.`, 'success');
   };
 
   const changeView = (mode: RasterMode, clearOnError = false) => {

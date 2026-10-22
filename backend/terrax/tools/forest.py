@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from ..processing import forest as fp
+from ..processing.rio import ground_geometry
 from . import tool
-from .common import bands, boundary, class_overlay, clean, number, raster
+from .common import bands, boundary, class_overlay, clean, number, raster, save_npz
 from .context import ToolContext, ToolError
 
 SLOT_NAMES = {
@@ -40,6 +43,9 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     slot = SLOT_NAMES[mode]
     label = "Burn severity" if mode == "burn" else "Forest change"
     image = class_overlay(ctx, "change.png", r["classes"], fp.legend(mode), a, label)
+    # Kept for the stratified validation sample and the area estimates (api/landcover.py, Olofsson et al. 2014).
+    geo = ground_geometry(a.meta, r["width"], r["height"])
+    save_npz(ctx.dir / "classes.npz", {"classes": r["classes"], "rowArea": np.asarray(geo.cell_area if geo else np.ones(r["height"]), dtype=np.float64)})
     downloads = []
     polys = fp.loss_polygons(r, a)
     if polys is not None:
@@ -55,5 +61,8 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         "map": {"bounds": a.meta.latlng_bounds, "image": image},
         "result": r,
         "legend": fp.legend(mode),
+        "labels": [c["label"] for c in fp.legend(mode)],
+        "file": inputs.get("a"),
+        "filename": a.meta.filename,
         "downloads": downloads,
     })

@@ -371,6 +371,89 @@ def read_s2_window(item: StacItem, bbox: list[float], out: Path) -> list[str]:
     return notes
 
 
+S2_COMPOSITE_MAX = 12
+
+
+def composite_s2(items: list[StacItem], bbox: list[float], out: Path, workdir: Path, read=None) -> dict[str, Any]:
+    """Per-pixel median of the cloud-free observations of several Sentinel-2 L2A scenes over a WGS84 box.
+
+    Each scene is read like a single one (reflectance, offset checked against the data), masked with its own scene
+    classification (SCL classes 0, 1, 3, 8, 9, 10, 11: no data, defective, cloud shadow, clouds, cirrus, snow) and,
+    when it lies on another grid (another MGRS tile or UTM zone), reprojected onto the first scene's grid (bilinear for
+    reflectance, nearest for SCL). The median is taken band by band over the clear observations, as in the usual
+    median composites (e.g. Google Earth Engine's ``median()``); band 5 holds the number of clear observations.
+    """
+    import warnings
+
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.warp import reproject
+
+    from ..processing.rio import qa_masked
+
+    read = read or read_s2_window
+    if not 2 <= len(items) <= S2_COMPOSITE_MAX:
+        raise ValueError(f"Choose between 2 and {S2_COMPOSITE_MAX} scenes for a composite.")
+    scenes: list[tuple[StacItem, Path]] = []
+    notes: list[str] = []
+    skipped: list[str] = []
+    for i, item in enumerate(items):
+        path = workdir / f"scene_{i}.tif"
+        try:
+            scene_notes = read(item, bbox, path)
+        except ValueError as err:
+            skipped.append(f"{item.id} ({err})")
+            continue
+        if not scenes:
+            notes.append(scene_notes[0])  # how reflectance was computed, from the first scene
+        scenes.append((item, path))
+    if len(scenes) < 2:
+        raise ValueError("Fewer than two of the scenes could be read over this area" + (f": {'; '.join(skipped)}" if skipped else "") + ".")
+    with rasterio.open(scenes[0][1]) as ref:
+        crs, transform, w, h = ref.crs, ref.transform, ref.width, ref.height
+
+    def on_grid(path: Path, band: int, nearest: bool) -> np.ndarray:
+        with rasterio.open(path) as ds:
+            if ds.crs == crs and ds.transform == transform and (ds.width, ds.height) == (w, h):
+                return ds.read(band).astype(np.float32)
+            dst = np.full((h, w), np.nan, dtype=np.float32)
+            reproject(ds.read(band).astype(np.float32), dst, src_transform=ds.transform, src_crs=ds.crs, src_nodata=np.nan, dst_transform=transform,
+                      dst_crs=crs, dst_nodata=np.nan, resampling=Resampling.nearest if nearest else Resampling.bilinear)
+            return dst
+
+    masks = [qa_masked("scl", on_grid(p, 5, nearest=True)) for _, p in scenes]
+    bands: list[np.ndarray] = []
+    for b in range(1, 5):
+        stack = np.stack([np.where(m, np.nan, on_grid(p, b, nearest=False)) for (_, p), m in zip(scenes, masks, strict=True)])
+        with warnings.catch_warnings():  # pixels with no clear observation are NaN, as intended
+            warnings.simplefilter("ignore", RuntimeWarning)
+            bands.append(np.nanmedian(stack, axis=0).astype(np.float32))
+        if b == 3:
+            clear = np.isfinite(stack).sum(axis=0).astype(np.float32)
+    covered = clear > 0
+    profile = {"driver": "GTiff", "width": w, "height": h, "count": 5, "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan, "compress": "deflate", "tiled": True}
+    with rasterio.open(out, "w", **profile) as dst:
+        for i, (band, name) in enumerate(zip([*bands, clear], ["blue (B2)", "green (B3)", "red (B4)", "nir (B8)", "clear observations"], strict=True), start=1):
+            dst.write(band, i)
+            dst.set_band_description(i, name)
+    dates = sorted(it.datetime[:10] for it, _ in scenes)
+    cc = clear[covered]
+    notes += [
+        f"Median composite of {len(scenes)} Sentinel-2 L2A scenes from Earth Search ({dates[0]} to {dates[-1]}): for each pixel and band, the median of the observations "
+        "that the scene's own classification (SCL) marks clear. Masked: SCL 0, 1, 3, 8, 9, 10 and 11 (no data, defective, cloud shadow, clouds, cirrus, snow). "
+        "Band 5 is the number of clear observations per pixel.",
+        f"Clear observations per pixel: median {float(np.median(cc)) if cc.size else 0:.0f} of {len(scenes)}; {float((~covered).mean()) * 100:.1f} % of pixels had none and are empty (no data).",
+        "Each band's median is taken on its own, so a pixel's bands can come from different dates. For indices of one band pair (NDVI) this is the usual practice; "
+        "a medoid composite keeps the bands of one date together (Flood 2013).",
+    ]
+    if len({it.epsg for it, _ in scenes}) > 1:
+        notes.append("Scenes on other UTM grids were reprojected onto the first scene's grid (bilinear for reflectance, nearest for the classification).")
+    if skipped:
+        notes.append(f"Left out (could not be read over the area): {'; '.join(skipped)}.")
+    return {"notes": notes, "scenes": [it.id for it, _ in scenes], "dates": dates, "clearMedian": float(np.median(cc)) if cc.size else 0.0,
+            "emptyShare": float((~covered).mean())}
+
+
 # ── Sentinel-1 RTC via the Planetary Computer ─────────────────────────────────
 
 PC_STAC = "https://planetarycomputer.microsoft.com/api/stac/v1"

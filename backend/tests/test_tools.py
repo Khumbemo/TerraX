@@ -313,3 +313,44 @@ def test_sentinel1_search_load_and_radar_change(client, monkeypatch, tmp_path):
     assert res["radar"]["dates"][0]["scale"] == "linear" and res["radar"]["change"]["ha"]["1"] == pytest.approx(25, rel=0.2)  # 50 × 50 px at 10 m
     other = run_err(client, "sentinel1", {}, {"item": {**found[0], "assets": {"vv": {"href": "https://evil.example.com/a.tif"}, "vh": {"href": "https://evil.example.com/b.tif"}}}, "bbox": [w, s, e, n]})
     assert "Planetary Computer's storage" in other
+
+
+def test_forest_loss_area_estimate_from_a_stratified_sample(client, tmp_path):
+    """Olofsson et al. (2014) on a forest-change map: loss the map missed in stable forest raises the estimated loss area."""
+    import csv
+    import io
+
+    a, b = sample(client, "forest_ndvi_2016_synthetic.tif"), sample(client, "forest_ndvi_2024_synthetic.tif")
+    res = run(client, "forest", {"a": a, "b": b}, {"mode": "ndvi"})
+    jid = res["map"]["image"]["url"].split("/")[3]
+    s = client.post(f"/api/jobs/{jid}/validation/sample", json={"total": 200, "minPerClass": 30}).json()
+    alloc = {x["label"]: x for x in s["allocation"]}
+    assert s["unit"] == "ha" and alloc["Forest loss"]["mapped"] == pytest.approx(184.05) and alloc["Forest loss"]["n"] >= 30
+    rows = list(csv.DictReader(io.StringIO(client.get(s["downloads"][-1]["url"]).text)))
+    assert len(rows) == s["points"] and {r["map_class"] for r in rows} <= set(alloc)
+    # Reference = map, except 3 of the stable-forest points turn out to be loss (omission errors).
+    missed = 0
+    for r in rows:
+        r["reference"] = r["map_class"]
+        if r["map_class"] == "Stable forest" and missed < 3:
+            r["reference"], missed = "Forest loss", missed + 1
+    p = tmp_path / "labelled.csv"
+    with p.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    with p.open("rb") as fh:
+        fid = client.post("/api/files", files={"file": ("labelled.csv", fh, "text/csv")}).json()["id"]
+    acc = client.post(f"/api/jobs/{jid}/validation/accuracy", json={"file": fid}).json()
+    loss = next(c for c in acc["classes"] if c["label"] == "Forest loss")
+    # p̂(loss) = Σᵢ Wᵢ nᵢ,loss / nᵢ·, times the total mapped area (eq. 4 and 9).
+    total = sum(x["mapped"] for x in alloc.values())
+    n_stable = sum(r["map_class"] == "Stable forest" for r in rows)
+    expected = total * (alloc["Forest loss"]["share"] + alloc["Stable forest"]["share"] * 3 / n_stable)
+    assert loss["area"] == pytest.approx(expected, rel=1e-9) and loss["area"] > loss["mappedArea"] and loss["areaCi"] > 0
+    assert loss["userAccuracy"] == 1 and loss["producerAccuracy"] < 1
+    assert "Estimated area" in acc["markdown"]
+    # Validation needs a classified map.
+    terrain = run(client, "terrain", {"dem": sample(client, "terrain_dem_synthetic.tif")}, {})
+    tid = terrain["layers"]["slope"].split("/")[3]
+    assert client.post(f"/api/jobs/{tid}/validation/sample", json={}).status_code == 400

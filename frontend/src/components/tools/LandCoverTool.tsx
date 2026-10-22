@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { request, runJob, type Download, type RasterMeta, type ResultImage, type StoredFile } from '../../lib/api';
+import { runJob, type Download, type RasterMeta, type ResultImage, type StoredFile } from '../../lib/api';
 import { downloadText, safeFilename } from '../../lib/download';
 import type { LatLngBounds } from '../../lib/geo';
 import { fmt } from '../../lib/stats';
@@ -9,7 +9,8 @@ import type { ToolOutput } from '../../lib/tools/registry';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
+import { ArtifactImage, Notes, Stat, useUpload } from '../ToolKit';
+import MapValidation, { type AccuracyResult } from './MapValidation';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -39,38 +40,7 @@ interface LandCoverJob {
   downloads: Download[];
 }
 
-interface SampleResult {
-  points: number;
-  unit: 'ha' | 'px';
-  allocation: { label: string; mapped: number; share: number; n: number }[];
-  downloads: Download[];
-  note: string;
-}
-
-interface AccuracyClass {
-  label: string;
-  samples: number;
-  mappedArea: number;
-  area: number;
-  areaCi: number | null;
-  userAccuracy: number | null;
-  userCi: number | null;
-  producerAccuracy: number | null;
-  producerCi: number | null;
-}
-
-interface AccuracyResult {
-  unit: 'ha' | 'px';
-  samples: number;
-  unlabelled: number;
-  overallAccuracy: number;
-  overallCi: number | null;
-  classes: AccuracyClass[];
-  markdown: string;
-}
-
 const jobIdOf = (artifactUrl: string) => artifactUrl.split('/')[3];
-const pct = (v: number | null, ci: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)} %${ci === null ? '' : ` ± ${(ci * 100).toFixed(1)}`}`);
 
 export default function LandCoverTool({ onOutput, boundary }: Props) {
   const notify = useToast();
@@ -78,7 +48,6 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
   const busy = Boolean(job.busy);
   const files = useUpload<RasterMeta>(['raster'], 'a GeoTIFF raster TerraX can read');
   const shapeFiles = useUpload(['vector'], 'GeoJSON, KML or a zipped shapefile of training shapes');
-  const refFiles = useUpload(['table', 'vector'], 'the labelled validation sample (CSV or GeoJSON)');
   const [raster, setRaster] = useState<StoredFile<RasterMeta> | null>(null);
   const [bands, setBands] = useState<number[]>([]);
   const [method, setMethod] = useState<Method>('kmeans');
@@ -89,9 +58,6 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
   const [out, setOut] = useState<LandCoverJob | null>(null);
   const result = out?.landcover ?? null;
   const [labels, setLabels] = useState<string[]>([]);
-  const [sampleTotal, setSampleTotal] = useState('');
-  const [minPerClass, setMinPerClass] = useState('50');
-  const [validation, setValidation] = useState<SampleResult | null>(null);
   const [accuracy, setAccuracy] = useState<AccuracyResult | null>(null);
   const fail = (m: string) => notify(m, 'error');
   const serverLabels = useRef(false);
@@ -102,7 +68,6 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
     setRaster(f);
     setBands(Array.from({ length: f.meta.bands }, (_, i) => i));
     setOut(null);
-    setValidation(null);
     setAccuracy(null);
     onOutput(null);
     if (f.meta.bands < 2) notify(`${f.name} has one band; classes can only split it into value ranges.`);
@@ -142,7 +107,6 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
     if (!names.length) {
       serverLabels.current = true;
       setLabels(res.landcover.method === 'rf' ? res.labels : res.landcover.stats.map(c => (c.suggestion ? `${c.suggestion} (suggested)` : `Class ${c.id}`)));
-      setValidation(null);
       setAccuracy(null);
     }
     report(res, names.length ? accuracy : null);
@@ -167,29 +131,6 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundary]);
 
-  const makeSample = async () => {
-    if (!out) return;
-    const total = sampleTotal.trim() ? Number(sampleTotal) : undefined;
-    const min = Number(minPerClass);
-    if (total !== undefined && (!Number.isInteger(total) || total < 2)) return fail('Set the sample size as a whole number of points, or leave it empty.');
-    if (!Number.isInteger(min) || min < 1) return fail('Set the minimum points per class as a whole number.');
-    const s = await job.run('sample', signal => request<SampleResult>(`/api/landcover/${jobIdOf(out.map.image.url)}/sample`, { method: 'POST', json: { total, minPerClass: min, labels }, signal }), fail);
-    if (!s) return;
-    setValidation(s);
-    setAccuracy(null);
-    report(out, null);
-  };
-
-  const assessFile = async (picked: File) => {
-    if (!out) return;
-    const f = await job.run('reference', signal => refFiles.upload(picked, signal), fail);
-    if (!f) return;
-    const a = await job.run('assess', signal => request<AccuracyResult>(`/api/landcover/${jobIdOf(out.map.image.url)}/accuracy`, { method: 'POST', json: { file: f.id }, signal }), fail);
-    if (!a) return;
-    setAccuracy(a);
-    report(out, a);
-  };
-
   const exportCsv = () => {
     if (!result) return;
     const head = ['class', 'label', 'pixels', 'hectares', 'share_percent', 'mean_ndvi', ...result.bands.map(b => `band${b + 1}_mean`)];
@@ -198,7 +139,6 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
     downloadText([head.join(','), ...rows].join('\n'), `${safeFilename(result.filename)}_landcover_classes.csv`, 'text/csv');
   };
 
-  const area = (v: number, unit: 'ha' | 'px') => (unit === 'ha' ? `${fmt(v, 4)} ha` : `${Math.round(v).toLocaleString()} px`);
 
   return (
     <div className="tool-body">
@@ -337,99 +277,18 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
           </div>
           <Notes items={result.notes} />
 
-          <section className="sub-panel" aria-label="Accuracy assessment">
-            <div className="eyebrow">Accuracy and area</div>
-            <p className="field-hint">
-              Mapped areas include the map’s errors. Draw a stratified random sample, label each point’s true class from field visits or finer imagery (without looking at
-              the map), then upload it for accuracy and area estimates with 95 % confidence intervals (Olofsson et al. 2014).
-            </p>
-            <div className="param-row">
-              <label className="param">
-                <span>Sample points</span>
-                <input id="landcover-sample-total" type="number" min="2" step="1" placeholder={String(100 * result.k)} value={sampleTotal} onChange={e => setSampleTotal(e.target.value)} />
-              </label>
-              <label className="param">
-                <span>Minimum per class</span>
-                <input id="landcover-sample-min" type="number" min="1" step="1" value={minPerClass} onChange={e => setMinPerClass(e.target.value)} />
-              </label>
-              <button type="button" id="landcover-sample" className="btn" disabled={busy} onClick={makeSample}>
-                {job.busy === 'sample' ? 'Drawing…' : validation ? 'Draw a new sample' : 'Create validation sample'}
-              </button>
-            </div>
-            {validation && (
-              <>
-                <div className="tabular-view">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Class</th>
-                        <th>Mapped</th>
-                        <th>Share</th>
-                        <th>Points</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {validation.allocation.map(a => (
-                        <tr key={a.label}>
-                          <td>{a.label}</td>
-                          <td className="num">{area(a.mapped, validation.unit)}</td>
-                          <td className="num">{(a.share * 100).toFixed(1)} %</td>
-                          <td className="num">{a.n}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="button-row">
-                  <Downloads idPrefix="landcover-sample" items={validation.downloads} />
-                </div>
-                <Notes items={[validation.note]} />
-                <FileDrop
-                  id="landcover-reference"
-                  label="Labelled sample"
-                  accept=".csv,.geojson,.json"
-                  hint="The sample file with its “reference” column filled in"
-                  busy={job.busy === 'reference' || job.busy === 'assess'}
-                  onFile={f => assessFile(f)}
-                />
-              </>
-            )}
-            {accuracy && (
-              <>
-                <div className="stat-grid">
-                  <Stat label="Overall accuracy" value={pct(accuracy.overallAccuracy, accuracy.overallCi)} />
-                  <Stat label="Reference points" value={`${accuracy.samples}${accuracy.unlabelled ? ` (${accuracy.unlabelled} unlabelled)` : ''}`} />
-                </div>
-                <div className="tabular-view">
-                  <table id="landcover-accuracy">
-                    <thead>
-                      <tr>
-                        <th>Class</th>
-                        <th>Mapped</th>
-                        <th>Estimated area (95 % CI)</th>
-                        <th>User’s</th>
-                        <th>Producer’s</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {accuracy.classes.map(c => (
-                        <tr key={c.label}>
-                          <td>{c.label}</td>
-                          <td className="num">{area(c.mappedArea, accuracy.unit)}</td>
-                          <td className="num">
-                            {area(c.area, accuracy.unit)}
-                            {c.areaCi === null ? '' : ` ± ${accuracy.unit === 'ha' ? fmt(c.areaCi, 3) : Math.round(c.areaCi).toLocaleString()}`}
-                          </td>
-                          <td className="num">{pct(c.userAccuracy, c.userCi)}</td>
-                          <td className="num">{pct(c.producerAccuracy, c.producerCi)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </section>
+          <MapValidation
+            key={jobIdOf(out.map.image.url)}
+            jobId={jobIdOf(out.map.image.url)}
+            idPrefix="landcover"
+            labels={labels}
+            classes={result.k}
+            intro="Mapped areas include the map’s errors. Draw a stratified random sample, label each point’s true class from field visits or finer imagery (without looking at the map), then upload it for accuracy and area estimates with 95 % confidence intervals (Olofsson et al. 2014)."
+            onAccuracy={a => {
+              setAccuracy(a);
+              report(out, a);
+            }}
+          />
         </div>
       )}
     </div>
