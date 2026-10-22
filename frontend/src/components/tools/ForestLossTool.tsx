@@ -13,6 +13,7 @@ import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
 import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
+import MapValidation from './MapValidation';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -129,6 +130,8 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
   const [canopyThr, setCanopyThr] = useState('30');
   const [mmu, setMmu] = useState('0');
   const [out, setOut] = useState<ForestJob | null>(null);
+  const report = (r: ForestJob, accuracyMarkdown: string | null) =>
+    onOutput({ tool: 'forest', name: r.name, markdown: r.markdown + (accuracyMarkdown ?? ''), map: r.map, figures: r.map.image ? [{ title: r.map.image.label, url: r.map.image.url }] : [] });
   const result = out?.result ?? null;
   const fail = (m: string) => notify(m, 'error');
 
@@ -173,7 +176,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
     );
     if (!r) return;
     setOut(r);
-    onOutput({ tool: 'forest', name: r.name, markdown: r.markdown, map: r.map, figures: r.map.image ? [{ title: r.map.image.label, url: r.map.image.url }] : [] });
+    report(r, null);
   };
 
   const loadSample = async () => {
@@ -336,6 +339,21 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
           )}
 
           <Notes items={result.notes} />
+
+          {out.map.image && (
+            <MapValidation
+              key={out.map.image.url}
+              jobId={out.map.image.url.split('/')[3]}
+              idPrefix="forest"
+              classes={out.legend.length}
+              intro={
+                result.mode === 'burn'
+                  ? 'Mapped burned areas include the map’s errors. Draw a stratified random sample, label each point’s true severity class from field plots (e.g. CBI) or finer imagery without looking at the map, then upload it for accuracy and area estimates with 95 % confidence intervals (Olofsson et al. 2014).'
+                  : 'Mapped loss includes the map’s errors, and loss the map missed hides in the large stable classes. Draw a stratified random sample, label each point’s true change from field visits or finer imagery of both dates without looking at the map, then upload it for loss area with a 95 % confidence interval (Olofsson et al. 2014), as IPCC and REDD+ reporting expect.'
+              }
+              onAccuracy={a => report(out, a ? a.markdown : null)}
+            />
+          )}
         </div>
       )}
     </div>

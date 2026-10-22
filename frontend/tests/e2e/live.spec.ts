@@ -103,6 +103,46 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
   expect(errors).toEqual([]);
 });
 
+test('satellite: ticked Sentinel-2 scenes make a cloud-free composite, loaded without the SCL mask', async ({ page }) => {
+  const errors = await start(page);
+  // A composite as the server writes it: reflectance medians and, in band 5, 3 clear observations everywhere.
+  // 3 is also SCL's "cloud shadow" code, so applying the scene mask to it would blank the whole image.
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-s2c-'));
+  const path = join(dir, 'S2_median_2024-01-05_2024-03-01.tif');
+  execFileSync('python3', ['-c', `
+import numpy as np, rasterio
+from rasterio.transform import from_origin
+w = 200
+b = [np.full((w, w), v, np.float32) for v in (0.03, 0.06, 0.04, 0.34, 3)]
+with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height=w, count=5, dtype='float32', crs='EPSG:32646', transform=from_origin(609000, 2842000, 10, 10), nodata=float('nan')) as d:
+    for i, a in enumerate(b, 1):
+        d.write(a, i)
+`]);
+  const file = await upload(page.request, 'S2_median_2024-01-05_2024-03-01.tif', readFileSync(path), 'image/tiff');
+  const items = ['2024-03-01', '2024-02-04', '2024-01-05'].map(d => ({ id: `S2B_46RFQ_${d.replace(/-/g, '')}_0_L2A`, datetime: `${d}T04:25:00Z`, cloud: 30, epsg: 32646, assets: {}, processingBaseline: '05.10' }));
+  await page.route('**/api/live/sentinel/search', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items }) }));
+  const sent: { params: { items: { id: string }[] } }[] = [];
+  await page.route('**/api/jobs', async route => {
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    if (route.request().method() !== 'POST' || body.tool !== 'sentinel_composite') return route.fallback();
+    sent.push(body);
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: '0'.repeat(32), tool: 'sentinel_composite', state: 'done', progress: 1, message: 'Done', result: { file, notes: ['Median composite of 2 Sentinel-2 L2A scenes.'] } }) });
+  });
+  await openTool(page, 'Satellite imagery');
+  await page.locator('summary', { hasText: 'Search Sentinel-2 scenes' }).click();
+  await page.click('#s2-search');
+  await expect(page.locator('#s2-composite')).toBeDisabled();
+  await page.check(`input[aria-label="Combine ${items[0].id}"]`);
+  await page.check(`input[aria-label="Combine ${items[2].id}"]`);
+  await page.click('#s2-composite');
+  await expect(page.locator('.core-analysis-module')).toContainText('S2_median_2024-01-05_2024-03-01.tif');
+  expect(sent[0].params.items.map(i => i.id)).toEqual([items[0].id, items[2].id]);
+  // Every pixel kept: NDVI = (0.34 − 0.04) / (0.34 + 0.04) = 0.7895, and no quality mask.
+  await expect(page.locator('.report-card')).toContainText('0.7895');
+  await expect(page.locator('.report-card')).not.toContainText('Quality mask from band 5');
+  expect(errors).toEqual([]);
+});
+
 test('radar: two searched Sentinel-1 dates give a change map', async ({ page }) => {
   const errors = await start(page);
   // Two VV/VH windows as the server writes them (γ⁰, linear power), the second with a 7 dB VH drop over 50 × 50 px.

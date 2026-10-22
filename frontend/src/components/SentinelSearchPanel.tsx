@@ -17,8 +17,8 @@ interface StacItem {
 interface Props {
   target: { lat: number; lon: number; name: string };
   boundary: Boundary | null;
-  /** The scene window, stored on the server as a 5-band GeoTIFF (blue, green, red, NIR, SCL). */
-  onRaster: (file: StoredFile<RasterMeta>, notes: string[]) => void;
+  /** A scene window (5 bands: blue, green, red, NIR, SCL) or a median composite (band 5: clear observations), stored on the server. */
+  onRaster: (file: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite') => void;
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -45,6 +45,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
   const [cloud, setCloud] = useState('20');
   const [km, setKm] = useState('3');
   const [items, setItems] = useState<StacItem[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const job = useJob();
   const busy = job.busy;
 
@@ -64,13 +65,29 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
     );
     if (!r) return;
     setItems(r.items);
+    setPicked(new Set());
     if (!r.items.length) notify('No scenes match. Widen the dates or raise the cloud limit.');
   };
 
   const load = async (item: StacItem) => {
     const r = await job.run(item.id, (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>('sentinel', {}, { item, bbox: bbox() }, { signal, onProgress }), fail);
-    if (r) onRaster(r.file, r.notes);
+    if (r) onRaster(r.file, r.notes, 'scene');
   };
+
+  const MAX_COMPOSITE = 12;
+  const composite = async () => {
+    const chosen = (items ?? []).filter(it => picked.has(it.id));
+    if (chosen.length < 2 || chosen.length > MAX_COMPOSITE) return fail(`Tick between 2 and ${MAX_COMPOSITE} scenes to combine.`);
+    const r = await job.run('composite', (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>('sentinel_composite', {}, { items: chosen, bbox: bbox() }, { signal, onProgress }), fail);
+    if (r) onRaster(r.file, r.notes, 'composite');
+  };
+  const toggle = (id: string) =>
+    setPicked(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <details className="sub-panel live-panel">
@@ -110,6 +127,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
                 <th>Date</th>
                 <th>Scene</th>
                 <th>Cloud (tile)</th>
+                <th>Combine</th>
                 <th />
               </tr>
             </thead>
@@ -120,6 +138,9 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
                   <td>{it.id}</td>
                   <td className="num">{it.cloud === null ? '—' : `${it.cloud.toFixed(1)} %`}</td>
                   <td>
+                    <input type="checkbox" className="s2-pick" aria-label={`Combine ${it.id}`} checked={picked.has(it.id)} onChange={() => toggle(it.id)} />
+                  </td>
+                  <td>
                     <button type="button" className="btn btn-small" disabled={Boolean(busy)} onClick={() => load(it)}>
                       {busy === it.id ? 'Reading…' : 'Load'}
                     </button>
@@ -128,6 +149,23 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
               ))}
             </tbody>
           </table>
+          <div className="button-row">
+            <button
+              type="button"
+              className="btn btn-small"
+              disabled={Boolean(busy)}
+              onClick={() => setPicked(picked.size ? new Set() : new Set(items.slice(0, MAX_COMPOSITE).map(it => it.id)))}
+            >
+              {picked.size ? 'Clear ticks' : `Tick ${Math.min(items.length, MAX_COMPOSITE)}`}
+            </button>
+            <button type="button" id="s2-composite" className="btn btn-primary push-right" disabled={Boolean(busy) || picked.size < 2 || picked.size > MAX_COMPOSITE} onClick={composite}>
+              {busy === 'composite' ? 'Combining…' : `Cloud-free composite of ${picked.size} scene${picked.size === 1 ? '' : 's'}`}
+            </button>
+          </div>
+          <p className="field-hint">
+            A composite takes, for each pixel, the median of the scenes’ cloud-free observations (each scene’s own cloud classification), so cloudy months still give a full
+            image. Band 5 of the result counts the clear observations per pixel.
+          </p>
         </div>
       )}
       <p className="field-hint">

@@ -196,3 +196,32 @@ test('canopy: LiDAR point cloud gives height, cover and tree tops', async ({ pag
   expect(dl.suggestedFilename()).toBe('chm.tif');
   expect(errors).toEqual([]);
 });
+
+test('forest loss: stratified sample gives the loss area with a confidence interval', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Forest loss');
+  await page.click('button:has-text("Try synthetic sample")');
+  await expect(page.locator('.result-block .stat-grid').first()).toContainText('Forest loss');
+  await page.fill('#forest-sample-total', '120');
+  await page.fill('#forest-sample-min', '25');
+  await page.click('#forest-sample');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Validation sample (CSV)")')]);
+  const csv = await (await import('node:fs/promises')).readFile((await dl.path())!, 'utf8');
+  const [head, ...lines] = csv.trim().split(/\r?\n/);
+  const cols = head.split(',');
+  // The map is right except that two stable-forest points were in fact cleared.
+  let missed = 0;
+  const labelled = [head, ...lines.map(l => {
+    const v = l.split(',');
+    const map = v[cols.indexOf('map_class')];
+    const ref = map === 'Stable forest' && missed < 2 ? (missed++, 'Forest loss') : map;
+    v[cols.indexOf('reference')] = ref;
+    return v.join(',');
+  })].join('\n');
+  expect(lines).toHaveLength(120);
+  await page.setInputFiles('#forest-reference', { name: 'labelled.csv', mimeType: 'text/csv', buffer: Buffer.from(labelled) });
+  const loss = page.locator('#forest-accuracy tbody tr', { hasText: 'Forest loss' });
+  await expect(loss).toContainText('±');
+  await expect(page.locator('.report-card')).toContainText('Accuracy and area (stratified sample)');
+  expect(errors).toEqual([]);
+});

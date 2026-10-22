@@ -296,3 +296,57 @@ def test_sentinel_offset_is_checked_against_the_data(tmp_path, monkeypatch):
     assert live.offset_in_data(np.full((20, 20), 1350.0), veg) is True
     assert live.offset_in_data(np.full((20, 20), 350.0), veg) is False
     assert live.offset_in_data(np.full((20, 20), 350.0), np.full((20, 20), 5.0)) is None
+
+
+def test_sentinel2_median_composite_masks_clouds_and_aligns_grids(tmp_path, monkeypatch):
+    """Three dates over one area: a cloud in one (SCL 9) is ignored, the median is of the clear values, and a scene on a
+    shifted grid is reprojected onto the first one's grid."""
+    E0, N0 = 600000, 2850000
+
+    def scene(path, red, cloud, origin_shift=0.0):
+        data = np.zeros((5, 60, 60), dtype=np.float32)
+        data[0], data[1], data[2], data[3] = 0.03, 0.05, red, 0.30
+        data[4] = 4  # SCL vegetation
+        if cloud:
+            data[2, :20, :] = 0.40  # bright cloud in the red band ...
+            data[4, :20, :] = 9  # ... flagged as cloud (high probability)
+        with rasterio.open(path, "w", driver="GTiff", width=60, height=60, count=5, dtype="float32", crs="EPSG:32646",
+                           transform=from_origin(E0 + origin_shift, N0, 10, 10), nodata=np.nan) as d:
+            d.write(data)
+        return ["Reflectance note."]
+
+    values = {"A": (0.04, False, 0.0), "B": (0.06, True, 0.0), "C": (0.08, False, 5.0), "D": None}
+
+    def fake_read(item, bbox, out):
+        v = values[item.id]
+        if v is None:
+            raise ValueError("The area does not overlap this scene.")
+        return scene(out, *v)
+
+    items = [live.StacItem(id=k, datetime=f"2024-0{i + 1}-10T04:30:00Z", cloud=5.0, epsg=32646, assets={}) for i, k in enumerate(values)]
+    out = tmp_path / "median.tif"
+    info = live.composite_s2(items, [94.0, 25.7, 94.01, 25.71], out, tmp_path, read=fake_read)
+    with rasterio.open(out) as d:
+        assert d.count == 5 and d.descriptions[4] == "clear observations" and (d.width, d.height) == (60, 60)
+        red, clear = d.read(3), d.read(5)
+    # Under B's cloud only A and C are clear: median of 0.04 and 0.08 = 0.06. Elsewhere median of 0.04, 0.06, 0.08 = 0.06 too,
+    # so check the cloud never leaks in (0.40 would lift it) and the counts.
+    assert np.nanmax(red[1:-1, 1:-1]) == pytest.approx(0.06, abs=1e-6)
+    assert clear[5, 30] == 2 and clear[40, 30] == 3
+    assert info["scenes"] == ["A", "B", "C"] and any("Left out" in n and "D (" in n for n in info["notes"])
+    assert any("Median composite of 3" in n for n in info["notes"])
+    with pytest.raises(ValueError, match="between 2 and"):
+        live.composite_s2(items[:1], [94.0, 25.7, 94.01, 25.71], out, tmp_path, read=fake_read)
+    with pytest.raises(ValueError, match="Fewer than two"):
+        live.composite_s2([items[0], items[3]], [94.0, 25.7, 94.01, 25.71], out, tmp_path, read=fake_read)
+    # Through the tool, as the API runs it.
+    monkeypatch.setattr(live, "read_s2_window", fake_read)
+    from fastapi.testclient import TestClient
+
+    from terrax.api.main import app
+
+    c = TestClient(app)
+    job = c.post("/api/jobs", json={"tool": "sentinel_composite", "inputs": {}, "params": {"items": [i.public() for i in items[:3]], "bbox": [94.0, 25.7, 94.01, 25.71]}}).json()
+    assert job["state"] == "done", job
+    f = job["result"]["file"]
+    assert f["kind"] == "raster" and f["meta"]["bands"] == 5 and f["name"].startswith("S2_median_2024-01-10_2024-03-10")

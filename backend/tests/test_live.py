@@ -85,3 +85,23 @@ def test_sentinel2_reflectance_is_physical(client):
         report.append(line)
     assert ok, "no scene had 100 vegetation pixels:\n" + "\n".join(report)
     assert all(ok), "reflectance is not physical:\n" + "\n".join(report)
+
+
+def test_sentinel2_median_composite_of_real_scenes(client):
+    """Several real dry-season scenes over the same area: a composite with few empty pixels and NIR above red."""
+    import rasterio
+
+    from terrax import storage
+
+    r = client.post("/api/live/sentinel/search", json={"bbox": BBOX, "start": "2024-01-01", "end": "2024-03-31", "maxCloud": 60, "limit": 10})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"][:4]
+    assert len(items) >= 2, "fewer than two Sentinel-2 scenes in three months"
+    res = run(client, "sentinel_composite", {}, {"items": items, "bbox": BBOX})
+    comp = res["composite"]
+    assert len(comp["scenes"]) >= 2 and comp["emptyShare"] < 0.2, comp
+    with rasterio.open(storage.get_file(res["file"]["id"]).path) as d:
+        red, nir, clear = d.read(3), d.read(4), d.read(5)
+    ok = np.isfinite(red) & np.isfinite(nir)
+    assert ok.mean() > 0.8 and 0 < float(np.median(red[ok])) < 0.2 and float(np.median(nir[ok])) > float(np.median(red[ok])) + 0.05
+    assert clear.max() <= len(comp["scenes"])

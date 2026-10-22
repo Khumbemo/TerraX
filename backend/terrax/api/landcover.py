@@ -1,5 +1,5 @@
-"""Land-cover validation: a stratified random sample of a classified map, and the accuracy and area estimates
-from its reference labels (Olofsson et al. 2014)."""
+"""Map validation: a stratified random sample of a classified map (land cover, forest change or burn severity), and
+the accuracy and area estimates from its reference labels (Olofsson et al. 2014)."""
 
 from __future__ import annotations
 
@@ -35,16 +35,29 @@ class AccuracyRequest(BaseModel):
     file: str
 
 
-def _job(job_id: str, p: Principal) -> tuple[dict, Path]:
+class _Map(BaseModel):
+    """What validation needs from a classified map's job, whichever tool made it."""
+
+    labels: list[str]
+    file: str
+    filename: str
+
+
+def _job(job_id: str, p: Principal) -> tuple[_Map, Path]:
     try:
         auth.own_job(p, job_id)
         st = storage.job_status(job_id)
     except KeyError:
-        raise HTTPException(404, "That classification is no longer on the server. Run it again.") from None
+        raise HTTPException(404, "That map is no longer on the server. Run the analysis again.") from None
     res = storage.job_result(job_id)
-    if st["tool"] != "landcover" or not res:
-        raise HTTPException(400, "Classify the image first.")
-    return res, storage.job_dir(job_id) / "artifacts"
+    art = storage.job_dir(job_id) / "artifacts"
+    if not res or st["tool"] not in ("landcover", "forest"):
+        raise HTTPException(400, "Validation needs a classified map: land cover, forest change or burn severity.")
+    if not (art / "classes.npz").exists():
+        raise HTTPException(400, "This result was made before maps could be validated. Run the analysis again.")
+    if st["tool"] == "landcover":
+        return _Map(labels=res["labels"], file=res["file"], filename=res["landcover"]["filename"]), art
+    return _Map(labels=res["labels"], file=res["file"], filename=res["filename"]), art
 
 
 def _mapped(classes: np.ndarray, row_area: np.ndarray, k: int) -> np.ndarray:
@@ -63,20 +76,21 @@ def cochran_n(weights: np.ndarray, user_accuracy: float = 0.8, se: float = 0.01)
     return math.ceil((float(np.sum(weights)) * s / se) ** 2)
 
 
+@router.post("/api/jobs/{job_id}/validation/sample")
 @router.post("/api/landcover/{job_id}/sample")
 def sample(job_id: str, req: SampleRequest, p: Principal = Depends(principal)) -> dict:
-    res, art = _job(job_id, p)
+    m, art = _job(job_id, p)
     d = np.load(art / "classes.npz")
     classes, row_area = d["classes"], d["rowArea"]
-    stats = res["landcover"]["stats"]
-    k = len(stats)
-    labels = [(req.labels[i] if req.labels and i < len(req.labels) and req.labels[i] else res["labels"][i]) for i in range(k)]
+    k = len(m.labels)
+    labels = [(req.labels[i] if req.labels and i < len(req.labels) and req.labels[i] else m.labels[i]) for i in range(k)]
     areas = _mapped(classes, row_area, k)
-    total = req.total or max(100 * k, req.minPerClass * k)
+    present = int((areas > 0).sum())
+    total = req.total or max(100 * present, req.minPerClass * present)
     sizes = allocate(areas, total, req.minPerClass)
     pts = stratified_sample(classes, list(range(1, k + 1)), sizes, req.seed)
     pts.sort(key=lambda p: (p[2], p[0], p[1]))
-    f = storage.get_file(res["file"])
+    f = storage.get_file(m.file)
     r = Raster(f.path, f.name, max_pixels=settings().max_pixels)
     h, w = classes.shape
     ll = grid_to_lonlat_arrays(r, w, h) if (r.gw, r.gh) == (w, h) else None
@@ -96,7 +110,7 @@ def sample(job_id: str, req: SampleRequest, p: Principal = Depends(principal)) -
             feats.append({"type": "Feature", "properties": {"id": ids[i], "map_class": labels[c - 1], "reference": ""}, "geometry": {"type": "Point", "coordinates": [x, y]}})
     (art / "sample.json").write_text(json.dumps({"labels": labels, "areas": areas.tolist(), "geo": bool(np.any(row_area != 1)),
                                                  "points": [{"id": ids[i], "row": p[0], "col": p[1], "map": p[2]} for i, p in enumerate(pts)]}))
-    base = res["landcover"]["filename"].rsplit(".", 1)[0]
+    base = m.filename.rsplit(".", 1)[0]
     (art / f"{base}_validation_sample.csv").write_text(lines.getvalue(), encoding="utf-8")
     def download(label: str, name: str, media: str) -> dict:
         return {"label": label, "filename": name, "url": sign_urls(f"/api/jobs/{job_id}/artifacts/{name}", job_id), "mediaType": media}
@@ -139,6 +153,7 @@ def _read_labels(path, name: str) -> dict[str, str]:
     return out
 
 
+@router.post("/api/jobs/{job_id}/validation/accuracy")
 @router.post("/api/landcover/{job_id}/accuracy")
 def accuracy(job_id: str, req: AccuracyRequest, who: Principal = Depends(principal)) -> dict:
     _, art = _job(job_id, who)
