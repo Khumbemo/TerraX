@@ -446,3 +446,19 @@ def test_signed_media_links_work_without_cookies_and_expire(app, monkeypatch):
     assert c.delete(f"/api/jobs/{job['id']}").status_code == 204
     monkeypatch.setenv("TERRAX_AUTH", "required")
     assert cookieless.get(art).status_code == 404
+
+
+def test_saved_projects_do_not_carry_signed_links(app):
+    """A shared project must not hand its owner's picture access to the people it is shared with."""
+    c = new_client(app)
+    signup(c, uniq("projlinks"))
+    fid = sample(c)
+    art = c.post("/api/jobs", json={"tool": "terrain", "inputs": {"dem": fid}}).json()["result"]["layers"]["slope"]
+    assert "?t=" in art
+    report = {"id": "r1", "title": "T", "content": "x" * 500 + f" ![slope]({art})", "figures": [{"title": "Slope", "url": art}]}
+    pid = c.post("/api/projects", json={"name": "links", "data": {"reports": [report]}}).json()["id"]
+    saved = c.get(f"/api/projects/{pid}").json()["data"]["reports"][0]
+    assert saved["figures"][0]["url"] == art.split("?")[0] and "?t=" not in saved["content"] and art.split("?")[0] in saved["content"]
+    assert c.get(saved["figures"][0]["url"]).status_code == 200  # the owner still opens it with their session
+    c.put(f"/api/projects/{pid}", json={"data": {"reports": [report]}})
+    assert "?t=" not in str(c.get(f"/api/projects/{pid}").json()["data"])

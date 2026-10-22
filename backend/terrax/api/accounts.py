@@ -491,6 +491,12 @@ class ShareIn(BaseModel):
     canEdit: bool = False
 
 
+def _clean(data: dict[str, Any]) -> dict[str, Any]:
+    from ..signing import strip_tokens
+
+    return strip_tokens(data)
+
+
 def _check_size(data: dict[str, Any]) -> None:
     if len(json.dumps(data, separators=(",", ":"))) > PROJECT_MAX_BYTES:
         raise HTTPException(413, f"The project is larger than {PROJECT_MAX_BYTES // (1024 * 1024)} MB; remove some saved reports or their figures.")
@@ -537,7 +543,7 @@ def list_projects(p: Principal = Depends(require_user)) -> dict[str, Any]:
 def create_project(req: ProjectIn, p: Principal = Depends(require_user)) -> dict[str, Any]:
     _check_size(req.data)
     now = time.time()
-    pr = {"id": secrets.token_hex(16), "owner": p.user_id, "name": req.name.strip(), "data": req.data, "created": now, "updated": now}
+    pr = {"id": secrets.token_hex(16), "owner": p.user_id, "name": req.name.strip(), "data": _clean(req.data), "created": now, "updated": now}
     with db.connect() as c:
         c.execute(db.projects.insert().values(**pr))
     return _summary(pr, "owner")
@@ -565,7 +571,7 @@ def update_project(project_id: str, req: ProjectPatch, p: Principal = Depends(re
         values["name"] = req.name.strip()
     if req.data is not None:
         _check_size(req.data)
-        values["data"] = req.data
+        values["data"] = _clean(req.data)
     with db.connect() as c:
         c.execute(update(db.projects).where(db.projects.c.id == project_id).values(**values))
     return _summary(pr | values, access)

@@ -176,7 +176,7 @@ index 0cd18cc..a06af00 100644
 +if (fixed.includes('�')) throw new Error('index.html has a U+FFFD outside a JS string literal; check the build.');
 +if (fixed !== html) writeFileSync(page, fixed);
 diff --git a/src/App.tsx b/src/App.tsx
-index 297c3c8..4a90d4e 100644
+index 297c3c8..c5fc373 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
 @@ -36,6 +36,8 @@ const DataTool = lazy(() => import('./components/tools/DataTool'));
@@ -188,7 +188,59 @@ index 297c3c8..4a90d4e 100644
  const ReportsView = lazy(() => import('./components/ReportsView'));
  const SettingsModal = lazy(() => import('./components/SettingsModal'));
  const Tour = lazy(() => import('./components/Tour'));
-@@ -388,7 +390,7 @@ export default function App() {
+@@ -165,27 +167,33 @@ export default function App() {
+   };
+ 
+   const PREF_KEYS = ['declination', 'units', 'theme', 'lang'];
+-  const exportProject = () => {
++  const currentProject = () => {
+     const preferences: Record<string, unknown> = {};
+     for (const k of PREF_KEYS) {
+       const v = getJSON<unknown>(k, null);
+       if (v !== null) preferences[k] = v;
+     }
+-    const p = buildProject({ target, boundary, reports, preferences });
++    return buildProject({ target, boundary, reports, preferences });
++  };
++  const exportProject = () => {
++    const p = currentProject();
+     downloadText(JSON.stringify(p), `TerraX_project_${new Date().toISOString().slice(0, 10)}.terrax.json`, 'application/json').catch(err =>
+       notify(err instanceof Error ? err.message : 'The download failed.', 'error'),
+     );
+   };
+ 
++  const applyProject = (p: ReturnType<typeof parseProject>, verb: string) => {
++    const { reports: merged, added } = mergeReports(reports, p.reports);
++    persistReports(merged);
++    if (p.target) updateTarget(p.target);
++    if (p.boundary) setBoundary(p.boundary);
++    for (const k of PREF_KEYS) if (k in p.preferences) setJSON(k, p.preferences[k]);
++    notify(`Project ${verb}: ${added} new report${added === 1 ? '' : 's'}${p.boundary ? ', analysis boundary' : ''}${p.target ? ', target location' : ''}. Reload to apply display preferences.`, 'success');
++  };
++
+   const importProject = async (file: File) => {
+     try {
+-      const p = parseProject(JSON.parse(await file.text()));
+-      const { reports: merged, added } = mergeReports(reports, p.reports);
+-      persistReports(merged);
+-      if (p.target) updateTarget(p.target);
+-      if (p.boundary) setBoundary(p.boundary);
+-      for (const k of PREF_KEYS) if (k in p.preferences) setJSON(k, p.preferences[k]);
+-      notify(`Project imported: ${added} new report${added === 1 ? '' : 's'}${p.boundary ? ', analysis boundary' : ''}${p.target ? ', target location' : ''}. Reload to apply display preferences.`, 'success');
++      applyProject(parseProject(JSON.parse(await file.text())), 'imported');
+     } catch (err) {
+       notify(err instanceof SyntaxError ? `${file.name} is not valid JSON.` : err instanceof Error ? err.message : 'Could not import the project.', 'error');
+     }
+@@ -354,6 +362,8 @@ export default function App() {
+                 onGoExplore={() => setView('explore')}
+                 onExportProject={exportProject}
+                 onImportProject={importProject}
++                currentProject={currentProject}
++                onOpenProject={p => applyProject(parseProject(p), 'opened from your account')}
+               />
+             </Suspense>
+           ) : (
+@@ -388,7 +398,7 @@ export default function App() {
                          </button>
                        )}
                      </div>
@@ -197,7 +249,7 @@ index 297c3c8..4a90d4e 100644
                        <div className="boundary-banner" role="status">
                          <span>
                            Analysis boundary: <strong>{boundary.name}</strong> ({(boundary.areaM2 / 10_000).toFixed(2)} ha).{' '}
-@@ -408,6 +410,8 @@ export default function App() {
+@@ -408,6 +418,8 @@ export default function App() {
                        {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}
                        {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                        {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
@@ -304,6 +356,144 @@ index a25ecb1..c2c22a2 100644
              <li key={h}>{h}</li>
            ))}
          </ul>
+diff --git a/src/components/ReportsView.tsx b/src/components/ReportsView.tsx
+index 69a1e25..c973b15 100644
+--- a/src/components/ReportsView.tsx
++++ b/src/components/ReportsView.tsx
+@@ -1,7 +1,9 @@
+-import { useState } from 'react';
++import { useEffect, useState } from 'react';
+ import ReactMarkdown from 'react-markdown';
+ import remarkGfm from 'remark-gfm';
+ import { useToast } from '../lib/toast';
++import { accountError, accountStore, type AccountStore, type SavedProjectSummary } from '../lib/account-store';
++import type { Project } from '../lib/project';
+ import type { ReportRecord } from '../lib/types';
+ import { exportReport } from './ReportPanel';
+ 
+@@ -13,6 +15,97 @@ interface Props {
+   onGoExplore: () => void;
+   onExportProject: () => void;
+   onImportProject: (file: File) => void;
++  currentProject: () => Project;
++  onOpenProject: (p: Project) => void;
++}
++
++/** Projects kept in the viewer's claude.ai account (private to them); hidden outside claude.ai. */
++function AccountProjects({ currentProject, onOpenProject }: Pick<Props, 'currentProject' | 'onOpenProject'>) {
++  const notify = useToast();
++  const [store, setStore] = useState<AccountStore | null>(null);
++  const [saved, setSaved] = useState<SavedProjectSummary[] | null>(null);
++  const [name, setName] = useState('');
++  const [busy, setBusy] = useState(false);
++  useEffect(() => {
++    let live = true;
++    accountStore()
++      .then(async s => {
++        if (!live || !s) return;
++        setStore(s);
++        const list = await s.list();
++        if (live) setSaved(list);
++      })
++      .catch(() => undefined); // no account behind this view: the panel stays hidden
++    return () => {
++      live = false;
++    };
++  }, []);
++  if (!store) return null;
++  const run = async (fn: () => Promise<void>) => {
++    setBusy(true);
++    try {
++      await fn();
++    } catch (err) {
++      notify(accountError(err), 'error');
++    } finally {
++      setBusy(false);
++    }
++  };
++  return (
++    <div className="project-bar account-projects" id="account-projects">
++      <span className="muted">Your account: projects saved here are private to you and open wherever you sign in to claude.ai.</span>
++      <div className="button-row push-right">
++        <input id="account-project-name" className="param-input" placeholder="Project name" maxLength={120} value={name} onChange={e => setName(e.target.value)} />
++        <button
++          type="button"
++          id="account-project-save"
++          className="btn btn-small btn-primary"
++          disabled={busy || !name.trim()}
++          onClick={() =>
++            run(async () => {
++              const s = await store.save(name.trim(), currentProject());
++              setSaved(await store.list());
++              setName('');
++              notify(`Saved “${s.name}” to your account${s.droppedFigures ? `; ${s.droppedFigures} figure${s.droppedFigures === 1 ? ' was' : 's were'} too large and left out (the PDF keeps them)` : ''}.`, 'success');
++            })
++          }
++        >
++          Save to my account
++        </button>
++      </div>
++      {saved && saved.length > 0 && (
++        <ul className="account-project-list">
++          {saved.map(p => (
++            <li key={p.id}>
++              <span>
++                <strong>{p.name}</strong> · {p.reports} report{p.reports === 1 ? '' : 's'} · {new Date(p.savedAt).toLocaleString()}
++              </span>
++              <span className="button-row">
++                <button type="button" className="btn btn-small" disabled={busy} onClick={() => run(async () => onOpenProject(await store.open(p.id)))}>
++                  Open
++                </button>
++                <button
++                  type="button"
++                  className="btn btn-small"
++                  disabled={busy}
++                  onClick={() =>
++                    window.confirm(`Delete “${p.name}” from your account?`) &&
++                    run(async () => {
++                      await store.remove(p.id);
++                      setSaved(await store.list());
++                    })
++                  }
++                >
++                  Delete
++                </button>
++              </span>
++            </li>
++          ))}
++        </ul>
++      )}
++      {saved && saved.length === 0 && <span className="muted">No projects saved to your account yet.</span>}
++    </div>
++  );
+ }
+ 
+ function ProjectBar({ onExportProject, onImportProject }: Pick<Props, 'onExportProject' | 'onImportProject'>) {
+@@ -42,7 +135,7 @@ function ProjectBar({ onExportProject, onImportProject }: Pick<Props, 'onExportP
+   );
+ }
+ 
+-export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExplore, onExportProject, onImportProject }: Props) {
++export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExplore, onExportProject, onImportProject, currentProject, onOpenProject }: Props) {
+   const notify = useToast();
+   const [confirmId, setConfirmId] = useState<string | null>(null);
+   const open = reports.find(r => r.id === openId) ?? reports[0] ?? null;
+@@ -51,6 +144,7 @@ export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExp
+     return (
+       <>
+       <ProjectBar onExportProject={onExportProject} onImportProject={onImportProject} />
++      <AccountProjects currentProject={currentProject} onOpenProject={onOpenProject} />
+       <div className="empty-state">
+         <h2>No saved reports yet</h2>
+         <p>Load a dataset in Explore, then choose “Save to Reports” on its report.</p>
+@@ -73,6 +167,7 @@ export default function ReportsView({ reports, openId, onOpen, onDelete, onGoExp
+   return (
+     <>
+     <ProjectBar onExportProject={onExportProject} onImportProject={onImportProject} />
++      <AccountProjects currentProject={currentProject} onOpenProject={onOpenProject} />
+     <div className="reports-layout">
+       <aside className="report-list" aria-label="Saved reports">
+         <div className="eyebrow">Saved reports ({reports.length})</div>
 diff --git a/src/components/SettingsModal.tsx b/src/components/SettingsModal.tsx
 index 9ec3ced..50ee035 100644
 --- a/src/components/SettingsModal.tsx
@@ -1596,6 +1786,186 @@ index 1963e1f..0b199c3 100644
                <li key={n}>{n}</li>
              ))}
            </ul>
+diff --git a/src/index.css b/src/index.css
+index 32e38f4..d0d4f67 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -2520,3 +2520,27 @@ details[open] > summary {
+ .class-popup .muted {
+   font-size: 11px;
+ }
++.account-projects input {
++  min-width: 180px;
++  padding: 5px 8px;
++  border: 1px solid var(--line);
++  border-radius: 6px;
++  background: transparent;
++  color: inherit;
++  font: inherit;
++}
++.account-project-list {
++  flex-basis: 100%;
++  margin: 0;
++  padding: 0;
++  list-style: none;
++}
++.account-project-list li {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: 6px 12px;
++  padding: 6px 0;
++  border-top: 1px solid var(--line);
++}
+diff --git a/src/lib/account-store.ts b/src/lib/account-store.ts
+new file mode 100644
+index 0000000..9427b85
+--- /dev/null
++++ b/src/lib/account-store.ts
+@@ -0,0 +1,142 @@
++// Projects kept in the viewer's claude.ai account, through the artifact's private per-person store
++// (`db` under data/users/<id>/, readable only by that person, not even by the page's owner) and the `user`
++// capability for the id. Outside claude.ai (a local build, a saved file) neither exists and the feature hides.
++//
++// Layout, one document each (every document must stay under the store's 256 KiB):
++//   data/users/<id>/terrax/projects/<projectId>                 name, savedAt, target, boundary, preferences, reportIds
++//   data/users/<id>/terrax/projects/<projectId>/reports/<rid>   one report, with as many of its figures as fit
++import type { Project } from './project';
++import { buildProject } from './project';
++import type { ReportRecord } from './types';
++
++/** The store's document limit is 256 KiB of serialised JSON; keep a margin for its own encoding. */
++export const DOC_LIMIT = 240 * 1024;
++
++export interface SavedProjectSummary {
++  id: string;
++  name: string;
++  savedAt: string;
++  reports: number;
++  droppedFigures: number;
++}
++
++const bytes = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length;
++
++/** A report as one document: all figures if they fit, else the largest set of figures (in order) that does. */
++export function fitReport(r: ReportRecord, limit = DOC_LIMIT): { doc: ReportRecord; dropped: number } {
++  if (bytes(r) <= limit) return { doc: r, dropped: 0 };
++  const { figures = [], ...text } = r;
++  if (bytes(text) > limit) throw new Error(`The report “${r.title}” is too large to save in your account even without its figures. Export the project file instead.`);
++  const kept: NonNullable<ReportRecord['figures']> = [];
++  for (const f of figures) if (bytes({ ...text, figures: [...kept, f] }) <= limit) kept.push(f);
++  return { doc: kept.length ? { ...text, figures: kept } : text, dropped: figures.length - kept.length };
++}
++
++/** The project document without its reports (they are stored one per document). */
++export function projectHead(name: string, p: Project, limit = DOC_LIMIT) {
++  const head = { name, savedAt: new Date().toISOString(), target: p.target, boundary: p.boundary, preferences: p.preferences, reportIds: p.reports.map(r => r.id) };
++  if (bytes(head) > limit) throw new Error('The analysis boundary is too detailed to save in your account (over 240 KB). Simplify it, or export the project file instead.');
++  return head;
++}
++
++export function projectFromDocs(head: Record<string, unknown>, reports: ReportRecord[]): Project {
++  const order = new Map(((head.reportIds as string[]) ?? []).map((id, i) => [id, i]));
++  return buildProject({
++    target: (head.target as Project['target']) ?? null,
++    boundary: (head.boundary as Project['boundary']) ?? null,
++    preferences: (head.preferences as Record<string, unknown>) ?? {},
++    reports: [...reports].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)),
++  });
++}
++
++// ── The capability calls (shapes per the artifact runtime's db and user contracts) ──
++
++interface DocSnap {
++  id: string;
++  exists: boolean;
++  data(): Record<string, unknown> | undefined;
++}
++interface DocRef {
++  id: string;
++  get(): Promise<DocSnap>;
++  set(data: Record<string, unknown>): Promise<void>;
++  delete(): Promise<void>;
++  collection(path: string): CollRef;
++}
++interface CollRef {
++  doc(id?: string): DocRef;
++  get(): Promise<{ docs: DocSnap[] }>;
++}
++interface Db {
++  doc(path: string): DocRef;
++}
++interface ClaudeRuntime {
++  use(name: 'db'): Promise<Db | null>;
++  use(name: 'user'): Promise<{ id(): Promise<string | null> } | null>;
++}
++
++export interface AccountStore {
++  list(): Promise<SavedProjectSummary[]>;
++  save(name: string, p: Project, replaceId?: string): Promise<SavedProjectSummary>;
++  open(id: string): Promise<Project>;
++  remove(id: string): Promise<void>;
++}
++
++/** The viewer's account store, or null when this view has no claude.ai account behind it. */
++export async function accountStore(): Promise<AccountStore | null> {
++  const rt = (globalThis as { claude?: ClaudeRuntime }).claude;
++  if (!rt || typeof rt.use !== 'function') return null;
++  const [db, user] = await Promise.all([rt.use('db'), rt.use('user')]);
++  const uid = user ? await user.id() : null;
++  if (!db || !uid) return null;
++  const projects = db.doc(`data/users/${uid}/terrax`).collection('projects');
++
++  const summary = (id: string, d: Record<string, unknown>): SavedProjectSummary => ({
++    id,
++    name: String(d.name ?? 'Untitled'),
++    savedAt: String(d.savedAt ?? ''),
++    reports: Array.isArray(d.reportIds) ? d.reportIds.length : 0,
++    droppedFigures: Number(d.droppedFigures ?? 0),
++  });
++  const clearReports = async (ref: DocRef) => {
++    for (const r of (await ref.collection('reports').get()).docs) await ref.collection('reports').doc(r.id).delete();
++  };
++
++  return {
++    async list() {
++      const snap = await projects.get();
++      return snap.docs.filter(d => d.exists).map(d => summary(d.id, d.data() ?? {})).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
++    },
++    async save(name, p, replaceId) {
++      const fitted = p.reports.map(r => fitReport(r));
++      const head = { ...projectHead(name, p), droppedFigures: fitted.reduce((s, f) => s + f.dropped, 0) };
++      const ref = replaceId ? projects.doc(replaceId) : projects.doc();
++      if (replaceId) await clearReports(ref);
++      for (const f of fitted) await ref.collection('reports').doc(f.doc.id).set(f.doc as unknown as Record<string, unknown>); // one write at a time
++      await ref.set(head); // last, so a listed project always has its reports
++      return summary(ref.id, head);
++    },
++    async open(id) {
++      const ref = projects.doc(id);
++      const head = await ref.get();
++      if (!head.exists) throw new Error('This project is no longer in your account.');
++      const reports = (await ref.collection('reports').get()).docs.filter(d => d.exists).map(d => d.data() as unknown as ReportRecord);
++      return projectFromDocs(head.data() ?? {}, reports);
++    },
++    async remove(id) {
++      const ref = projects.doc(id);
++      await clearReports(ref); // nested documents survive a parent's delete, so delete them first
++      await ref.delete();
++    },
++  };
++}
++
++/** A store error as a sentence for the viewer (codes per the runtime's db contract). */
++export function accountError(err: unknown): string {
++  const code = (err as { code?: string })?.code;
++  if (code === 'invalid_argument') return 'Your access to this page does not let you save. Ask its owner for Contributor access, or export the project file instead.';
++  if (code === 'quota_exceeded') return 'Your saved projects are full. Delete some, or export project files instead.';
++  if (code === 'resource_exhausted') return 'Too many saves at once. Wait a moment and try again.';
++  if (code === 'unavailable' || code === 'revoked' || code === 'not_granted') return 'Saving to your account is unavailable right now. Export the project file instead.';
++  return err instanceof Error ? err.message : 'That did not work.';
++}
 diff --git a/src/lib/assistant/knowledge.ts b/src/lib/assistant/knowledge.ts
 index f360d76..32248b7 100644
 --- a/src/lib/assistant/knowledge.ts
@@ -4120,6 +4490,110 @@ index c5faac7..764e717 100644
      } else {
        const r = kmeans(m.points, m.d, m.k, m.seed);
        post({ id: m.id, ok: true, result: r }, [r.centroids.buffer]);
+diff --git a/tests/account-store.test.ts b/tests/account-store.test.ts
+new file mode 100644
+index 0000000..a656551
+--- /dev/null
++++ b/tests/account-store.test.ts
+@@ -0,0 +1,98 @@
++import assert from 'node:assert/strict';
++import { test } from 'node:test';
++import { accountError, accountStore, DOC_LIMIT, fitReport, projectHead } from '../src/lib/account-store';
++import { buildProject } from '../src/lib/project';
++import type { ReportRecord } from '../src/lib/types';
++
++const report = (id: string, figureKb: number[]): ReportRecord => ({
++  id,
++  title: `Report ${id}`,
++  datasetName: 'demo.tif',
++  createdAt: `2026-10-0${id}T00:00:00Z`,
++  source: 'local',
++  content: '## Results\n\nNDVI 0.62',
++  figures: figureKb.map((kb, i) => ({ title: `Figure ${i}`, dataUrl: `data:image/png;base64,${'A'.repeat(kb * 1024)}`, width: 10, height: 10 })),
++});
++
++test('a report keeps every figure that fits under the document limit, in order', () => {
++  assert.equal(fitReport(report('1', [10, 20])).dropped, 0);
++  const { doc, dropped } = fitReport(report('2', [100, 200, 100]));
++  assert.equal(dropped, 1);
++  assert.deepEqual(doc.figures?.map(f => f.title), ['Figure 0', 'Figure 2']);
++  assert.ok(new TextEncoder().encode(JSON.stringify(doc)).length <= DOC_LIMIT);
++  assert.throws(() => fitReport({ ...report('3', []), content: 'x'.repeat(DOC_LIMIT + 1) }), /too large to save/);
++});
++
++test('a boundary too detailed for one document is refused with advice', () => {
++  const big = buildProject({ target: null, reports: [], preferences: {}, boundary: { name: 'b', areaM2: 1, geojson: { type: 'FeatureCollection', features: [] }, pad: 'x'.repeat(DOC_LIMIT) } as never });
++  assert.throws(() => projectHead('p', big), /too detailed/);
++});
++
++/** An in-memory stand-in for the artifact store, with its path grammar: documents at even segment counts, collections odd. */
++function fakeRuntime(uid: string | null) {
++  const docs = new Map<string, Record<string, unknown>>();
++  let n = 0;
++  const segs = (p: string) => p.split('/').length;
++  const docRef = (path: string): unknown => {
++    assert.equal(segs(path) % 2, 0, `document path ${path}`);
++    return {
++      id: path.split('/').pop(),
++      get: async () => ({ id: path.split('/').pop(), exists: docs.has(path), data: () => docs.get(path) }),
++      set: async (d: Record<string, unknown>) => {
++        assert.ok(new TextEncoder().encode(JSON.stringify(d)).length <= 256 * 1024, 'document over 256 KiB');
++        docs.set(path, structuredClone(d));
++      },
++      delete: async () => void docs.delete(path), // nested documents survive, as in the real store
++      collection: (c: string) => collRef(`${path}/${c}`),
++    };
++  };
++  const collRef = (path: string): unknown => {
++    assert.equal(segs(path) % 2, 1, `collection path ${path}`);
++    return {
++      doc: (id?: string) => docRef(`${path}/${id ?? `auto${++n}`}`),
++      get: async () => ({
++        docs: [...docs.keys()].filter(k => k.startsWith(`${path}/`) && segs(k) === segs(path) + 1).map(k => ({ id: k.split('/').pop(), exists: true, data: () => docs.get(k) })),
++      }),
++    };
++  };
++  return { docs, rt: { use: async (name: string) => (name === 'db' ? { doc: docRef } : name === 'user' ? { id: async () => uid } : null) } };
++}
++
++test('save, list, open and delete round-trip under the viewer’s private path', async () => {
++  const g = globalThis as { claude?: unknown };
++  assert.equal(await accountStore(), null); // outside claude.ai: no store
++  const { docs, rt } = fakeRuntime('u_abc');
++  g.claude = rt;
++  try {
++    const store = await accountStore();
++    assert.ok(store);
++    const p = buildProject({ target: { lat: 25.67, lon: 94.11, name: 'Kohima' }, boundary: null, preferences: { units: 'metric' }, reports: [report('1', [10]), report('2', [100, 200, 100])] });
++    const saved = await store.save('Kohima survey', p);
++    assert.equal(saved.reports, 2);
++    assert.equal(saved.droppedFigures, 1);
++    assert.ok([...docs.keys()].every(k => k.startsWith('data/users/u_abc/terrax/projects/')));
++    const list = await store.list();
++    assert.deepEqual(list.map(x => x.name), ['Kohima survey']);
++    const back = await store.open(list[0].id);
++    assert.deepEqual(back.target, p.target);
++    assert.deepEqual(back.reports.map(r => r.id), ['1', '2']);
++    assert.equal(back.reports[1].figures?.length, 2);
++    await store.remove(list[0].id);
++    assert.equal(docs.size, 0); // reports deleted too, not left behind under the parent
++    assert.deepEqual(await store.list(), []);
++  } finally {
++    delete g.claude;
++  }
++  g.claude = fakeRuntime(null).rt; // signed out: no private subtree, so no store
++  try {
++    assert.equal(await accountStore(), null);
++  } finally {
++    delete g.claude;
++  }
++});
++
++test('store errors become advice', () => {
++  assert.match(accountError({ code: 'invalid_argument' }), /Contributor access/);
++  assert.match(accountError({ code: 'quota_exceeded' }), /full/);
++  assert.match(accountError(new Error('boom')), /boom/);
++});
 diff --git a/tests/accuracy.test.ts b/tests/accuracy.test.ts
 new file mode 100644
 index 0000000..6196073

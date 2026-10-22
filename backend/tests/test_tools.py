@@ -155,7 +155,10 @@ def test_landcover_random_forest_sample_and_accuracy(client):
     res = run(client, "landcover", {"file": img, "training": shapes}, {"method": "rf", "bands": [0, 1, 2, 3], "roles": {"red": 2, "nir": 3}})
     lc = res["landcover"]
     assert res["labels"] == ["Built-up", "Forest", "Water"] and lc["method"] == "rf" and lc["validation"]["overall"] > 0.95
-    assert "Cross-validation by training shape" in res["markdown"]
+    assert "Cross-validation by training shape" in res["markdown"] and any("100 trees" in n for n in lc["notes"])
+    small = run(client, "landcover", {"file": img, "training": shapes}, {"method": "rf", "bands": [0, 1, 2, 3], "roles": {"red": 2, "nir": 3}, "trees": 50})["landcover"]
+    assert any("50 trees" in n for n in small["notes"]) and small["validation"]["overall"] > 0.95
+    assert "Choose 50, 100, 200 trees" in run_err(client, "landcover", {"file": img, "training": shapes}, {"method": "rf", "bands": [0, 1], "trees": 7})
     job_id = res["map"]["image"]["url"].split("/")[3]
     s = client.post(f"/api/landcover/{job_id}/sample", json={"total": 150, "minPerClass": 30}).json()
     assert s["points"] == 150 and [a["n"] >= 30 for a in s["allocation"]] == [True] * 3 and s["unit"] == "ha"
@@ -231,6 +234,44 @@ def test_canopy_from_point_cloud_and_rasters(client, tmp_path):
     again = run(client, "canopy", {"chm": fid}, {"threshold": 2, "minTree": 5})
     assert again["canopy"]["trees"]["count"] == 25 and again["canopy"]["cover"] == pytest.approx(c["cover"], abs=1e-9)
     assert "point cloud, a canopy height model" in run_err(client, "canopy", {}, {})
+
+
+def test_canopy_count_calibrated_by_field_plots(client, tmp_path):
+    """Ratio estimator (Cochran 1977, ch. 6): three plots around single detected tops, counted 2, 1 and 3 on the ground."""
+    import json
+    import math
+
+    from terrax.processing.canopy import calibrate_count
+
+    c = calibrate_count([2, 1, 3], [1, 1, 1], 25, 2.0)
+    assert c["ratio"] == 2 and c["total"] == 50 and c["perHa"] == 25 and c["detectionRate"] == 0.5
+    assert c["se"] == pytest.approx(25 * math.sqrt(1 / 3)) and c["ci95"][0] == 0 and c["ci95"][1] == pytest.approx(50 + 4.302653 * 25 * math.sqrt(1 / 3), rel=1e-6)
+    assert calibrate_count([4], [2], 10)["se"] is None
+    with pytest.raises(ValueError, match="No tree tops were detected"):
+        calibrate_count([3, 4], [0, 0], 10)
+
+    cloud = sample(client, "lidar_forest_synthetic.laz")
+    tops = run(client, "canopy", {"cloud": cloud}, {"cell": 1, "threshold": 2, "minTree": 5})["map"]["geojson"]["features"]
+    d = 4e-6  # about ±0.4 m: each square holds one tree top (tops are a crown radius apart)
+
+    def square(x, y, n):
+        return {"type": "Feature", "properties": {"trees": n}, "geometry": {"type": "Polygon", "coordinates": [[[x - d, y - d], [x + d, y - d], [x + d, y + d], [x - d, y + d], [x - d, y - d]]]}}
+
+    feats = [square(*f["geometry"]["coordinates"], n) for f, n in zip(tops[:3], (2, 1, 3), strict=True)] + [square(10.0, 10.0, 5)]  # the last is far off the data
+    p = tmp_path / "plots.geojson"
+    p.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+    with p.open("rb") as fh:
+        plots = client.post("/api/files", files={"file": ("plots.geojson", fh, "application/geo+json")}).json()["id"]
+    res = run(client, "canopy", {"cloud": cloud, "plots": plots}, {"cell": 1, "threshold": 2, "minTree": 5})
+    cal = res["canopy"]["trees"]["calibrated"]
+    assert cal["plots"] == 3 and cal["detectedInPlots"] == 3 and cal["total"] == pytest.approx(50) and cal["se"] == pytest.approx(25 * math.sqrt(1 / 3))
+    assert "calibrated by 3 field plots | 50" in res["markdown"] and any("1 of 4 field plots lie outside" in n for n in res["notes"])
+    assert any("use at least 10" in n for n in res["notes"])
+    bad = tmp_path / "bad.geojson"
+    bad.write_text(json.dumps({"type": "FeatureCollection", "features": [{**feats[0], "properties": {"trees": 2.5}}]}))
+    with bad.open("rb") as fh:
+        bid = client.post("/api/files", files={"file": ("bad.geojson", fh, "application/geo+json")}).json()["id"]
+    assert "whole numbers" in run_err(client, "canopy", {"cloud": cloud, "plots": bid}, {"cell": 1})
 
 
 def test_sentinel1_search_load_and_radar_change(client, monkeypatch, tmp_path):

@@ -53,6 +53,18 @@ fixes made since:
   flow down the facets gives the same shares; the cells sending at least half
   export as a polygon.
 
+- Projects saved to your claude.ai account. On claude.ai, the Reports view
+  can save the boundary, target, reports and preferences to the viewer's
+  account, then open or delete them from any device where they sign in.
+  - The page uses the artifact's `user` and `db` capabilities. The data sits
+    under `data/users/<id>/terrax/projects/`, a subtree only that viewer can
+    read, not even the page's owner.
+  - Each report is its own document, under the store's 256 KiB limit. A
+    report's figures that do not fit are left out, and the app says how many.
+  - Viewers need Contributor access to save. Outside claude.ai (a local build
+    or a saved file) the panel does not appear, and project files work as
+    before.
+
 Rebuild it:
 
 ```bash
@@ -62,12 +74,12 @@ git apply ../TerraX/deploy/browser-preview/terrax-browser.patch
 cp ../TerraX/backend/data/samples/{s1_vv_vh_2023-01-08,s1_vv_vh_2024-01-03}_synthetic.tif \
    ../TerraX/backend/data/samples/{lidar_forest_synthetic.laz,landcover_training_synthetic.geojson} public/data/samples/
 npm ci
-npx tsx --test tests/*.test.ts      # 105 unit tests
+npx tsx --test tests/*.test.ts      # 109 unit tests
 npm run build:preview               # → dist-preview/
 ```
 
 Publish `dist-preview/index.html` with `maplibre-gl-worker-*.js` and `data/`
-next to it. `playwright.artifact.config.ts` runs the end-to-end tests against
+next to it, declaring the capabilities `{"downloads": {}, "db": {}, "user": {}}`. `playwright.artifact.config.ts` runs the end-to-end tests against
 that folder; five fail there by design, since the preview disables live data,
 the Sentinel-2 search and the offline service worker, and starts the map at
 zoom 5 instead of 10.

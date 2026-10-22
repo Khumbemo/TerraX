@@ -26,9 +26,9 @@ The browser uploads a file once and gets an id. To analyse it, the browser start
 | **Residential plot** | Dated GeoTIFFs plus a boundary, or same-view photos | Radiometric normalisation, robust change detection, changes crossing the boundary (area and depth) |
 | **Weather & climate** | CSV, TSV or XLSX series; Open-Meteo ERA5 or NASA POWER fetched by the server | Mann–Kendall and Theil–Sen, seasonal cycle, Seasonal Kendall, anomalies, SPI-1/3/6/12, IMD rainfall classes |
 | **Satellite imagery** | Multiband GeoTIFF; Sentinel-2 L2A windows from Earth Search; several dated images | Composites, NDVI, EVI, SAVI, NDWI, NDMI, NBR, NDBI, SCL/QA_PIXEL cloud masks, pixel inspector, multi-date trend |
-| **Land cover** | Multiband GeoTIFF (+ training shapes) | k-means (scikit-learn, k-means++) clusters ordered by NDVI, or a random forest trained on labelled polygons or points and cross-validated by shape; a stratified validation sample and accuracy and area estimates with 95 % CIs (Olofsson et al. 2014) |
+| **Land cover** | Multiband GeoTIFF (+ training shapes) | k-means (scikit-learn, k-means++) clusters ordered by NDVI, or a random forest (50, 100 or 200 trees) trained on labelled polygons or points and cross-validated by shape; a stratified validation sample and accuracy and area estimates with 95 % CIs (Olofsson et al. 2014) |
 | **Radar (Sentinel-1)** | VV/VH backscatter GeoTIFFs (dB or linear), one date or two from the same relative orbit; or search Sentinel-1 RTC (γ⁰, 10 m) on the Microsoft Planetary Computer and read the window over the area | Lee (1980) speckle filter in linear power, VV, VH, VH/VV and dual-pol RVI; VH log-ratio change map (±3 dB) with areas and a GeoTIFF export |
-| **Canopy height** | LAS/LAZ point cloud (ground classified), DSM + DTM, or a CHM GeoTIFF | Canopy height model (first returns minus TIN-filled ground), cover at 2 m and the FAO 5 m height, height classes, tree tops by local maxima with Popescu & Wynne (2004) crown windows; CHM GeoTIFF and tree-top GeoJSON |
+| **Canopy height** | LAS/LAZ point cloud (ground classified), DSM + DTM, or a CHM GeoTIFF | Canopy height model (first returns minus TIN-filled ground), cover at 2 m and the FAO 5 m height, height classes, tree tops by local maxima with Popescu & Wynne (2004) crown windows (a lower bound under overlapping crowns); with field plots counted on the ground, a calibrated tree count with a 95 % CI (ratio estimator, Cochran 1977); CHM GeoTIFF and tree-top GeoJSON |
 | **Terrain** | DEM GeoTIFF | Slope and aspect (Horn 1981), hillshade, hypsometric integral, Priority-Flood + D8 flow, Strahler streams, watersheds, contours; optional D∞ flow (Tarboton 1997) with the topographic wetness index and D∞ watersheds (upslope dependence on the clicked outlet) |
 | **Space & aerial photos** | JPG, PNG, WebP | Vegetation cover (ExG + Otsu), VARI, EXIF position on the map, comparison of two photos |
 
@@ -122,11 +122,13 @@ Measured on 4 cores, against the previous whole-grid code at full resolution:
 | Forest loss (NDVI change) | 100 MP × 2 dates | 41.8 s, 5.7 GB | 7.3 s, 0.8 GB |
 | Satellite statistics (exact quartiles) | 100 MP | 26.8 s, 3.2 GB | 5.3 s, 0.9 GB |
 | Land cover (k-means, k = 5) | 36 MP × 4 bands | 46.4 s, 5.5 GB | 14.2 s, 1.8 GB |
-| Land cover (random forest, 100 trees, 3 classes) | 36 MP × 4 bands | — | 166 s, 1.9 GB |
+| Land cover (random forest, 100 trees, 3 classes) | 36 MP × 4 bands | — | 166 s, 1.9 GB (about half with 50 trees) |
 | Terrain (slope, aspect, hillshade, layers) | 25 MP DEM | 243 s, 3.7 GB | 22 s, 2.4 GB |
 | Hydrology (fill, D8, Strahler, streams) | 25 MP DEM | 174 s, 3.7 GB | 42 s, 2.4 GB |
 
 Results were identical in each case. A 100 MP DEM takes about 200 s and 6.3 GB for hydrology.
+
+Random-forest time is almost all prediction, which is proportional to the number of trees. scikit-learn's compiled traversal already scales across cores (×3.7 on 4). Three exact re-implementations in Numba gave bit-identical results but were all slower (the best by about 25 % on 4 cores), so the speed choice is the forest size. On synthetic 3–6 class tests, 50 trees took half the time of 100 for 0.03–0.2 percentage points of accuracy, in line with Probst & Boulesteix (2018). 100 stays the default.
 
 Radar runs in strips like the optical tools, with halo rows for the speckle filter and streaming statistics (exact quartiles: 0.01 dB bins locate them, and a second pass keeps only those bins' values). Canopy height reads point clouds in chunks of 5 million points onto a grid of at most 100 million cells, and keeps the CHM in memory for tree tops (rasters use `TERRAX_DEM_PIXELS`).
 
@@ -235,7 +237,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 231 tests, on SQLite or (with `DATABASE_URL`) PostgreSQL: accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 236 tests (2 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 

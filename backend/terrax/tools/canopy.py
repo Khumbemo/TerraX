@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from ..config import settings
-from ..processing.canopy import analyze_canopy, canopy_markdown, chm_from_las
+from ..processing.canopy import analyze_canopy, calibrate_count, canopy_markdown, chm_from_las
 from ..processing.render import ramp_rgba
 from ..processing.rio import Raster, grid_to_lonlat_arrays, ground_geometry, same_grid
 from . import tool
@@ -14,6 +16,39 @@ from .context import ToolContext, ToolError
 
 CHM_COLORS = ["#f7fcf5", "#c7e9c0", "#74c476", "#238b45", "#00441b"]
 MAP_TREES = 20_000  # tree tops drawn on the map; the export keeps all of them
+COUNT_FIELDS = ("trees", "tree_count", "field_count", "count", "stems", "n")
+
+
+def _plots(ctx: ToolContext, inputs: dict, params: dict) -> list[tuple[dict, float]] | None:
+    """Field plots: polygons with the number of trees counted on the ground in each."""
+    from ..processing.survey import parse_survey_file
+
+    f = ctx.file(inputs.get("plots"))
+    if f is None:
+        return None
+    try:
+        fc, _, _ = parse_survey_file(f.path, f.name, close_ring=False)
+    except ValueError as e:
+        raise ToolError(str(e)) from None
+    feats = [x for x in fc.get("features", []) if (x.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon")]
+    if not feats:
+        raise ToolError(f"{f.name} has no polygons. Field plots are polygons, each with the number of trees counted in it.")
+    wanted = (params.get("countField") or "").strip()
+    keys = {k.lower(): k for x in feats for k in (x.get("properties") or {})}
+    key = keys.get(wanted.lower()) if wanted else next((keys[k] for k in COUNT_FIELDS if k in keys), None)
+    if key is None:
+        raise ToolError(f"Name the property that holds each plot's tree count{f' (no “{wanted}” in {f.name})' if wanted else ''}; TerraX looks for {', '.join(COUNT_FIELDS)}.")
+    out = []
+    for x in feats:
+        v = (x.get("properties") or {}).get(key)
+        try:
+            count = float(v)
+        except (TypeError, ValueError):
+            raise ToolError(f"A plot's “{key}” is “{v}”, not a number of trees.") from None
+        if not math.isfinite(count) or count < 0 or count != int(count):
+            raise ToolError(f"A plot's “{key}” is {v}; tree counts are whole numbers, zero or more.")
+        out.append((x["geometry"], count))
+    return out
 
 
 def _raster(ctx: ToolContext, inputs: dict, slot: str) -> Raster | None:
@@ -23,6 +58,17 @@ def _raster(ctx: ToolContext, inputs: dict, slot: str) -> Raster | None:
     if f.kind != "raster":
         raise ToolError(f"{f.name} is not a GeoTIFF raster.")
     return Raster(f.path, f.name, max_pixels=settings().dem_pixels)
+
+
+def _on_grid(geom, transform, crs, chm: np.ndarray) -> bool:
+    """Whether a plot (WGS84) lies wholly on the CHM's extent."""
+    from rasterio.transform import array_bounds
+    from rasterio.warp import transform_bounds
+
+    west, south, east, north = array_bounds(chm.shape[0], chm.shape[1], transform)
+    w, s, e, n = transform_bounds(crs, "EPSG:4326", west, south, east, north, densify_pts=21)
+    gw, gs, ge, gn = geom.bounds
+    return w <= gw and ge <= e and s <= gs and gn <= n
 
 
 @tool("canopy")
@@ -103,6 +149,31 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     trees = res.pop("trees")
     rows, cols, heights = trees.pop("rows"), trees.pop("cols"), trees.pop("heights")
     res["trees"] = trees
+    plots = _plots(ctx, inputs, params)
+    if plots is not None:
+        from shapely import contains_xy
+        from shapely.geometry import shape
+
+        if crs is None:
+            raise ToolError("Field plots need a point cloud or raster with a coordinate reference system, to place them on it.")
+        tops = lonlat(cols.astype(np.float64), rows.astype(np.float64)) if rows.size else (np.empty(0), np.empty(0))
+        tx, ty = np.asarray(tops[0], dtype=np.float64), np.asarray(tops[1], dtype=np.float64)
+        on_chm = [(g, n) for g, n in plots if _on_grid(shape(g), transform, crs, chm)]
+        if len(on_chm) < len(plots):
+            notes.append(f"{len(plots) - len(on_chm)} of {len(plots)} field plots lie outside the canopy height model and were left out.")
+        detected = np.array([int(contains_xy(shape(g), tx, ty).sum()) for g, _ in on_chm])
+        try:
+            cal = calibrate_count(np.array([n for _, n in on_chm]), detected, trees["count"], res["areaHa"])
+        except ValueError as e:
+            raise ToolError(str(e)) from None
+        trees["calibrated"] = cal
+        notes.append(
+            f"Calibrated count: in {cal['plots']} field plots, {cal['fieldTrees']:,} trees were counted on the ground and {cal['detectedInPlots']:,} tree tops detected "
+            f"({cal['detectionRate'] * 100:.0f} % detected). The ratio estimator (Cochran 1977, ch. 6) scales the {trees['count']:,} detected trees by "
+            f"{cal['ratio']:.3g} to {cal['total']:,.0f}"
+            + (f" (standard error {cal['se']:,.0f})" if cal["se"] is not None else "")
+            + ". It assumes the plots were placed at random over the area and counted the same trees (at least the minimum height)."
+            + (f" With {cal['plots']} plots the ratio estimate can be biased; use at least 10." if cal["plots"] < 10 else ""))
     downloads = [ctx.download("Export canopy height model (GeoTIFF)", "chm.tif", ctx.geotiff("chm.tif", chm, transform, crs, nodata=float("nan")), "image/tiff")]
     pts = lonlat(cols.astype(np.float64), rows.astype(np.float64)) if rows.size else None
     fc = None
