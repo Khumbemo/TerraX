@@ -8,6 +8,8 @@ against reference data (Olofsson et al. 2014).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from sklearn.cluster import KMeans
 
@@ -50,12 +52,39 @@ def _combine_moments(parts: list[tuple[int, np.ndarray, np.ndarray, int, int]], 
     return mean, sd
 
 
-def _strip_reader(raster: Raster, bands: list[int], qa: dict | None):
-    """Reads a strip as (pixels × bands of valid cells, valid mask, cells removed by QA, cells inside the boundary)."""
-    d = len(bands)
+@dataclass
+class RadarInput:
+    """Sentinel-1 backscatter on the optical raster's analysis grid, added as random-forest features."""
+
+    raster: Raster
+    vv: int
+    vh: int
+    scale: str  # "db" or "linear"
+    name: str = "radar"
+    aligned: bool = False  # reprojected onto the optical grid
+    source_scale: str = "linear"  # the file's own scale, when it was reprojected
+
+    def rows(self, r0: int, r1: int) -> list[np.ndarray]:
+        """VV and VH in dB and their ratio VH/VV in dB (VH dB − VV dB) for rows r0..r1."""
+        from .radar import to_linear
+
+        vv, vh = (to_linear(a, self.scale) for a in self.raster.read_rows([self.vv, self.vh], r0, r1))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            vv_db = np.where(vv > 0, 10 * np.log10(np.where(vv > 0, vv, 1)), np.nan)
+            vh_db = np.where(vh > 0, 10 * np.log10(np.where(vh > 0, vh, 1)), np.nan)
+        return [vv_db, vh_db, vh_db - vv_db]
+
+
+RADAR_FEATURES = ["VV (dB)", "VH (dB)", "VH/VV (dB)"]
+
+
+def _strip_reader(raster: Raster, bands: list[int], qa: dict | None, radar: RadarInput | None = None):
+    """Reads a strip as (pixels × features of valid cells, valid mask, cells removed by QA, cells inside the boundary).
+    Features are the bands, then the radar's VV, VH and VH/VV in dB when given."""
+    d = len(bands) + (len(RADAR_FEATURES) if radar else 0)
 
     def read(st: Strip) -> tuple[np.ndarray, np.ndarray, int, int]:
-        arrays = raster.read_rows(bands, st.r0, st.r1)
+        arrays = raster.read_rows(bands, st.r0, st.r1) + (radar.rows(st.r0, st.r1) if radar else [])
         masked = inside = 0
         if qa:
             m = qa_masked(qa["kind"], raster.read_rows([qa["band"]], st.r0, st.r1)[0])
@@ -225,7 +254,7 @@ def training_labels(fc: dict, field: str | None) -> tuple[str, list[tuple[dict, 
 FOREST_SIZES = (50, 100, 200)
 
 def classify_supervised(raster: Raster, bands: list[int], training: dict, roles: dict, label_field: str | None = None, boundary=None, qa: dict | None = None,
-                        seed: int = 7, max_per_class: int = 5000, trees: int = 100, threads: int = 1) -> dict:
+                        seed: int = 7, max_per_class: int = 5000, trees: int = 100, threads: int = 1, radar: RadarInput | None = None) -> dict:
     """Random forest (Breiman 2001) trained on labelled polygons or points, cross-validated by shape, applied strip by strip."""
     from affine import Affine
     from rasterio.features import rasterize
@@ -249,8 +278,9 @@ def classify_supervised(raster: Raster, bands: list[int], training: dict, roles:
         g = f["geometry"] if raster.meta.geographic else transform_geom("EPSG:4326", raster.crs, f["geometry"])
         geoms.append((g, code[lab], i + 1))
     plan = StripPlan(raster, boundary)
-    w, h, d = plan.width, plan.height, len(bands)
-    read = _strip_reader(raster, bands, qa)
+    nb = len(bands)
+    w, h, d = plan.width, plan.height, nb + (len(RADAR_FEATURES) if radar else 0)
+    read = _strip_reader(raster, bands, qa, radar)
 
     # Pass 1: pixels under the training shapes (cell centres; where shapes overlap, the later one wins).
     def gather(st: Strip) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
@@ -321,7 +351,8 @@ def classify_supervised(raster: Raster, bands: list[int], training: dict, roles:
     n = float(px.sum()) or 1.0
     geo = plan.geo
     stats = [{"id": j + 1, "label": labels[j], "pixels": int(px[j]), "ha": float(m2[j] / 10_000) if geo else None, "share": float(px[j] / n),
-              "bandMeans": [float(v) for v in sums[j] / (px[j] or 1)], "ndvi": float(nd_s[j] / nd_c[j]) if (ri >= 0 and ni >= 0 and nd_c[j]) else None,
+              "bandMeans": [float(v) for v in sums[j][:nb] / (px[j] or 1)],
+              **({"radarMeans": [float(v) for v in sums[j][nb:] / (px[j] or 1)]} if radar else {}), "ndvi": float(nd_s[j] / nd_c[j]) if (ri >= 0 and ni >= 0 and nd_c[j]) else None,
               "trainingPixels": int((y == j + 1).sum()), "trainingShapes": shapes_per_class[labels[j]]} for j in range(k)]
     notes: list[str] = []
     if boundary:
@@ -329,8 +360,9 @@ def classify_supervised(raster: Raster, bands: list[int], training: dict, roles:
     if qa:
         frac = sum(p[3] for p in parts) / (w * h) if w * h else 0.0
         notes.append(f"Quality mask from band {qa['band'] + 1} ({QA_KINDS[qa['kind']]['rule']}) removed {frac * 100:.1f} % of pixels.")
+    features = [f"band {b + 1}" for b in bands] + (RADAR_FEATURES if radar else [])
     notes += [
-        f"Random forest (Breiman 2001; scikit-learn, {trees} trees, √bands features per split) on {d} band{'' if d == 1 else 's'} ({', '.join(f'band {b + 1}' for b in bands)}), "
+        f"Random forest (Breiman 2001; scikit-learn, {trees} trees, √features per split) on {d} feature{'' if d == 1 else 's'} ({', '.join(features)}), "
         f"trained on {y.size:,} pixels from {len(shapes)} shapes labelled by “{field}” ({pixels_total:,} under the shapes; at most {max_per_class:,} per class, drawn at random).",
     ]
     if validation:
@@ -344,7 +376,8 @@ def classify_supervised(raster: Raster, bands: list[int], training: dict, roles:
     if raster.resample_factor > 1:
         notes.append(f"Classified on a resampled grid (each cell = {fmt(raster.resample_factor, 3)} original pixels).")
     return {"filename": raster.meta.filename, "bands": bands, "k": k, "width": w, "height": h, "classes": classes, "stats": stats, "labels": labels,
-            "labelField": field, "trainingPixels": int(y.size), "validation": validation, "method": "rf", "notes": notes, "_rowArea": geo.cell_area if geo else None}
+            "labelField": field, "trainingPixels": int(y.size), "validation": validation, "method": "rf", "notes": notes, "_rowArea": geo.cell_area if geo else None,
+            "features": features, "radar": bool(radar)}
 
 
 def land_cover_markdown(r: dict, labels: list[str]) -> str:
