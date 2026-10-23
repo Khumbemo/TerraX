@@ -354,3 +354,83 @@ def test_forest_loss_area_estimate_from_a_stratified_sample(client, tmp_path):
     terrain = run(client, "terrain", {"dem": sample(client, "terrain_dem_synthetic.tif")}, {})
     tid = terrain["layers"]["slope"].split("/")[3]
     assert client.post(f"/api/jobs/{tid}/validation/sample", json={}).status_code == 400
+
+
+def test_series_maps_disturbance_dates_per_pixel(client, tmp_path):
+    """Six dates of NDVI at 10 m: a 30 × 40 px block cleared between the third and fourth date (12 ha)."""
+    import numpy as np
+    import rasterio
+    from rasterio.transform import from_origin
+
+    rng = np.random.default_rng(5)
+    dates = ["2019-02-10", "2020-02-12", "2021-02-09", "2022-02-14", "2023-02-11", "2024-02-13"]
+    ids = []
+    for i, d in enumerate(dates):
+        a = (0.78 + 0.004 * i + rng.normal(0, 0.03, (100, 100))).astype(np.float32)
+        if i >= 3:
+            a[20:50, 30:70] -= 0.4
+        if i == 4:
+            a[:10, :] = np.nan  # a cloudy strip on one date
+        p = tmp_path / f"ndvi_{d}.tif"
+        with rasterio.open(p, "w", driver="GTiff", width=100, height=100, count=1, dtype="float32", crs="EPSG:32646", transform=from_origin(600000, 2850000, 10, 10), nodata=np.nan) as f:
+            f.write(a, 1)
+        with p.open("rb") as fh:
+            ids.append(client.post("/api/files", files={"file": (p.name, fh, "image/tiff")}).json()["id"])
+    res = run(client, "stack", {"files": ids}, {"mapBreaks": True, "minDrop": 0.15})
+    b = res["breaks"]
+    by = {x["date"]: x for x in b["byDate"]}
+    assert by["2022-02-14"]["previous"] == "2021-02-09" and by["2022-02-14"]["ha"] == pytest.approx(12, rel=0.03)
+    assert b["disturbedHa"] - by["2022-02-14"]["ha"] < 0.1  # false positives over the 88 ha of stable forest: under 0.1 ha
+    assert "Drop first seen 2022-02-14" in [x["label"] for x in b["legend"]] and res["map"]["image"]["url"]
+    assert "## Disturbances (per pixel)" in res["markdown"] and "BFAST" in res["markdown"]
+    tif = next(d["url"] for d in res["downloads"] if d["filename"] == "disturbance_date.tif")
+    p = tmp_path / "dates.tif"
+    p.write_bytes(client.get(tif).content)
+    with rasterio.open(p) as f:
+        cls = f.read(1)
+    assert (cls[20:50, 30:70] == 3).mean() > 0.97 and cls[80, 80] == 1
+    # Too few dates, or dates on different grids, are refused.
+    assert "at least 5 dates" in run_err(client, "stack", {"files": ids[:4]}, {"mapBreaks": True})
+
+
+def test_canopy_biomass_from_field_plots(client, tmp_path):
+    """A 1 m CHM of 25 m stands of different heights; 30 plots of 25 m with AGB = 4.5·TCH^1.3 × lognormal noise."""
+    import json
+
+    import numpy as np
+    import rasterio
+    from pyproj import Transformer
+    from rasterio.transform import from_origin
+
+    rng = np.random.default_rng(8)
+    E0, N0, side, n = 600000.0, 2850000.0, 25, 16  # 16 × 16 stands of 25 m
+    stand_h = rng.uniform(4, 30, (n, n))
+    chm = np.kron(stand_h, np.ones((side, side))).astype(np.float32) + rng.normal(0, 1.0, (n * side, n * side)).astype(np.float32)
+    chm = np.maximum(chm, 0)
+    p = tmp_path / "chm.tif"
+    with rasterio.open(p, "w", driver="GTiff", width=n * side, height=n * side, count=1, dtype="float32", crs="EPSG:32646", transform=from_origin(E0, N0, 1, 1), nodata=np.nan) as f:
+        f.write(chm, 1)
+    with p.open("rb") as fh:
+        fid = client.post("/api/files", files={"file": ("chm.tif", fh, "image/tiff")}).json()["id"]
+    to_ll = Transformer.from_crs(32646, 4326, always_xy=True)
+    feats, truth_total = [], float((4.5 * stand_h**1.3 * np.exp(0.15**2 / 2)).sum() * 0.0625)
+    cells = rng.choice(n * n, 30, replace=False)
+    for c in cells:
+        i, j = divmod(int(c), n)
+        x0, y1 = E0 + j * side, N0 - i * side
+        ring = [to_ll.transform(x, y) for x, y in [(x0, y1), (x0 + side, y1), (x0 + side, y1 - side), (x0, y1 - side), (x0, y1)]]
+        tch = float(chm[i * side : (i + 1) * side, j * side : (j + 1) * side].mean())
+        feats.append({"type": "Feature", "properties": {"agb": round(4.5 * tch**1.3 * float(np.exp(rng.normal(0, 0.15))), 2)}, "geometry": {"type": "Polygon", "coordinates": [ring]}})
+    plots = tmp_path / "plots.geojson"
+    plots.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+    with plots.open("rb") as fh:
+        pid = client.post("/api/files", files={"file": ("plots.geojson", fh, "application/geo+json")}).json()["id"]
+    res = run(client, "canopy", {"chm": fid, "plots": pid}, {"threshold": 2, "minTree": 5})
+    bm = res["canopy"]["biomass"]
+    assert bm["plots"] == 30 and bm["cellSideM"] == pytest.approx(25, abs=1)
+    assert bm["b"] == pytest.approx(1.3, abs=0.12) and bm["a"] == pytest.approx(4.5, rel=0.35)
+    assert bm["totalMg"] == pytest.approx(truth_total, rel=0.08) and bm["ci95Mg"][0] < bm["totalMg"] < bm["ci95Mg"][1]
+    assert bm["carbonMg"] == pytest.approx(0.47 * bm["totalMg"]) and bm["co2eMg"] == pytest.approx(bm["carbonMg"] * 44 / 12)
+    assert "Above-ground biomass, from 30 field plots" in res["markdown"] and "Asner & Mascaro" in res["markdown"]
+    assert any(d["filename"] == "agb_mg_ha.tif" for d in res["downloads"])
+    assert "trees" not in res["canopy"] or "calibrated" not in res["canopy"]["trees"]  # no count column: no count calibration

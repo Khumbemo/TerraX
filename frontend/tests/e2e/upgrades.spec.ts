@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { exifTiff, withExif } from '../fixtures/exif-builder';
 import { mapState, openTool, start } from './helpers';
@@ -122,6 +126,20 @@ test('satellite: pixel inspector, stretch and a multi-date series', async ({ pag
   expect(errors).toEqual([]);
 });
 
+test('series: per-pixel disturbance dates for a clearing front', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Satellite imagery');
+  // The synthetic series clears 4 columns × 50 rows (200 px of 30 m) a year from the east edge. With two clear dates
+  // needed on each side of a drop, the 2021, 2022 and 2023 fronts can be dated: 18 ha each.
+  await page.check('#stack-breaks');
+  await page.click('button:has-text("Try synthetic 6-date series")');
+  await expect(page.locator('#stack-breaks-table tbody tr')).toHaveCount(3);
+  await expect(page.locator('#stack-breaks-table')).toContainText('2021-03-09');
+  await expect(page.locator('#stack-breaks-total')).toContainText('54 ha');
+  await expect(page.locator('.report-card')).toContainText('Disturbances (per pixel)');
+  expect(errors).toEqual([]);
+});
+
 test('land cover: random forest from training shapes, validation sample and accuracy', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Land cover');
@@ -194,6 +212,40 @@ test('canopy: LiDAR point cloud gives height, cover and tree tops', async ({ pag
   await expect.poll(() => mapState<number>(page, `m => m.getSource('tx-features') ? m.getSource('tx-features').serialize().data.features.length : 0`)).toBe(25);
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export canopy height model")')]);
   expect(dl.suggestedFilename()).toBe('chm.tif');
+  expect(errors).toEqual([]);
+});
+
+test('canopy: field plots with biomass give a biomass and carbon estimate with an interval', async ({ page }) => {
+  const errors = await start(page);
+  // A 1 m CHM of 25 m stands and 30 plots of 25 m whose biomass follows AGB = 4.5 · TCH^1.3 (the API test checks the fit).
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-agb-'));
+  const chm = join(dir, 'chm.tif');
+  const plots = join(dir, 'plots.geojson');
+  execFileSync('python3', ['-c', `
+import json, numpy as np, rasterio
+from pyproj import Transformer
+from rasterio.transform import from_origin
+rng = np.random.default_rng(8); E0, N0, s, n = 600000.0, 2850000.0, 25, 12
+h = rng.uniform(4, 30, (n, n)); c = np.maximum(np.kron(h, np.ones((s, s))) + rng.normal(0, 1, (n * s, n * s)), 0).astype(np.float32)
+with rasterio.open(${JSON.stringify(chm)}, 'w', driver='GTiff', width=n * s, height=n * s, count=1, dtype='float32', crs='EPSG:32646', transform=from_origin(E0, N0, 1, 1), nodata=float('nan')) as d:
+    d.write(c, 1)
+t = Transformer.from_crs(32646, 4326, always_xy=True); feats = []
+for k in rng.choice(n * n, 30, replace=False):
+    i, j = divmod(int(k), n); x0, y1 = E0 + j * s, N0 - i * s
+    ring = [list(t.transform(x, y)) for x, y in [(x0, y1), (x0 + s, y1), (x0 + s, y1 - s), (x0, y1 - s), (x0, y1)]]
+    tch = float(c[i * s:(i + 1) * s, j * s:(j + 1) * s].mean())
+    feats.append({'type': 'Feature', 'properties': {'agb': 4.5 * tch ** 1.3 * float(np.exp(rng.normal(0, 0.15)))}, 'geometry': {'type': 'Polygon', 'coordinates': [ring]}})
+json.dump({'type': 'FeatureCollection', 'features': feats}, open(${JSON.stringify(plots)}, 'w'))
+`]);
+  await openTool(page, 'Canopy height');
+  await page.selectOption('#canopy-source', 'chm');
+  await page.setInputFiles('#canopy-chm', chm);
+  await page.setInputFiles('#canopy-plots', plots);
+  await expect(page.locator('#canopy-agb-field')).toBeVisible();
+  await page.click('#canopy-run');
+  await expect(page.locator('.stat', { hasText: 'Above-ground biomass (30 plots)' })).toContainText('95 % CI');
+  await expect(page.locator('.stat', { hasText: 'Carbon' })).toContainText('Mg CO₂e');
+  await expect(page.locator('.report-card')).toContainText('Asner & Mascaro');
   expect(errors).toEqual([]);
 });
 

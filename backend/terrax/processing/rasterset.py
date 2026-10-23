@@ -208,3 +208,82 @@ def stack_markdown(r: dict) -> str:
         f"Trend (Mann–Kendall, n = {t['n']}): {t['direction']}, Theil–Sen slope {fmt(t['senSlope'])} per year, {p(t['p'])}." if t else "Trend: not tested (fewer than four usable dates).",
         "", "## Method and limits", "", *[f"- {n}" for n in r["notes"]],
     ])
+
+
+def analyze_breaks(rasters: list[Raster], index: str | None, bands: dict, qa: dict | None = None, boundary=None, min_drop: float = 0.15) -> dict:
+    """Per-pixel disturbance dating over a dated series on one grid (processing.breaks), read in strips."""
+    from .breaks import MIN_DATES, fit_breaks
+    from .tiles import class_totals
+
+    found = [(r, date_from_filename(r.meta.filename)) for r in rasters]
+    undated = [r.meta.filename for r, d in found if d is None]
+    if undated:
+        raise ValueError(f"No date found in: {', '.join(undated)}. Put the acquisition date in each file name (for example S2_2024-03-15_ndvi.tif).")
+    dated = sorted(((r, d) for r, d in found if d is not None), key=lambda x: x[1])
+    if len(dated) < MIN_DATES:
+        raise ValueError(f"Mapping disturbances needs at least {MIN_DATES} dates (two before a drop, two after, and one to fit the trend); add more images.")
+    if len({d for _, d in dated}) < len(dated):
+        raise ValueError("Two images have the same date. Keep one image per date.")
+    ref = dated[0][0]
+    if not all(same_grid(ref.meta, r.meta) for r, _ in dated):
+        raise ValueError("Mapping disturbances compares each pixel across dates, so every image must be on the same grid. Export each date with the same region, scale and CRS.")
+    if not 0 < min_drop <= 2:
+        raise ValueError("Set the smallest drop to map between 0 and 2 (for NDVI, 0.15 is a common choice).")
+    layers = []
+    for r, _ in dated:
+        view: dict[str, Any] = {"mode": "index", "index": index, "bands": bands} if index and r.meta.bands > 1 else {"mode": "band", "band": 0}
+        if qa and r.meta.bands > 1:
+            view["qa"] = qa
+        layers.append(_Layer(r, view))
+    t = np.array([decimal_year(d) for _, d in dated])
+    n = len(dated)
+    plan = StripPlan(ref, boundary)
+    w, h = plan.width, plan.height
+    classes = np.zeros((h, w), dtype=np.uint8)
+    magnitude = np.full((h, w), np.nan, dtype=np.float32)
+
+    def work(st: Strip) -> tuple[int, int]:
+        y = np.stack([layer.rows(st.r0, st.r1)[0] for layer in layers]).reshape(n, -1)
+        if st.inside is not None:
+            y[:, ~st.inside.ravel()] = np.nan
+        after, _, c, nv = fit_breaks(t, y, min_drop)
+        cls = np.where(nv >= MIN_DATES, np.where(after >= 0, after, 1), 0).astype(np.uint8)  # 0 too few dates, 1 no disturbance, k drop first seen at date k
+        classes[st.rows] = cls.reshape(st.r1 - st.r0, w)
+        magnitude[st.rows] = c.reshape(st.r1 - st.r0, w).astype(np.float32)
+        return int((nv >= MIN_DATES).sum()), int(st.inside.sum()) if st.inside is not None else 0
+
+    parts = plan.map(work)
+    plan.check_overlap(sum(p[1] for p in parts))
+    counts, areas = class_totals(classes, plan.geo.cell_area if plan.geo else None, n, plan.row_blocks())
+    label = index_def(index).short if index else "Band 1"
+    dates = [d.isoformat() for _, d in dated]
+    by_date = [{"date": dates[k], "previous": dates[k - 1], "pixels": int(counts[k]), "ha": float(areas[k]) / 1e4 if areas is not None else None}
+               for k in range(2, n - 1) if counts[k]]
+    analysed = int(sum(p[0] for p in parts))
+    disturbed = int(counts[2 : n - 1].sum())
+    disturbed_ha = float(areas[2 : n - 1].sum()) / 1e4 if areas is not None else None
+    notes = [
+        f"Each pixel's {label} series was tested for one abrupt drop on a linear trend (y = a + b·t + c·[t ≥ t_k], the single-break model of BFAST, Verbesselt et al. 2010) "
+        f"against a trend alone, by the Bayesian information criterion with the break date counted as a parameter. Disturbed: the break model wins and the drop is at least {fmt(min_drop)}.",
+        "A disturbance is dated by the clear observations around it: it happened after the pixel's last clear date before the drop and by its first clear date after. "
+        "The map shows that first date; where a cloudy date sits next to the drop, the interval is wider than one step of the series.",
+        f"Pixels need at least {MIN_DATES} clear dates, with two on each side of a drop; {h * w - analysed:,} pixels had fewer and are left empty.",
+        "One break per pixel: a second disturbance, or a recovery after the drop, is not modelled. Use images from the same season so that phenology does not read as change.",
+    ]
+    if plan.geo:
+        notes.append(plan.geo.note)
+    return {"label": label, "dates": dates, "minDrop": min_drop, "width": w, "height": h, "analysedPixels": analysed, "disturbedPixels": disturbed,
+            "disturbedHa": disturbed_ha, "byDate": by_date, "notes": notes,
+            "classes": classes, "magnitude": magnitude, "_rowArea": plan.geo.cell_area if plan.geo else None}
+
+
+def breaks_markdown(r: dict) -> str:
+    unit = "ha" if r["disturbedHa"] is not None else "pixels"
+    total = fmt(r["disturbedHa"], 4) + " ha" if r["disturbedHa"] is not None else f"{r['disturbedPixels']:,} pixels"
+    return "\n".join([
+        "## Dataset", "", f"- {len(r['dates'])} dates, {r['dates'][0]} to {r['dates'][-1]}; value: {r['label']}; {r['analysedPixels']:,} pixels with enough clear dates", "",
+        "## Results", "", f"Disturbed (drop of at least {fmt(r['minDrop'])}): {total}.", "",
+        f"| Drop first seen | Previous date | Area ({unit}) |", "|---|---|---|",
+        *[f"| {x['date']} | {x['previous']} | {fmt(x['ha'], 4) if x['ha'] is not None else x['pixels']} |" for x in r["byDate"]],
+        "", "## Method and limits", "", *[f"- {n}" for n in r["notes"]],
+    ])
