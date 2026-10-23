@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from ..config import settings
 from ..processing.indices import INDICES
-from ..processing.rasterset import analyze_stack, dataset, raster_report, stack_markdown
+from ..processing.rasterset import analyze_breaks, analyze_stack, breaks_markdown, dataset, raster_report, stack_markdown
 from ..processing.render import ramp_rgba
 from ..processing.report import with_quality
 from ..processing.rio import Raster
 from . import tool
-from .common import bands, begin_tiles, boundary, clean, finish_tiles, grid_crs, raster
+from .common import bands, begin_tiles, boundary, class_overlay, clean, finish_tiles, grid_crs, number, raster
 from .context import ToolContext, ToolError
 
 
@@ -52,4 +52,37 @@ def run_stack(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         ctx.progress(0.1 + 0.6 * i / len(ids), f"Reading {f.name}")
     qa = params.get("qa")
     r = analyze_stack(rasters, params.get("index"), bands(params, "bands"), qa, boundary(params))
-    return clean({"tool": "satellite", "name": f"{len(r['rows'])}-date {r['label']} series", "markdown": stack_markdown(r), "series": r})
+    out = {"tool": "satellite", "name": f"{len(r['rows'])}-date {r['label']} series", "markdown": stack_markdown(r), "series": r}
+    if params.get("mapBreaks"):
+        ctx.progress(0.75, "Testing every pixel for a disturbance")
+        min_drop = number(params, "minDrop", 0.15, 0.01, 2, "Set the smallest drop to map between 0.01 and 2 (for NDVI, 0.15 is a common choice).")
+        try:
+            b = analyze_breaks(rasters, params.get("index"), bands(params, "bands"), qa, boundary(params), min_drop)
+        except ValueError as e:
+            raise ToolError(str(e)) from None
+        extra = _breaks_outputs(ctx, b, rasters[0])  # every date is on one grid (checked)
+        report = extra.pop("markdown")
+        out.update(extra)
+        out["markdown"] += "\n\n" + report
+    return clean(out)
+
+
+BREAK_COLORS = ["#ffd166", "#f8961e", "#f3722c", "#e5484d", "#b5179e", "#7209b7", "#3a0ca3", "#4361ee", "#4cc9f0", "#2a9d8f"]
+
+
+def _breaks_outputs(ctx: ToolContext, b: dict, ref: Raster) -> dict:
+    from ..processing.render import hex_rgb
+
+    dates = b["dates"]
+    legend = [{"id": 1, "label": "No disturbance", "color": [72, 96, 84]}] + [
+        {"id": k, "label": f"Drop first seen {dates[k]}", "color": list(hex_rgb(BREAK_COLORS[(k - 2) % len(BREAK_COLORS)]))} for k in range(2, len(dates) - 1)]
+    image = class_overlay(ctx, "breaks.png", b["classes"], legend, ref, "Disturbance date")
+    downloads = [
+        ctx.download("Export disturbance dates (GeoTIFF; value = index of the first date after the drop, 1 = none)", "disturbance_date.tif",
+                     ctx.geotiff("disturbance_date.tif", b["classes"], ref.transform, ref.crs, nodata=0), "image/tiff"),
+        ctx.download("Export drop size (GeoTIFF)", "disturbance_magnitude.tif", ctx.geotiff("disturbance_magnitude.tif", b["magnitude"], ref.transform, ref.crs, nodata=float("nan")), "image/tiff"),
+    ]
+    csv = "first_seen,previous_date,pixels,area_ha\n" + "\n".join(f"{x['date']},{x['previous']},{x['pixels']},{'' if x['ha'] is None else round(x['ha'], 4)}" for x in b["byDate"])
+    downloads.append(ctx.download("Export disturbed area by date (CSV)", "disturbance_by_date.csv", ctx.text("disturbance_by_date.csv", csv), "text/csv"))
+    pub = {k: v for k, v in b.items() if k not in ("classes", "magnitude", "_rowArea")}
+    return {"breaks": pub | {"legend": legend}, "markdown": breaks_markdown(b).replace("## Dataset", "## Disturbances (per pixel)", 1), "map": {"bounds": ref.meta.latlng_bounds, "image": image}, "downloads": downloads}

@@ -33,6 +33,8 @@ interface CanopyJob {
     coverFao: number;
     height: { mean: number | null; median: number | null; q1: number | null; q3: number | null; p95: number | null; max: number | null };
     classes: { label: string; ha: number }[];
+    /** Plot-calibrated AGB = a·TCH^b on plot-sized cells, with a Monte Carlo 95 % interval. */
+    biomass?: { plots: number; a: number; b: number; looRmse: number; totalMg: number; meanMgHa: number | null; ci95Mg: [number, number]; carbonMg: number; co2eMg: number; cellSideM: number };
     trees: {
       count: number;
       perHa: number | null;
@@ -51,12 +53,15 @@ const SAMPLE = 'lidar_forest_synthetic.laz';
 export default function CanopyTool({ onOutput }: Props) {
   const notify = useToast();
   const job = useJob();
-  const busy = Boolean(job.busy);
+  // The plots upload has its own job: starting it must not cancel a model file still uploading on `job`.
+  const plotJob = useJob();
+  const busy = Boolean(job.busy || plotJob.busy);
   const clouds = useUpload(['pointcloud'], 'a LAS or LAZ point cloud');
   const rasters = useUpload<RasterMeta>(['raster'], 'a GeoTIFF elevation or height model');
   const plotFiles = useUpload(['vector'], 'field plots as polygons (GeoJSON, KML or a zipped shapefile)');
   const [plots, setPlots] = useState<StoredFile | null>(null);
   const [countField, setCountField] = useState('');
+  const [agbField, setAgbField] = useState('');
   const [source, setSource] = useState<Source>('cloud');
   const [files, setFiles] = useState<Partial<Record<'cloud' | 'chm' | 'dsm' | 'dtm', StoredFile>>>({});
   const [cell, setCell] = useState('1');
@@ -82,7 +87,7 @@ export default function CanopyTool({ onOutput }: Props) {
     const params = { cell: Number(cell), threshold: Number(threshold), minTree: Number(minTree) };
     const withPlots = plots ? { ...inputs, plots: plots.id } : inputs;
     if (Object.values(params).some(v => !Number.isFinite(v) || v <= 0)) return fail('Cell size and heights must be positive numbers of metres.');
-    const res = await job.run('run', (signal, onProgress) => runJob<CanopyJob>('canopy', withPlots, { ...params, ...(countField.trim() ? { countField: countField.trim() } : {}) }, { signal, onProgress }), fail);
+    const res = await job.run('run', (signal, onProgress) => runJob<CanopyJob>('canopy', withPlots, { ...params, ...(countField.trim() ? { countField: countField.trim() } : {}), ...(agbField.trim() ? { agbField: agbField.trim() } : {}) }, { signal, onProgress }), fail);
     if (!res) return;
     setOut(res);
     onOutput({ tool: 'canopy', name: res.name, markdown: res.markdown, map: res.map ?? undefined, summary: res.canopy, figures: [{ title: 'Canopy height', url: res.layer }] });
@@ -133,12 +138,12 @@ export default function CanopyTool({ onOutput }: Props) {
         id="canopy-plots"
         label="Field plots (optional)"
         accept=".geojson,.json,.kml,.zip"
-        hint="Polygons with the trees counted in each · corrects the count for trees hidden under taller crowns"
+        hint="Polygons with the trees counted (corrects the count) and/or the biomass measured in Mg/ha (fits biomass to canopy height) in each"
         compact
-        busy={job.busy === 'plots'}
+        busy={Boolean(plotJob.busy)}
         loaded={plots?.name}
         onFile={async f => {
-          const up = await job.run('plots', signal => plotFiles.upload(f, signal), fail);
+          const up = await plotJob.run('plots', signal => plotFiles.upload(f, signal), fail);
           if (up) setPlots(up);
         }}
       />
@@ -147,6 +152,10 @@ export default function CanopyTool({ onOutput }: Props) {
           <label className="param" title="The property with each plot's tree count; left empty, TerraX looks for trees, tree_count, field_count, count, stems or n.">
             <span>Count property</span>
             <input id="canopy-count-field" placeholder="trees" value={countField} onChange={e => setCountField(e.target.value)} />
+          </label>
+          <label className="param" title="The property with each plot's above-ground biomass in Mg/ha; left empty, TerraX looks for agb, agb_mg_ha, agb_t_ha, biomass, biomass_mg_ha or biomass_t_ha.">
+            <span>Biomass property</span>
+            <input id="canopy-agb-field" placeholder="agb" value={agbField} onChange={e => setAgbField(e.target.value)} />
           </label>
           <button type="button" className="btn btn-small" onClick={() => setPlots(null)}>
             Remove plots
@@ -182,6 +191,15 @@ export default function CanopyTool({ onOutput }: Props) {
             <Stat label="Median canopy height" value={c.height.median === null ? '—' : `${fmt(c.height.median, 3)} m`} />
             <Stat label="95th percentile height" value={c.height.p95 === null ? '—' : `${fmt(c.height.p95, 3)} m`} />
             <Stat label="Tree tops" value={`${c.trees.count.toLocaleString()}${c.trees.perHa === null ? '' : ` (${fmt(c.trees.perHa, 3)}/ha)`}`} />
+            {c.biomass && (
+              <>
+                <Stat
+                  label={`Above-ground biomass (${c.biomass.plots} plots)`}
+                  value={`${Math.round(c.biomass.totalMg).toLocaleString()} Mg${c.biomass.meanMgHa === null ? '' : ` (${fmt(c.biomass.meanMgHa, 3)} Mg/ha)`}; 95 % CI ${Math.round(c.biomass.ci95Mg[0]).toLocaleString()}–${Math.round(c.biomass.ci95Mg[1]).toLocaleString()}`}
+                />
+                <Stat label="Carbon / CO₂e" value={`${Math.round(c.biomass.carbonMg).toLocaleString()} Mg C / ${Math.round(c.biomass.co2eMg).toLocaleString()} Mg CO₂e`} />
+              </>
+            )}
             {c.trees.calibrated && (
               <Stat
                 label={`Trees, calibrated by ${c.trees.calibrated.plots} plot${c.trees.calibrated.plots === 1 ? '' : 's'}`}

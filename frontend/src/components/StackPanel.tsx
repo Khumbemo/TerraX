@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { runJob, type RasterMeta, type StoredFile, type Trend } from '../lib/api';
+import { runJob, type Download, type RasterMeta, type ResultImage, type StoredFile, type Trend } from '../lib/api';
+import type { LatLngBounds } from '../lib/geo';
 import { INDICES } from '../lib/indices';
 import { fmt, fmtP } from '../lib/stats';
 import { useToast } from '../lib/toast';
@@ -10,13 +11,34 @@ import type { SpectralIndex } from '../lib/types';
 import type { Boundary } from '../lib/zonal';
 import FileDrop from './FileDrop';
 import JobStatus from './JobStatus';
-import { Notes, useUpload } from './ToolKit';
+import { Downloads, Notes, useUpload } from './ToolKit';
 
 interface StackResult {
   label: string;
   rows: { filename: string; date: string; mean: number; median: number; validFraction: number; sparse: boolean }[];
   trend: Trend | null;
   notes: string[];
+}
+
+interface BreaksResult {
+  label: string;
+  dates: string[];
+  minDrop: number;
+  analysedPixels: number;
+  disturbedPixels: number;
+  disturbedHa: number | null;
+  byDate: { date: string; previous: string; pixels: number; ha: number | null }[];
+  legend: { id: number; label: string; color: number[] }[];
+  notes: string[];
+}
+
+interface StackJob {
+  name: string;
+  markdown: string;
+  series: StackResult;
+  breaks?: BreaksResult;
+  map?: { bounds: LatLngBounds | null; image: ResultImage | null };
+  downloads?: Download[];
 }
 
 interface Props {
@@ -36,18 +58,21 @@ export default function StackPanel({ onOutput, boundary }: Props) {
   const [index, setIndex] = useState<SpectralIndex>('ndvi');
   const [files, setFiles] = useState<StoredFile<RasterMeta>[]>([]);
   const [result, setResult] = useState<StackResult | null>(null);
+  const [mapBreaks, setMapBreaks] = useState(false);
+  const [minDrop, setMinDrop] = useState('0.15');
+  const [breaks, setBreaks] = useState<StackJob | null>(null);
   const fail = (m: string) => notify(m, 'error');
 
   const run = async (list: StoredFile<RasterMeta>[], idx: SpectralIndex = index) => {
-    const r = await job.run(
-      'run',
-      (signal, onProgress) => runJob<{ name: string; markdown: string; series: StackResult }>('stack', { files: list.map(f => f.id) }, { index: idx, bands: list[0].meta.guessedBands, boundary }, { signal, onProgress }),
-      fail,
-    );
+    const drop = Number(minDrop);
+    if (mapBreaks && !(drop > 0 && drop <= 2)) return fail('Set the smallest drop to map between 0 and 2 (for NDVI, 0.15 is common).');
+    const params = { index: idx, bands: list[0].meta.guessedBands, boundary, ...(mapBreaks ? { mapBreaks: true, minDrop: drop } : {}) };
+    const r = await job.run('run', (signal, onProgress) => runJob<StackJob>('stack', { files: list.map(f => f.id) }, params, { signal, onProgress }), fail);
     if (!r) return;
     setFiles(list);
     setResult(r.series);
-    onOutput({ tool: 'satellite', name: r.name, markdown: r.markdown, summary: r.series });
+    setBreaks(r.breaks ? r : null);
+    onOutput({ tool: 'satellite', name: r.name, markdown: r.markdown, summary: r.series, ...(r.map?.image ? { map: r.map, figures: [{ title: 'Disturbance date', url: r.map.image.url }] } : {}) });
   };
 
   const add = async (picked: File[] | string[]) => {
@@ -88,6 +113,15 @@ export default function StackPanel({ onOutput, boundary }: Props) {
         >
           Try synthetic 6-date series
         </button>
+        <label className="inline-check" title="Test every pixel for one abrupt drop on its trend and map when it happened. Needs at least 5 dates on one grid.">
+          <input id="stack-breaks" type="checkbox" checked={mapBreaks} onChange={e => setMapBreaks(e.target.checked)} /> Map disturbances per pixel
+        </label>
+        {mapBreaks && (
+          <label className="param">
+            <span>Smallest drop</span>
+            <input id="stack-min-drop" type="number" min="0.01" max="2" step="0.05" value={minDrop} onChange={e => setMinDrop(e.target.value)} />
+          </label>
+        )}
         {files.length > 1 && (
           <button type="button" className="btn btn-small" disabled={busy} onClick={() => run(files)}>
             Recompute
@@ -140,6 +174,41 @@ export default function StackPanel({ onOutput, boundary }: Props) {
             </table>
           </div>
           <Notes items={result.notes} />
+          {breaks?.breaks && (
+            <div className="sub-panel" aria-label="Disturbances">
+              <div className="eyebrow">Disturbances per pixel</div>
+              <p className="field-hint" id="stack-breaks-total">
+                Disturbed (drop of at least {fmt(breaks.breaks.minDrop)}): {breaks.breaks.disturbedHa !== null ? `${fmt(breaks.breaks.disturbedHa, 4)} ha` : `${breaks.breaks.disturbedPixels.toLocaleString()} pixels`} of{' '}
+                {breaks.breaks.analysedPixels.toLocaleString()} pixels with enough clear dates.
+              </p>
+              {breaks.breaks.byDate.length > 0 && (
+                <div className="tabular-view">
+                  <table id="stack-breaks-table">
+                    <thead>
+                      <tr>
+                        <th>Drop first seen</th>
+                        <th>Previous date</th>
+                        <th className="num">{breaks.breaks.disturbedHa !== null ? 'Area (ha)' : 'Pixels'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {breaks.breaks.byDate.map(x => (
+                        <tr key={x.date}>
+                          <td>
+                            <i className="class-swatch" style={{ background: `rgb(${(breaks.breaks!.legend.find(l => l.label.endsWith(x.date))?.color ?? [200, 200, 200]).join(',')})` }} /> {x.date}
+                          </td>
+                          <td>{x.previous}</td>
+                          <td className="num">{x.ha !== null ? fmt(x.ha, 4) : x.pixels.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {breaks.downloads && <Downloads idPrefix="stack-breaks" items={breaks.downloads} />}
+              <Notes items={breaks.breaks.notes} />
+            </div>
+          )}
         </>
       )}
     </section>

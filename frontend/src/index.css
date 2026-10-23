@@ -2704,3 +2704,10 @@ details[open] > summary {
   font-family: 'Space Mono', monospace;
   font-size: 11px;
 }
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}

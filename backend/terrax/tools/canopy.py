@@ -19,8 +19,32 @@ MAP_TREES = 20_000  # tree tops drawn on the map; the export keeps all of them
 COUNT_FIELDS = ("trees", "tree_count", "field_count", "count", "stems", "n")
 
 
-def _plots(ctx: ToolContext, inputs: dict, params: dict) -> list[tuple[dict, float]] | None:
-    """Field plots: polygons with the number of trees counted on the ground in each."""
+AGB_FIELDS = ("agb", "agb_mg_ha", "agb_t_ha", "biomass", "biomass_mg_ha", "biomass_t_ha")
+
+
+class FieldPlots:
+    """Field plots: polygons with the trees counted on the ground and/or the biomass measured (Mg/ha) in each."""
+
+    def __init__(self, name: str, feats: list[dict], count_key: str | None, agb_key: str | None):
+        self.name, self.feats, self.count_key, self.agb_key = name, feats, count_key, agb_key
+
+    def values(self, key: str, what: str, whole: bool) -> list[float]:
+        out = []
+        for x in self.feats:
+            v = (x.get("properties") or {}).get(key)
+            if v is None:
+                raise ToolError(f"A plot has no “{key}”; give every plot {what}.")
+            try:
+                num = float(v)
+            except (TypeError, ValueError):
+                raise ToolError(f"A plot's “{key}” is “{v}”, not {what}.") from None
+            if not math.isfinite(num) or num < 0 or (whole and num != int(num)):
+                raise ToolError(f"A plot's “{key}” is {v}; {what} must be {'whole numbers, ' if whole else ''}zero or more.")
+            out.append(num)
+        return out
+
+
+def _plots(ctx: ToolContext, inputs: dict, params: dict) -> FieldPlots | None:
     from ..processing.survey import parse_survey_file
 
     f = ctx.file(inputs.get("plots"))
@@ -32,23 +56,59 @@ def _plots(ctx: ToolContext, inputs: dict, params: dict) -> list[tuple[dict, flo
         raise ToolError(str(e)) from None
     feats = [x for x in fc.get("features", []) if (x.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon")]
     if not feats:
-        raise ToolError(f"{f.name} has no polygons. Field plots are polygons, each with the number of trees counted in it.")
-    wanted = (params.get("countField") or "").strip()
+        raise ToolError(f"{f.name} has no polygons. Field plots are polygons, each with the trees counted or the biomass measured in it.")
     keys = {k.lower(): k for x in feats for k in (x.get("properties") or {})}
-    key = keys.get(wanted.lower()) if wanted else next((keys[k] for k in COUNT_FIELDS if k in keys), None)
-    if key is None:
-        raise ToolError(f"Name the property that holds each plot's tree count{f' (no “{wanted}” in {f.name})' if wanted else ''}; TerraX looks for {', '.join(COUNT_FIELDS)}.")
-    out = []
-    for x in feats:
-        v = (x.get("properties") or {}).get(key)
-        try:
-            count = float(v)
-        except (TypeError, ValueError):
-            raise ToolError(f"A plot's “{key}” is “{v}”, not a number of trees.") from None
-        if not math.isfinite(count) or count < 0 or count != int(count):
-            raise ToolError(f"A plot's “{key}” is {v}; tree counts are whole numbers, zero or more.")
-        out.append((x["geometry"], count))
+
+    def pick(param: str, names: tuple[str, ...]) -> str | None:
+        wanted = (params.get(param) or "").strip()
+        if wanted:
+            if wanted.lower() not in keys:
+                raise ToolError(f"{f.name} has no property “{wanted}”.")
+            return keys[wanted.lower()]
+        return next((keys[k] for k in names if k in keys), None)
+
+    count_key, agb_key = pick("countField", COUNT_FIELDS), pick("agbField", AGB_FIELDS)
+    if count_key is None and agb_key is None:
+        raise ToolError(f"Name the property with each plot's tree count or biomass (Mg/ha); TerraX looks for {', '.join(COUNT_FIELDS)} or {', '.join(AGB_FIELDS)}.")
+    return FieldPlots(f.name, feats, count_key, agb_key)
+
+
+def _plot_heights(geoms: list[dict], chm: np.ndarray, transform, crs) -> np.ndarray:
+    """Mean canopy height (gaps included: top-of-canopy height, TCH) inside each plot; NaN where no cell falls inside."""
+    from rasterio.features import geometry_mask
+    from rasterio.warp import transform_geom
+
+    out = np.full(len(geoms), np.nan)
+    for i, g in enumerate(geoms):
+        inside = ~geometry_mask([transform_geom("EPSG:4326", crs, g)], out_shape=chm.shape, transform=transform, all_touched=False)
+        v = chm[inside]
+        v = v[np.isfinite(v)]
+        if v.size:
+            out[i] = float(v.mean())
     return out
+
+
+def _block_heights(chm: np.ndarray, cell_area: np.ndarray, b: int) -> tuple[np.ndarray, np.ndarray]:
+    """Mean CHM and ground area (ha) of b × b blocks; blocks under half covered by valid cells are NaN."""
+    h, w = chm.shape
+    hb, wb = math.ceil(h / b), math.ceil(w / b)
+    tch = np.full((hb, wb), np.nan)
+    ha = np.zeros((hb, wb))
+    for i in range(hb):
+        rows = slice(i * b, min(h, (i + 1) * b))
+        block = chm[rows]
+        area = cell_area[rows][:, None]
+        pad = wb * b - w
+        if pad:
+            block = np.pad(block, ((0, 0), (0, pad)), constant_values=np.nan)
+        v = np.isfinite(block)
+        vals = np.where(v, block, 0.0).reshape(block.shape[0], wb, b)
+        cnt = v.reshape(block.shape[0], wb, b).sum(axis=(0, 2))
+        sums = vals.sum(axis=(0, 2))
+        ha[i] = (v.reshape(block.shape[0], wb, b) * area[:, :, None]).sum(axis=(0, 2)) / 1e4
+        full = block.shape[0] * b
+        tch[i] = np.where(cnt >= 0.5 * full, sums / np.maximum(cnt, 1), np.nan)
+    return tch, ha
 
 
 def _raster(ctx: ToolContext, inputs: dict, slot: str) -> Raster | None:
@@ -150,20 +210,59 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     rows, cols, heights = trees.pop("rows"), trees.pop("cols"), trees.pop("heights")
     res["trees"] = trees
     plots = _plots(ctx, inputs, params)
+    biomass_downloads: list[dict] = []
     if plots is not None:
         from shapely import contains_xy
         from shapely.geometry import shape
 
         if crs is None:
             raise ToolError("Field plots need a point cloud or raster with a coordinate reference system, to place them on it.")
+        keep = [i for i, x in enumerate(plots.feats) if _on_grid(shape(x["geometry"]), transform, crs, chm)]
+        if len(keep) < len(plots.feats):
+            notes.append(f"{len(plots.feats) - len(keep)} of {len(plots.feats)} field plots lie outside the canopy height model and were left out.")
+        geoms = [plots.feats[i]["geometry"] for i in keep]
+    if plots is not None and plots.agb_key:
+        from ..processing.canopy import biomass_model
+
+        agb = np.array(plots.values(plots.agb_key, "biomass in Mg/ha", whole=False))[keep]
+        tch = _plot_heights(geoms, chm, transform, crs)
+        from pyproj import Geod
+
+        geod = Geod(ellps="WGS84")
+        plot_m2 = float(np.median([abs(geod.geometry_area_perimeter(shape(g))[0]) for g in geoms])) if geoms else 0.0
+        b = max(1, round(math.sqrt(plot_m2) / cell_m)) if plot_m2 else 1
+        cells_tch, cells_ha = _block_heights(chm, np.asarray(cell_area, dtype=np.float64), b)
+        try:
+            bm = biomass_model(tch, agb, cells_tch.ravel(), cells_ha.ravel())
+        except ValueError as e:
+            raise ToolError(str(e)) from None
+        cell_agb = bm.pop("_cellAgb").reshape(cells_tch.shape)
+        bm["cellSideM"] = b * cell_m
+        res["biomass"] = bm
+        notes.append(
+            f"Biomass: AGB = {bm['a']:.3g} × TCH^{bm['b']:.3f} Mg/ha (Asner & Mascaro 2014), fitted on {bm['plots']} field plots by least squares on logs (σ = {bm['sigmaLog']:.3f}, "
+            f"back-transformed with Baskerville's correction), where TCH is a plot's mean canopy height gaps included. Leave-one-out RMSE {bm['looRmse']:.1f} Mg/ha. "
+            f"Applied to cells of {bm['cellSideM']:.0f} m, about the plots' size, since the model only holds at the scale it was fitted at.")
+        notes.append(
+            f"95 % interval of the total by Monte Carlo ({bm['draws']:,} draws of the model parameters and of a log-scale residual per cell). Cells are treated as independent, so "
+            "spatial correlation is ignored and the interval is narrower than the true one. Carbon = 0.47 × biomass (IPCC 2006); CO₂e = carbon × 44/12. Below-ground biomass is not included.")
+        if bm["extrapolatedShare"] > 0.05:
+            notes.append(f"{bm['extrapolatedShare'] * 100:.0f} % of the area has a mean canopy height outside the plots' range ({bm['tchRange'][0]:.1f}–{bm['tchRange'][1]:.1f} m): "
+                         "the model is extrapolated there. Add plots in shorter or taller stands.")
+        if bm["plots"] < 20:
+            notes.append(f"With {bm['plots']} plots the model is uncertain; area-based biomass models are usually fitted on 30 or more.")
+        from rasterio.transform import Affine
+
+        biomass_downloads.append(ctx.download("Export biomass (GeoTIFF, Mg/ha per cell)", "agb_mg_ha.tif",
+                                              ctx.geotiff("agb_mg_ha.tif", np.where(np.isfinite(cells_tch), cell_agb, np.nan).astype(np.float32),
+                                                          transform @ Affine.scale(b, b), crs, nodata=float("nan")), "image/tiff"))
+    if plots is not None and plots.count_key:
+        counts = np.array(plots.values(plots.count_key, "numbers of trees", whole=True))[keep]
         tops = lonlat(cols.astype(np.float64), rows.astype(np.float64)) if rows.size else (np.empty(0), np.empty(0))
         tx, ty = np.asarray(tops[0], dtype=np.float64), np.asarray(tops[1], dtype=np.float64)
-        on_chm = [(g, n) for g, n in plots if _on_grid(shape(g), transform, crs, chm)]
-        if len(on_chm) < len(plots):
-            notes.append(f"{len(plots) - len(on_chm)} of {len(plots)} field plots lie outside the canopy height model and were left out.")
-        detected = np.array([int(contains_xy(shape(g), tx, ty).sum()) for g, _ in on_chm])
+        detected = np.array([int(contains_xy(shape(g), tx, ty).sum()) for g in geoms])
         try:
-            cal = calibrate_count(np.array([n for _, n in on_chm]), detected, trees["count"], res["areaHa"])
+            cal = calibrate_count(counts, detected, trees["count"], res["areaHa"])
         except ValueError as e:
             raise ToolError(str(e)) from None
         trees["calibrated"] = cal
@@ -174,7 +273,7 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
             + (f" (standard error {cal['se']:,.0f})" if cal["se"] is not None else "")
             + ". It assumes the plots were placed at random over the area and counted the same trees (at least the minimum height)."
             + (f" With {cal['plots']} plots the ratio estimate can be biased; use at least 10." if cal["plots"] < 10 else ""))
-    downloads = [ctx.download("Export canopy height model (GeoTIFF)", "chm.tif", ctx.geotiff("chm.tif", chm, transform, crs, nodata=float("nan")), "image/tiff")]
+    downloads = [ctx.download("Export canopy height model (GeoTIFF)", "chm.tif", ctx.geotiff("chm.tif", chm, transform, crs, nodata=float("nan")), "image/tiff"), *biomass_downloads]
     pts = lonlat(cols.astype(np.float64), rows.astype(np.float64)) if rows.size else None
     fc = None
     if pts is not None:

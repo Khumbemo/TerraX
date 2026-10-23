@@ -19,6 +19,7 @@ import math
 import numpy as np
 from numba import njit
 from scipy.ndimage import gaussian_filter
+from scipy.stats import t as stats_t
 
 from .stats import fmt
 
@@ -229,6 +230,13 @@ def _calibrated_row(c: dict) -> str:
     return f"| Trees, calibrated by {c['plots']} field plot{'' if c['plots'] == 1 else 's'} | {c['total']:,.0f}{per}{ci} |"
 
 
+def _biomass_rows(b: dict) -> list[str]:
+    lo, hi = b["ci95Mg"]
+    per = f" ({fmt(b['meanMgHa'], 3)} Mg/ha)" if b["meanMgHa"] else ""
+    return [f"| Above-ground biomass, from {b['plots']} field plots | {b['totalMg']:,.0f} Mg{per}; 95 % CI {lo:,.0f}–{hi:,.0f} Mg |",
+            f"| Carbon / CO₂e | {b['carbonMg']:,.0f} Mg C / {b['co2eMg']:,.0f} Mg CO₂e |"]
+
+
 def canopy_markdown(name: str, source: str, r: dict, notes: list[str]) -> str:
     hgt, t = r["height"], r["trees"]
     lines = ["## Dataset", "", f"- {name} ({source})", f"- Area with heights: {fmt(r['areaHa'], 4)} ha", "", "## Results", "",
@@ -238,7 +246,76 @@ def canopy_markdown(name: str, source: str, r: dict, notes: list[str]) -> str:
              f"| Canopy height, median (quartiles) | {fmt(hgt['median'], 3)} m ({fmt(hgt['q1'], 3)}–{fmt(hgt['q3'], 3)}) |",
              f"| 95th percentile / maximum | {fmt(hgt['p95'], 3)} m / {fmt(hgt['max'], 3)} m |",
              f"| Tree tops ≥ {fmt(t['minHeight'], 3)} m | {t['count']:,} ({fmt(t['perHa'], 3)} per ha; mean height {fmt(t['meanHeight'], 3)} m) |",
-             *([_calibrated_row(t["calibrated"])] if t.get("calibrated") else []), "",
+             *([_calibrated_row(t["calibrated"])] if t.get("calibrated") else []),
+             *(_biomass_rows(r["biomass"]) if r.get("biomass") else []), "",
              "| Height class | Area (ha) |", "|---|---|", *[f"| {c['label']} | {fmt(c['ha'], 4)} |" for c in r["classes"]], "",
              "## Method and limits", "", *[f"- {n}" for n in notes]]
     return "\n".join(lines)
+
+
+#: IPCC (2006) default carbon fraction of dry biomass, and CO₂ per unit carbon.
+CARBON_FRACTION = 0.47
+CO2_PER_C = 44 / 12
+
+
+def biomass_model(tch: np.ndarray, agb: np.ndarray, cells_tch: np.ndarray, cell_ha: np.ndarray, draws: int = 2000, seed: int = 17) -> dict:
+    """Above-ground biomass from top-of-canopy height, calibrated on field plots (area-based approach).
+
+    AGB = a·TCHᵇ (Asner & Mascaro 2014), fitted by least squares on ln AGB = ln a + b ln TCH over plots with TCH > 0
+    and AGB > 0, back-transformed with Baskerville's (1972) correction exp(σ²/2). It is applied to cells of about plot
+    size (`cells_tch`, `cell_ha`), as the model only holds at the scale it was fitted at.
+
+    The total's uncertainty is propagated by Monte Carlo: (ln a, b) drawn from their sampling distribution (bivariate
+    t-scaled normal, covariance σ̂²(XᵀX)⁻¹) and an independent residual N(0, σ̂²) on the log scale per cell. Independent
+    residuals ignore spatial correlation between neighbouring cells, so the interval is a lower bound of the true one.
+    """
+    tch, agb = np.asarray(tch, dtype=np.float64), np.asarray(agb, dtype=np.float64)
+    use = np.isfinite(tch) & np.isfinite(agb) & (tch > 0) & (agb > 0)
+    n = int(use.sum())
+    if n < 5:
+        raise ValueError(f"Fitting biomass to canopy height needs at least 5 field plots with biomass and canopy over them; {n} usable.")
+    x, y = np.log(tch[use]), np.log(agb[use])
+    X = np.c_[np.ones(n), x]
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    resid = y - X @ beta
+    s2 = float(resid @ resid) / (n - 2)
+    cov = s2 * np.linalg.inv(X.T @ X)
+    corr = math.exp(s2 / 2)
+    fitted = corr * np.exp(X @ beta)
+    rmse = float(np.sqrt(np.mean((agb[use] - fitted) ** 2)))
+    r2 = 1 - float(resid @ resid) / float(((y - y.mean()) ** 2).sum()) if n > 2 else None
+    loo = []
+    for i in range(n):  # leave-one-out, on the Mg/ha scale
+        m = np.arange(n) != i
+        bi, *_ = np.linalg.lstsq(X[m], y[m], rcond=None)
+        si = float(((y[m] - X[m] @ bi) ** 2).sum()) / (n - 3) if n > 3 else s2
+        loo.append(math.exp(si / 2) * math.exp(float(X[i] @ bi)) - agb[use][i])
+    cells = np.asarray(cells_tch, dtype=np.float64)
+    ha = np.asarray(cell_ha, dtype=np.float64)
+    ok = np.isfinite(cells)
+    canopy = ok & (cells >= 0.5)  # below half a metre of mean canopy height a cell is counted as no tree biomass
+    lx = np.log(np.where(canopy, cells, 1.0))
+    est = np.where(canopy, corr * np.exp(beta[0] + beta[1] * lx), 0.0)
+    area = float(ha[ok].sum())
+    total = float((est * ha)[ok].sum())
+    rng = np.random.default_rng(seed)
+    tq = float(stats_t.ppf(0.975, n - 2))
+    L = np.linalg.cholesky(cov)
+    totals = np.empty(draws)
+    cx, ch = lx[canopy], ha[canopy]
+    df = n - 2
+    for d in range(draws):
+        z = rng.standard_normal(2) * math.sqrt(df / rng.chisquare(df))  # multivariate t with n − 2 degrees of freedom
+        a_d, b_d = beta + L @ z
+        e = rng.standard_normal(cx.size) * math.sqrt(s2)
+        totals[d] = float((np.exp(a_d + b_d * cx + e) * ch).sum())
+    lo, hi = np.percentile(totals, [2.5, 97.5])
+    out_of_range = canopy & ((cells < tch[use].min()) | (cells > tch[use].max()))
+    return {
+        "plots": n, "a": float(corr * math.exp(beta[0])), "b": float(beta[1]), "sigmaLog": math.sqrt(s2), "r2Log": r2, "rmse": rmse,
+        "looRmse": float(np.sqrt(np.mean(np.square(loo)))), "tTwoSided": tq,
+        "areaHa": area, "totalMg": total, "meanMgHa": total / area if area else None, "ci95Mg": [float(lo), float(hi)],
+        "carbonMg": total * CARBON_FRACTION, "co2eMg": total * CARBON_FRACTION * CO2_PER_C,
+        "extrapolatedShare": float(ha[out_of_range].sum() / area) if area else 0.0, "cells": int(ok.sum()), "draws": draws,
+        "tchRange": [float(tch[use].min()), float(tch[use].max())], "_cellAgb": est,
+    }
