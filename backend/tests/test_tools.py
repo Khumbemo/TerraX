@@ -434,3 +434,54 @@ def test_canopy_biomass_from_field_plots(client, tmp_path):
     assert "Above-ground biomass, from 30 field plots" in res["markdown"] and "Asner & Mascaro" in res["markdown"]
     assert any(d["filename"] == "agb_mg_ha.tif" for d in res["downloads"])
     assert "trees" not in res["canopy"] or "calibrated" not in res["canopy"]["trees"]  # no count column: no count calibration
+
+
+def test_landcover_random_forest_with_radar_separates_spectral_twins(client, tmp_path):
+    """Forest and plantation with the same optical spectra but VH 6 dB apart: optical alone is near chance, radar fixes it."""
+    import json
+
+    import numpy as np
+    import rasterio
+    from pyproj import Transformer
+    from rasterio.transform import from_origin
+
+    rng = np.random.default_rng(12)
+    E0, N0, n = 600000.0, 2850000.0, 120
+    plantation = np.arange(n)[None, :].repeat(n, 0) >= n // 2
+    opt = np.stack([0.03 + rng.normal(0, 0.004, (n, n)), 0.06 + rng.normal(0, 0.006, (n, n)), 0.04 + rng.normal(0, 0.005, (n, n)), 0.32 + rng.normal(0, 0.02, (n, n))]).astype(np.float32)
+    vh_db = np.where(plantation, -20.0, -14.0) + rng.normal(0, 1.0, (n, n))  # speckle after multilooking, ~1 dB
+    vv_db = vh_db + 7 + rng.normal(0, 0.8, (n, n))
+
+    def write(name, data, res, origin_shift=0.0):
+        p = tmp_path / name
+        with rasterio.open(p, "w", driver="GTiff", width=data.shape[2], height=data.shape[1], count=data.shape[0], dtype="float32", crs="EPSG:32646",
+                           transform=from_origin(E0 + origin_shift, N0 - origin_shift, res, res), nodata=np.nan) as d:
+            d.write(data.astype(np.float32))
+        with p.open("rb") as fh:
+            return client.post("/api/files", files={"file": (name, fh, "image/tiff")}).json()["id"]
+
+    optical = write("optical.tif", opt, 10)
+    radar_same = write("s1_same_grid.tif", np.stack([10 ** (vv_db / 10), 10 ** (vh_db / 10)]), 10)  # linear power, same grid
+    coarse = np.stack([vv_db, vh_db])[:, ::2, ::2]  # dB, 20 m, offset by 5 m: reprojected
+    radar_other = write("s1_20m_db.tif", coarse, 20, origin_shift=5.0)
+    to_ll = Transformer.from_crs(32646, 4326, always_xy=True)
+    feats = []
+    for k, (r0, c0) in enumerate([(10, 10), (60, 15), (95, 30), (10, 70), (55, 85), (95, 100)]):
+        x0, y1 = E0 + c0 * 10, N0 - r0 * 10
+        ring = [list(to_ll.transform(x, y)) for x, y in [(x0, y1), (x0 + 150, y1), (x0 + 150, y1 - 150), (x0, y1 - 150), (x0, y1)]]
+        feats.append({"type": "Feature", "properties": {"class": "Forest" if k < 3 else "Plantation"}, "geometry": {"type": "Polygon", "coordinates": [ring]}})
+    p = tmp_path / "train.geojson"
+    p.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+    with p.open("rb") as fh:
+        train = client.post("/api/files", files={"file": ("train.geojson", fh, "application/geo+json")}).json()["id"]
+    base = {"method": "rf", "bands": [0, 1, 2, 3], "roles": {"red": 2, "nir": 3}, "trees": 50}
+    alone = run(client, "landcover", {"file": optical, "training": train}, base)["landcover"]
+    fused = run(client, "landcover", {"file": optical, "training": train, "radar": radar_same}, base)["landcover"]
+    other = run(client, "landcover", {"file": optical, "training": train, "radar": radar_other}, base)["landcover"]
+    assert alone["validation"]["overall"] < 0.65  # spectral twins: about chance
+    assert fused["validation"]["overall"] > 0.95 and other["validation"]["overall"] > 0.95
+    assert fused["features"][-3:] == ["VV (dB)", "VH (dB)", "VH/VV (dB)"] and len(fused["stats"][0]["bandMeans"]) == 4
+    vh_means = {c["label"]: c["radarMeans"][1] for c in fused["stats"]}
+    assert vh_means["Forest"] == pytest.approx(-14, abs=0.5) and vh_means["Plantation"] == pytest.approx(-20, abs=0.5)
+    assert any("read as linear power" in n for n in fused["notes"]) and any("reprojected onto the optical grid" in n and "read as dB" in n for n in other["notes"])
+    assert "random forest only" in run_err(client, "landcover", {"file": optical, "radar": radar_same}, {"method": "kmeans", "bands": [0, 1, 2, 3], "k": 2})

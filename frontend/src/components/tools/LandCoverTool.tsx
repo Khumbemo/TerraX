@@ -45,7 +45,12 @@ const jobIdOf = (artifactUrl: string) => artifactUrl.split('/')[3];
 export default function LandCoverTool({ onOutput, boundary }: Props) {
   const notify = useToast();
   const job = useJob();
-  const busy = Boolean(job.busy);
+  // Training shapes and radar upload on their own jobs, so neither cancels an upload still running on another.
+  const shapesJob = useJob();
+  const radarJob = useJob();
+  const radarFiles = useUpload<RasterMeta>(['raster'], 'a Sentinel-1 GeoTIFF with VV and VH bands');
+  const [radar, setRadar] = useState<StoredFile<RasterMeta> | null>(null);
+  const busy = Boolean(job.busy || shapesJob.busy || radarJob.busy);
   const files = useUpload<RasterMeta>(['raster'], 'a GeoTIFF raster TerraX can read');
   const shapeFiles = useUpload(['vector'], 'GeoJSON, KML or a zipped shapefile of training shapes');
   const [raster, setRaster] = useState<StoredFile<RasterMeta> | null>(null);
@@ -75,7 +80,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
   };
 
   const loadShapes = async (picked: File | string) => {
-    const f = await job.run('shapes', signal => (typeof picked === 'string' ? shapeFiles.sample(picked) : shapeFiles.upload(picked, signal)), fail);
+    const f = await shapesJob.run('shapes', signal => (typeof picked === 'string' ? shapeFiles.sample(picked) : shapeFiles.upload(picked, signal)), fail);
     if (f) setTraining(f);
     return f;
   };
@@ -95,7 +100,7 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
     const kk = Number(k);
     if (m === 'kmeans' && (!Number.isInteger(kk) || kk < 2 || kk > MAX_K)) return fail(`Choose a whole number of classes from 2 to ${MAX_K}.`);
     if (m === 'rf' && !shapes) return fail('Add training shapes first: polygons or points with a property naming each one’s class.');
-    const inputs = m === 'rf' && shapes ? { file: r.id, training: shapes.id } : { file: r.id };
+    const inputs = m === 'rf' && shapes ? { file: r.id, training: shapes.id, ...(radar ? { radar: radar.id } : {}) } : { file: r.id };
     const params = { method: m, bands: b, k: kk, roles: r.meta.guessedBands, boundary, labels: names, labelField: labelField.trim() || undefined, trees: Number(trees), seed: 7 };
     const res = await job.run('run', (signal, onProgress) => runJob<LandCoverJob>('landcover', inputs, params, { signal, onProgress }), msg => {
       fail(msg);
@@ -195,10 +200,30 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
           label="Training shapes"
           accept=".geojson,.json,.kml,.zip"
           hint="Polygons or points with a class property · GeoJSON, KML or zipped shapefile · at least two shapes per class"
-          busy={job.busy === 'shapes'}
+          busy={Boolean(shapesJob.busy)}
           loaded={training?.name}
           onFile={f => loadShapes(f)}
         />
+      )}
+      {method === 'rf' && (
+        <FileDrop
+          id="landcover-radar"
+          label="Radar (optional)"
+          accept=".tif,.tiff"
+          compact
+          hint="Sentinel-1 VV and VH (bands 1 and 2), dB or linear · added as VV, VH and VH/VV in dB · reprojected onto the image’s grid if needed"
+          busy={Boolean(radarJob.busy)}
+          loaded={radar?.name}
+          onFile={async f => {
+            const up = await radarJob.run('radar', signal => radarFiles.upload(f, signal), m => notify(m, 'error'));
+            if (up) setRadar(up);
+          }}
+        />
+      )}
+      {method === 'rf' && radar && (
+        <button type="button" className="btn btn-small" onClick={() => setRadar(null)}>
+          Remove radar
+        </button>
       )}
       <div className="param-row">
         <div className="button-row push-right">

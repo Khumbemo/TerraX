@@ -140,6 +140,42 @@ test('series: per-pixel disturbance dates for a clearing front', async ({ page }
   expect(errors).toEqual([]);
 });
 
+test('land cover: radar separates classes the optical bands cannot', async ({ page }) => {
+  const errors = await start(page);
+  // Forest and plantation with the same optical spectra but VH 6 dB apart (the API test checks the accuracies in detail).
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-fuse-'));
+  const [opt, s1, train] = ['optical.tif', 's1.tif', 'train.geojson'].map(n => join(dir, n));
+  execFileSync('python3', ['-c', `
+import json, numpy as np, rasterio
+from pyproj import Transformer
+from rasterio.transform import from_origin
+rng = np.random.default_rng(12); E0, N0, n = 600000.0, 2850000.0, 120
+pl = np.arange(n)[None, :].repeat(n, 0) >= n // 2
+o = np.stack([v + rng.normal(0, s, (n, n)) for v, s in ((0.03, 0.004), (0.06, 0.006), (0.04, 0.005), (0.32, 0.02))]).astype(np.float32)
+vh = np.where(pl, -20.0, -14.0) + rng.normal(0, 1, (n, n)); vv = vh + 7 + rng.normal(0, 0.8, (n, n))
+for path, data in ((${JSON.stringify(opt)}, o), (${JSON.stringify(s1)}, np.stack([vv, vh]).astype(np.float32))):
+    with rasterio.open(path, 'w', driver='GTiff', width=n, height=n, count=data.shape[0], dtype='float32', crs='EPSG:32646', transform=from_origin(E0, N0, 10, 10), nodata=float('nan')) as d:
+        d.write(data)
+t = Transformer.from_crs(32646, 4326, always_xy=True); feats = []
+for k, (r0, c0) in enumerate([(10, 10), (60, 15), (95, 30), (10, 70), (55, 85), (95, 100)]):
+    x0, y1 = E0 + c0 * 10, N0 - r0 * 10
+    ring = [list(t.transform(x, y)) for x, y in [(x0, y1), (x0 + 150, y1), (x0 + 150, y1 - 150), (x0, y1 - 150), (x0, y1)]]
+    feats.append({'type': 'Feature', 'properties': {'class': 'Forest' if k < 3 else 'Plantation'}, 'geometry': {'type': 'Polygon', 'coordinates': [ring]}})
+json.dump({'type': 'FeatureCollection', 'features': feats}, open(${JSON.stringify(train)}, 'w'))
+`]);
+  await openTool(page, 'Land cover');
+  await page.selectOption('#landcover-method', 'rf');
+  // Dropped one after another without waiting: none of the uploads may cancel another.
+  await page.setInputFiles('#landcover-file', opt);
+  await page.setInputFiles('#landcover-radar', s1);
+  await page.setInputFiles('#landcover-training', train);
+  await expect(page.locator('#landcover-run')).toBeEnabled();
+  await page.click('#landcover-run');
+  await expect(page.locator('.stat', { hasText: 'Cross-validated by shape' })).toContainText('100.0 %');
+  await expect(page.locator('.report-card')).toContainText('Radar features from s1.tif');
+  expect(errors).toEqual([]);
+});
+
 test('land cover: random forest from training shapes, validation sample and accuracy', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Land cover');
