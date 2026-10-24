@@ -41,8 +41,11 @@ if (.Platform$OS.type == "unix" && Sys.info()[["sysname"]] != "Darwin") {
   file.create(file.path(prefix, "lib", "libpython3.12.so.1.0"))
   real <- Sys.which(terrax_command()[1])
   shebang <- readLines(real, n = 1L)
+  real_lib <- file.path(dirname(dirname(normalizePath(strsplit(sub("^#!", "", shebang), "[[:space:]]+")[[1]][1]))), "lib")
   py <- file.path(prefix, "bin", "python3.12")
   writeLines(c("#!/bin/sh", sprintf('case "$LD_LIBRARY_PATH" in "%s/lib"*) ;; *) echo "terrax: LD_LIBRARY_PATH is $LD_LIBRARY_PATH" >&2; exit 1;; esac', prefix),
+               # Then the real Python (perhaps a shared-library build itself) gets its own lib folder in place of the dummy.
+               sprintf('LD_LIBRARY_PATH="%s${LD_LIBRARY_PATH#%s/lib}"; export LD_LIBRARY_PATH', real_lib, prefix),
                sprintf('exec %s "$@"', sub("^#!", "", shebang))), py)
   wrapped <- file.path(prefix, "bin", "terrax")
   writeLines(c(paste0("#!", py), readLines(real)[-1]), wrapped)
