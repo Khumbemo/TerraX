@@ -33,6 +33,25 @@ check(grepl("loss threshold", e), "TerraX's own message becomes the R error")
 e <- tryCatch(terrax_run("forest", list(a = "/no/such.tif")), error = function(e) conditionMessage(e))
 check(grepl("no file", e), "a missing input file")
 
+# A Python built as a shared library outside /usr (as in CI): R puts the system's library folder first, so the
+# command must get its Python's own lib folder back in front. A stand-in Python insists on that, then runs terrax.
+if (.Platform$OS.type == "unix" && Sys.info()[["sysname"]] != "Darwin") {
+  prefix <- file.path(tempfile("py-"), "x64")
+  dir.create(file.path(prefix, "bin"), recursive = TRUE); dir.create(file.path(prefix, "lib"))
+  file.create(file.path(prefix, "lib", "libpython3.12.so.1.0"))
+  real <- Sys.which(terrax_command()[1])
+  shebang <- readLines(real, n = 1L)
+  py <- file.path(prefix, "bin", "python3.12")
+  writeLines(c("#!/bin/sh", sprintf('case "$LD_LIBRARY_PATH" in "%s/lib"*) ;; *) echo "terrax: LD_LIBRARY_PATH is $LD_LIBRARY_PATH" >&2; exit 1;; esac', prefix),
+               sprintf('exec %s "$@"', sub("^#!", "", shebang))), py)
+  wrapped <- file.path(prefix, "bin", "terrax")
+  writeLines(c(paste0("#!", py), readLines(real)[-1]), wrapped)
+  Sys.chmod(c(py, wrapped), "755")
+  old <- options(terrax.command = wrapped)
+  check("forest" %in% names(terrax_tools()), "a shared-library Python gets its own lib folder first")
+  options(old)
+}
+
 if (requireNamespace("terra", quietly = TRUE)) {
   cm <- terra::rast(grep("_forest_change\\.tif$", r$files, value = TRUE))
   check(sum(terra::values(cm) == 2, na.rm = TRUE) == r$result$result$loss$pixels, "terra reads the class map")

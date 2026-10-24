@@ -14,11 +14,27 @@ terrax_command <- function() {
   strsplit(cmd, " ", fixed = TRUE)[[1]]
 }
 
+# R starts with its own library folders (and /usr/lib/<arch>) ahead of LD_LIBRARY_PATH. A Python built as a shared
+# library outside /usr (setup-python's, pyenv with --enable-shared) would then load the system's libpython instead of
+# its own, and with it the system's site-packages, where terrax is not installed. So the Python that runs the command
+# gets its own lib folder first again. `cmd` is the command (a script whose #! line names Python, or Python itself).
+.python_lib_env <- function(cmd) {
+  if (.Platform$OS.type != "unix" || Sys.info()[["sysname"]] == "Darwin") return(character())
+  path <- Sys.which(cmd)
+  if (!nzchar(path) || !file.exists(path)) return(character())
+  first <- tryCatch(readLines(path, n = 1L, warn = FALSE), error = function(e) character(), warning = function(w) character())
+  py <- if (length(first) && startsWith(first, "#!")) strsplit(trimws(sub("^#!", "", first)), "[[:space:]]+")[[1]][1] else path
+  if (basename(py) == "env") return(character())
+  lib <- file.path(dirname(dirname(normalizePath(py, mustWork = FALSE))), "lib")
+  if (!length(Sys.glob(file.path(lib, "libpython3*.so*")))) return(character())
+  paste0("LD_LIBRARY_PATH=", shQuote(paste(c(lib, Sys.getenv("LD_LIBRARY_PATH")), collapse = ":")))
+}
+
 .terrax_exec <- function(args) {
   cmd <- terrax_command()
   err <- tempfile(fileext = ".log")
   on.exit(unlink(err), add = TRUE)
-  out <- suppressWarnings(system2(cmd[1], c(cmd[-1], shQuote(args)), stdout = TRUE, stderr = err))
+  out <- suppressWarnings(system2(cmd[1], c(cmd[-1], shQuote(args)), stdout = TRUE, stderr = err, env = .python_lib_env(cmd[1])))
   status <- attr(out, "status")
   msg <- if (file.exists(err)) readLines(err, warn = FALSE) else character()
   if (!is.null(status) && status != 0) {
