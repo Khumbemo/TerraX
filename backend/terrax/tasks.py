@@ -40,7 +40,9 @@ celery_app.conf.update(
     result_expires=3600,
     broker_connection_retry_on_startup=True,
     # Hourly: expired uploads and results, and a database backup when TERRAX_BACKUP_HOURS have passed since the last.
-    beat_schedule={"purge-old-files": {"task": "terrax.purge", "schedule": 3600.0}, "backup-db": {"task": "terrax.backup", "schedule": 3600.0}},
+    # Every minute: jobs whose worker died (no heartbeat for storage.STALE_S) are marked failed.
+    beat_schedule={"purge-old-files": {"task": "terrax.purge", "schedule": 3600.0}, "backup-db": {"task": "terrax.backup", "schedule": 3600.0},
+                   "fail-stale-jobs": {"task": "terrax.stale", "schedule": 60.0}},
 )
 
 
@@ -113,10 +115,37 @@ def backup_task() -> dict | None:
     return run_if_due()
 
 
+@celery_app.task(name="terrax.stale")
+def stale_task() -> list[str]:
+    # Queued Celery jobs wait in Redis, which outlives a restart, so only running ones can be orphaned.
+    return storage.fail_stale(queued_too=False)
+
+
 @worker_process_init.connect
 def _worker_start(**_kwargs) -> None:
     configure_logging()
     init_sentry("worker")
+    start_heartbeat()
+
+
+_heartbeat_started = threading.Event()
+
+
+def start_heartbeat(every_s: float = storage.HEARTBEAT_S) -> None:
+    """Touches this process's unfinished jobs every minute, so they are not taken for orphans; started once."""
+    if _heartbeat_started.is_set():
+        return
+    _heartbeat_started.set()
+
+    def loop() -> None:
+        while True:
+            time.sleep(every_s)
+            try:
+                storage.heartbeat()
+            except Exception:
+                log.exception("job heartbeat failed")
+
+    threading.Thread(target=loop, name="terrax-heartbeat", daemon=True).start()
 
 
 @lru_cache(maxsize=1)
@@ -145,32 +174,47 @@ def job_mode() -> str:
 _purge_started = threading.Event()
 
 
-def start_purge_thread(every_s: float = 3600.0) -> None:
-    """Hourly clean-up when no Celery beat runs (thread mode); started once per process."""
+def start_purge_thread(every_s: float = 3600.0, tick_s: float = 60.0) -> None:
+    """Without Celery beat (thread mode), started once per process: every minute, jobs orphaned by a restart are
+    marked failed; every hour, the clean-up and (when due) a database backup."""
     if _purge_started.is_set():
         return
     _purge_started.set()
+    start_heartbeat()
+
+    def hourly() -> None:
+        try:
+            from .audit import purge as purge_audit
+            from .ratelimit import purge_counters
+
+            purge_errors()
+            purge_counters()
+            purge_audit()
+            n = storage.purge_old()
+            if n:
+                log.info("purged %d old upload/job folders", n)
+        except Exception:  # a failed clean-up must not stop later ones
+            log.exception("purge failed")
+        try:
+            from .backup import run_if_due
+
+            run_if_due()
+        except Exception:
+            log.exception("database backup failed")
 
     def loop() -> None:
+        last = 0.0
         while True:
             try:
-                from .audit import purge as purge_audit
-                from .ratelimit import purge_counters
-
-                purge_errors()
-                purge_counters()
-                purge_audit()
-                n = storage.purge_old()
-                if n:
-                    log.info("purged %d old upload/job folders", n)
-            except Exception:  # a failed clean-up must not stop later ones
-                log.exception("purge failed")
-            try:
-                from .backup import run_if_due
-
-                run_if_due()
+                # Jobs here wait in this process's memory, which a restart empties: queued ones can be orphaned too.
+                gone = storage.fail_stale(queued_too=True)
+                if gone:
+                    log.warning("marked %d interrupted job(s) as failed", len(gone))
             except Exception:
-                log.exception("database backup failed")
-            time.sleep(every_s)
+                log.exception("checking for interrupted jobs failed")
+            if time.monotonic() - last >= every_s or not last:
+                last = time.monotonic()
+                hourly()
+            time.sleep(tick_s)
 
     threading.Thread(target=loop, name="terrax-purge", daemon=True).start()

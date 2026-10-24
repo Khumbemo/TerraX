@@ -12,20 +12,40 @@ import time
 import pytest
 
 BUCKET = "terrax-test"
+#: A real S3-compatible server to test against instead of moto (CI starts SeaweedFS), e.g. http://127.0.0.1:8333.
+REAL = os.environ.get("TERRAX_TEST_S3_ENDPOINT", "")
 
 
 @pytest.fixture()
 def bucket(monkeypatch):
-    moto = pytest.importorskip("moto")
     from terrax import objectstore
 
+    global BUCKET
     for k in ("AWS_PROFILE", "AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3", "AWS_SESSION_TOKEN"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", os.environ.get("TERRAX_TEST_S3_KEY", "testing"))
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", os.environ.get("TERRAX_TEST_S3_SECRET", "testing"))
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-    monkeypatch.setenv("TERRAX_S3_BUCKET", BUCKET)
     monkeypatch.setenv("TERRAX_S3_PREFIX", "/site/")  # normalised to "site/"
+    if REAL:  # a fresh bucket per test on the real server, emptied and removed afterwards
+        BUCKET = f"terrax-test-{time.time_ns()}"
+        monkeypatch.setenv("TERRAX_S3_BUCKET", BUCKET)
+        monkeypatch.setenv("TERRAX_S3_ENDPOINT", REAL)
+        monkeypatch.setenv("TERRAX_S3_PATH_STYLE", "true")
+        objectstore._client.cache_clear()
+        objectstore.client().create_bucket(Bucket=BUCKET)
+        try:
+            yield objectstore
+        finally:
+            monkeypatch.setenv("TERRAX_S3_BUCKET", BUCKET)  # a test may have pointed it elsewhere
+            monkeypatch.setenv("TERRAX_S3_ENDPOINT", REAL)
+            objectstore.delete_tree("")
+            objectstore.client().delete_bucket(Bucket=BUCKET)
+            objectstore._client.cache_clear()
+        return
+    moto = pytest.importorskip("moto")
+    BUCKET = "terrax-test"
+    monkeypatch.setenv("TERRAX_S3_BUCKET", BUCKET)
     with moto.mock_aws():
         objectstore._client.cache_clear()
         objectstore.client().create_bucket(Bucket=BUCKET)

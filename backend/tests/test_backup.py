@@ -152,3 +152,27 @@ def test_manage_commands(folder, capsys):
         manage.main(["restore", "terrax-db-20000101T000000Z.jsonl.gz", "--yes"])
     assert manage.main(["restore", name, "--yes"]) == 0
     assert "Restored" in capsys.readouterr().out
+
+
+def test_an_empty_database_waits_for_unreadable_backups(folder, tmp_path, monkeypatch):
+    """With TERRAX_BACKUP_RESTORE_EMPTY, an unreachable backup store stops the database from opening (no request
+    is served on an empty database, and no backup of it rotates the good ones away); once it answers, the next use
+    restores."""
+    from terrax import backup, db
+
+    made = backup.create()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'wiped.db'}")
+    monkeypatch.setenv("TERRAX_BACKUP_RESTORE_EMPTY", "true")
+    real = backup.list_backups
+
+    def unreachable():
+        raise ConnectionError("bucket unreachable")
+
+    monkeypatch.setattr(backup, "list_backups", unreachable)
+    with pytest.raises(ConnectionError):
+        db.engine()
+    monkeypatch.setattr(backup, "list_backups", real)
+    try:
+        assert counts(db.engine()) == made["rows"]
+    finally:
+        db._engines.pop(db.database_url()).dispose()

@@ -240,6 +240,50 @@ def release(jid: str) -> None:
         _status_sent.pop(jid, None)
 
 
+#: Jobs this process runs or holds in its queue have their database row touched this often, seconds ...
+HEARTBEAT_S = 60.0
+#: ... so a job whose row has not changed for this long died with the process that had it (a restart, a crash).
+STALE_S = 300.0
+INTERRUPTED = "The server restarted or stopped while this analysis was waiting or running, so it did not finish. Run it again."
+
+
+def heartbeat(now: float | None = None) -> int:
+    """Touches the rows of the unfinished jobs this process holds; returns how many."""
+    from sqlalchemy import update
+
+    from . import db
+
+    with _lock:
+        ids = list(_local)
+    if not ids:
+        return 0
+    with db.connect() as c:
+        return c.execute(update(db.jobs).where(db.jobs.c.id.in_(ids), db.jobs.c.state.not_in(FINAL)).values(updated=time.time() if now is None else now)).rowcount
+
+
+def fail_stale(queued_too: bool, now: float | None = None) -> list[str]:
+    """Marks as failed the running jobs (and, when jobs wait in process memory rather than in Redis, the queued ones)
+    whose row no process has touched for STALE_S; returns their ids."""
+    from sqlalchemy import select, update
+
+    from . import db
+
+    cutoff = (time.time() if now is None else now) - STALE_S
+    states = ("running", "queued") if queued_too else ("running",)
+    with db.connect() as c:
+        ids = [r[0] for r in c.execute(select(db.jobs.c.id).where(db.jobs.c.state.in_(states), db.jobs.c.updated < cutoff))]
+    with _lock:
+        ids = [i for i in ids if i not in _local]
+    for jid in ids:
+        try:
+            fetch_job(jid)
+            update_job(jid, state="error", message=INTERRUPTED, error=INTERRUPTED)
+        except (KeyError, FileNotFoundError):  # the folder is gone too: the history row still says what happened
+            with db.connect() as c:
+                c.execute(update(db.jobs).where(db.jobs.c.id == jid).values(state="error", message=INTERRUPTED, updated=time.time()))
+    return ids
+
+
 def fetch_job(jid: str) -> None:
     """Makes sure a job's request and status are on this disk (a worker on another machine than the API)."""
     d = job_dir(jid)
