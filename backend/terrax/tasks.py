@@ -48,9 +48,9 @@ celery_app.conf.update(
 
 def run_job(job_id: str) -> dict:
     """Runs one job to completion and records the outcome in its status file."""
-    storage.fetch_job(job_id)  # a worker on another machine than the API gets the request from the bucket
     storage.claim(job_id)
     try:
+        storage.fetch_job(job_id)  # a worker on another machine than the API gets the request from the bucket
         return _run(job_id)
     finally:
         storage.release(job_id)

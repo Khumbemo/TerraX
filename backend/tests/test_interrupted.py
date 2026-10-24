@@ -34,7 +34,7 @@ def test_orphaned_jobs_are_marked_failed_and_live_ones_are_not(client):
     _age(recent, "running", 10)
     storage.claim(alive)  # this process still has it: its heartbeat keeps it
     try:
-        assert storage.heartbeat() == 1
+        assert storage.heartbeat() >= 1 and _row(alive).updated > time.time() - 60  # others may hold jobs too
         # Celery: queued jobs wait in Redis, which survives a restart, so only running ones count.
         first = set(storage.fail_stale(queued_too=False))
         second = set(storage.fail_stale(queued_too=True))
