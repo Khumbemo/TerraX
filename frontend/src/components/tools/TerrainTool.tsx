@@ -44,6 +44,8 @@ interface TerrainJob {
   aspects: string[];
   warnings: string[];
   map: { bounds: LatLngBounds | null; image: ResultImage | null };
+  /** Slope and hillshade as GeoTIFFs, for other GIS software. */
+  downloads?: Download[];
 }
 
 interface HydroJob {
@@ -370,6 +372,11 @@ export default function TerrainTool({ onOutput, boundary, onBoundary }: Props) {
             </div>
           </div>
 
+          {out.downloads && out.downloads.length > 0 && (
+            <div className="button-row">
+              <Downloads idPrefix="terrain" items={out.downloads} />
+            </div>
+          )}
           <Notes items={[...result.notes, ...out.warnings]} />
         </div>
       )}

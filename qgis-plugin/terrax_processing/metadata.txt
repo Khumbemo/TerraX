@@ -1,0 +1,15 @@
+[general]
+name=TerraX Processing
+qgisMinimumVersion=3.28
+description=TerraX earth-observation analyses in the Processing Toolbox: forest loss, burn severity, land cover, terrain, hydrology, canopy height and biomass, radar change and disturbance dating.
+about=Runs TerraX's tools (the same code and validated results as the TerraX web app) on your layers and loads the results: class maps with their colours and labels, slope, flow accumulation, wetness, tree tops, polygons and a report. It calls the `terrax` command, so install TerraX first (pip install it into any Python 3.11+ environment with GDAL), then set the command's path under Settings → Options → Processing → Providers → TerraX if it is not on PATH.
+version=2.0.0
+author=TerraX
+homepage=https://github.com/Khumbemo/TerraX
+repository=https://github.com/Khumbemo/TerraX
+tracker=https://github.com/Khumbemo/TerraX/issues
+category=Analysis
+tags=remote sensing,forest,deforestation,ndvi,land cover,random forest,lidar,canopy,biomass,carbon,hydrology,sentinel-1,sentinel-2,processing
+experimental=False
+hasProcessingProvider=yes
+icon=icon.svg

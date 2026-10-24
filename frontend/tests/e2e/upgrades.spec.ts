@@ -219,6 +219,8 @@ test('land cover: classify, rename a class and export', async ({ page }) => {
   await expect(page.locator('.tabular-view tbody tr')).toHaveCount(3);
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export class table")')]);
   expect(dl.suggestedFilename()).toBe('satellite_4band_synthetic_landcover_classes.csv');
+  const [tif] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export class map (GeoTIFF)")')]);
+  expect(tif.suggestedFilename()).toBe('satellite_4band_synthetic_landcover.tif');
   await expect.poll(() => mapState<boolean>(page, `m => !!m.getLayer('tx-image-r')`)).toBe(true);
   expect(errors).toEqual([]);
 });

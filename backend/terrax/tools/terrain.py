@@ -142,10 +142,18 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     if tiles is not None:
         tiles.write(0, slope.astype(np.float32, copy=False))
     tile_info = finish_tiles(ctx, tiles, "slope", r.meta.latlng_bounds)
+    crs = grid_crs(r)
+    downloads = []
+    if crs is not None and slope.shape == (r.gh, r.gw):
+        downloads.append(ctx.download("Export slope (GeoTIFF, degrees)", "slope_deg.tif",
+                                      ctx.geotiff("slope_deg.tif", slope.astype(np.float32, copy=False), r.transform, crs, nodata=float("nan"), description="slope (degrees)"), "image/tiff"))
+        downloads.append(ctx.download("Export hillshade (GeoTIFF)", "hillshade.tif",
+                                      ctx.geotiff("hillshade.tif", np.asarray(t["_hillshade"], dtype=np.float32), r.transform, crs, nodata=float("nan"), description="hillshade (0–1)"), "image/tiff"))
     image = {"url": layers["slope"], "bounds": r.meta.latlng_bounds, "label": "Slope classes", "legend": [{"color": c["color"], "label": c["label"]} for c in SLOPE_CLASSES],
              "tiles": tile_info} if r.meta.latlng_bounds else None
     return clean({"tool": "terrain", "name": r.meta.filename, "markdown": terrain_markdown(t, r.meta), "terrain": t, "layers": layers,
-                  "suggestedInterval": nice_interval(t["relief"]), "slopeClasses": SLOPE_CLASSES, "aspects": ASPECTS, "warnings": r.meta.warnings, "map": {"bounds": r.meta.latlng_bounds, "image": image}})
+                  "suggestedInterval": nice_interval(t["relief"]), "slopeClasses": SLOPE_CLASSES, "aspects": ASPECTS, "warnings": r.meta.warnings, "map": {"bounds": r.meta.latlng_bounds, "image": image},
+                  "downloads": downloads})
 
 
 @tool("hydrology")
@@ -160,6 +168,7 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     ctx.progress(0.3, "Filling depressions and routing flow")
     f = flow_routing(t["_dem"], geo, km2 * 1e6, dinf=method == "dinf")
     wetness = None
+    twi_tif: np.ndarray | None = None  # the wetness index for its GeoTIFF export
     dinf_grids: dict = {}
     if f["dinf"] is not None:
         from ..processing.stats import summarize_large
@@ -169,6 +178,7 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         dinf_grids = {"facet": extra["facet"], "share": extra["share"]}  # for D∞ watersheds on click
         del extra
         summary = summarize_large(twi[np.isfinite(twi)])
+        twi_tif = twi.astype(np.float32) if grid_crs(r) is not None and twi.shape == (r.gh, r.gw) else None
         view = display_grid(twi)
         lo, hi = (float(v) for v in np.nanpercentile(view, [2, 98])) if np.isfinite(view).any() else (0.0, 1.0)
         wetness = {"layer": ctx.png("wetness.png", ramp_rgba(view, lo, hi, WETNESS_COLORS)), "summary": summary.dict() if summary else None,
@@ -182,6 +192,17 @@ def run_hydrology(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         streams = stream_lines(f, ll)
         name = f"{r.meta.filename.rsplit('.', 1)[0]}_streams.geojson"
         downloads.append(ctx.download("Export streams (GeoJSON)", name, ctx.json(name, streams), "application/geo+json"))
+    # After the streams, whose button the web app addresses by position.
+    crs = grid_crs(r)
+    if crs is not None and f["acc"].shape == (r.gh, r.gw):
+        acc = np.where(np.isfinite(t["_dem"]), f["acc"], np.nan).astype(np.float32)
+        downloads.append(ctx.download("Export flow accumulation (GeoTIFF, upslope area m², D8)", "flow_accumulation_m2.tif",
+                                      ctx.geotiff("flow_accumulation_m2.tif", acc, r.transform, crs, nodata=float("nan"), description="upslope area (m²), D8"), "image/tiff"))
+        del acc
+    if twi_tif is not None:
+        downloads.append(ctx.download("Export wetness index (GeoTIFF, TWI, D∞)", "twi.tif",
+                                      ctx.geotiff("twi.tif", twi_tif, r.transform, crs, nodata=float("nan"), description="topographic wetness index ln(a / tan β), D∞"), "image/tiff"))
+        del twi_tif
     # Kept for watershed clicks; accumulation as float32 is ample for finding the outlet, and the hillshade only feeds the image.
     shade = display_grid(t["_hillshade"])
     save_npz(ctx.dir / "flow.npz", {"dir": f["dir"], "acc": f["acc"].astype(np.float32), "order": f["order"], "dem": t["_dem"], "slope": t["_slope"], "shade": shade, "cell": geo.cell_area,

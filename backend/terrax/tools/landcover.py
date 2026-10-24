@@ -14,7 +14,7 @@ from ..processing.render import hex_rgb
 from ..processing.rio import Raster, same_grid
 from ..processing.survey import parse_survey_file
 from . import tool
-from .common import boundary, class_overlay, clean, raster, save_npz
+from .common import boundary, class_geotiff, class_overlay, clean, raster, save_npz
 from .context import ToolContext, ToolError
 
 
@@ -122,6 +122,10 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         f"{c['id']},{labels[i]},{c['pixels']},{'' if c['ha'] is None else round(c['ha'], 4)},{round(c['share'] * 100, 2)},{'' if c['ndvi'] is None else round(c['ndvi'], 4)}"
         for i, c in enumerate(res["stats"]))
     name = f"{r.meta.filename.rsplit('.', 1)[0]}_landcover.csv"
+    downloads = [ctx.download("Export classes (CSV)", name, ctx.text(name, csv), "text/csv")]
+    tif = class_geotiff(ctx, f"{r.meta.filename.rsplit('.', 1)[0]}_landcover.tif", "class map", res["classes"], legend, r)
+    if tif:
+        downloads.append(tif)
     return clean({"tool": "landcover", "name": r.meta.filename, "markdown": land_cover_markdown(res, labels), "landcover": res, "labels": labels, "palette": PALETTE,
                   "map": {"bounds": r.meta.latlng_bounds, "image": image}, "file": inputs.get("file"),
-                  "downloads": [ctx.download("Export classes (CSV)", name, ctx.text(name, csv), "text/csv")]})
+                  "downloads": downloads})

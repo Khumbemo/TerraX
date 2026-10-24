@@ -9,7 +9,7 @@ import type { ToolOutput } from '../../lib/tools/registry';
 import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
-import { ArtifactImage, Notes, Stat, useUpload } from '../ToolKit';
+import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
 import MapValidation, { type AccuracyResult } from './MapValidation';
 
 interface Props {
@@ -296,6 +296,8 @@ export default function LandCoverTool({ onOutput, boundary }: Props) {
             </table>
           </div>
           <div className="button-row">
+            {/* The class map as a GeoTIFF with its colour table (the class table is made here, with the labels as edited). */}
+            <Downloads idPrefix="landcover" items={out.downloads?.filter(d => d.filename.endsWith('.tif'))} />
             <button type="button" className="btn btn-small push-right" onClick={exportCsv}>
               Export class table (CSV)
             </button>
