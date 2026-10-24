@@ -88,6 +88,21 @@ def grid_crs(r: Raster):
     return "EPSG:4326" if r.meta.geographic else None
 
 
+def class_geotiff(ctx: ToolContext, name: str, label: str, classes: np.ndarray, legend: Sequence[Mapping[str, Any]], r: Raster) -> dict | None:
+    """A class map as a GeoTIFF on the raster's analysis grid, with its colour table (0 = no data), as a download; None
+    when the raster has no georeferencing or the map is on another grid."""
+    crs = grid_crs(r)
+    if crs is None or classes.shape != (r.gh, r.gw):
+        return None
+    cmap: dict[int, tuple[int, int, int]] = {0: (0, 0, 0)}
+    for c in legend:
+        red, green, blue = (int(x) for x in c["color"][:3])
+        cmap[int(c["id"])] = (red, green, blue)
+    url = ctx.geotiff(name, np.asarray(classes, dtype=np.uint8), r.transform, crs, nodata=0, colormap=cmap,
+                      description="; ".join(f"{c['id']} = {c['label']}" for c in legend))
+    return ctx.download(f"Export {label} (GeoTIFF)", name, url, "image/tiff") | {"classes": [{"id": int(c["id"]), "label": c["label"]} for c in legend]}
+
+
 def begin_tiles(ctx: ToolContext, name: str, width: int, height: int, transform, crs, dtype: str, recipe: dict, count: int = 1, nodata: float | None = None):
     """A TileSource for a grid too large for one picture, or None (small grid, or no georeferencing)."""
     from ..processing.maptiles import TileSource

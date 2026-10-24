@@ -1,0 +1,14 @@
+Package: terrax
+Type: Package
+Title: TerraX Earth-Observation Tools from R
+Version: 2.0.0
+Description: Runs TerraX's tools (forest loss, burn severity, land cover,
+    terrain, hydrology, canopy height and biomass, radar change, disturbance
+    dating) on local files from R, through the 'terrax' command, and returns
+    their results and output files (GeoTIFF, GeoJSON, CSV) for use with
+    'terra' and 'sf'.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports: jsonlite
+Suggests: terra, sf
+SystemRequirements: the terrax command (pip install -e backend from the TerraX repository)

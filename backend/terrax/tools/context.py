@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, overload
 
@@ -10,6 +12,9 @@ import numpy as np
 
 from .. import storage
 from ..processing.render import save_png
+
+#: Called with (fraction, message) at each progress report of a tool, when set (terrax.local's runs on local files).
+PROGRESS_HOOK: ContextVar[Callable[[float, str], None] | None] = ContextVar("terrax_progress_hook", default=None)
 
 
 class ToolError(ValueError):
@@ -46,7 +51,11 @@ class ToolContext:
 
     # Progress
     def progress(self, fraction: float, message: str) -> None:
-        storage.update_job(self.job_id, progress=round(max(0.0, min(1.0, fraction)), 3), message=message)
+        f = round(max(0.0, min(1.0, fraction)), 3)
+        storage.update_job(self.job_id, progress=f, message=message)
+        hook = PROGRESS_HOOK.get()
+        if hook is not None:
+            hook(f, message)
 
     # Artifacts
     def url(self, name: str) -> str:
@@ -56,8 +65,10 @@ class ToolContext:
         save_png(rgba, self.dir / storage.safe_name(name))
         return self.url(name)
 
-    def geotiff(self, name: str, data: np.ndarray, transform, crs, nodata: float | None = None) -> str:
-        """A single-band GeoTIFF (deflate-compressed, tiled) for download and use in other GIS software."""
+    def geotiff(self, name: str, data: np.ndarray, transform, crs, nodata: float | None = None, colormap: dict[int, tuple[int, int, int]] | None = None,
+                description: str | None = None) -> str:
+        """A single-band GeoTIFF (deflate-compressed, tiled) for download and use in other GIS software. A class map can
+        carry its colour table, which QGIS and ArcGIS draw as given."""
         import rasterio
 
         h, w = data.shape
@@ -65,6 +76,10 @@ class ToolContext:
                    "compress": "deflate", "tiled": w >= 256 and h >= 256, "nodata": nodata}
         with rasterio.open(self.dir / storage.safe_name(name), "w", **profile) as d:
             d.write(data, 1)
+            if colormap:
+                d.write_colormap(1, {k: (*v, 255) for k, v in colormap.items()})
+            if description:
+                d.set_band_description(1, description)
         return self.url(name)
 
     def json(self, name: str, data: Any) -> str:

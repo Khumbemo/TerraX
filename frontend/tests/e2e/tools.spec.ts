@@ -108,6 +108,9 @@ test('terrain and photo samples', async ({ page }) => {
   await page.click('button:has-text("Try synthetic DEM")');
   await expect(page.locator('.result-block .stat-grid').first()).toContainText('Relief');
   await page.click('button[role=tab]:has-text("Slope classes")');
+  // Slope and hillshade as GeoTIFFs for QGIS or ArcGIS.
+  const [slope] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export slope (GeoTIFF, degrees)")')]);
+  expect(slope.suggestedFilename()).toBe('slope_deg.tif');
   await backToTools(page);
   await openTool(page, 'Space & aerial photos');
   await page.click('button:has-text("Try synthetic photo")');

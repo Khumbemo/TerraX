@@ -212,6 +212,36 @@ For heavy workloads:
   - `python -m terrax.manage migrate status` shows the revision; `migrate upgrade` applies pending ones without starting the server.
   - The hourly clean-up deletes expired files. History rows stay, marked expired.
 
+## Python, command line and QGIS
+
+The same tools run without the web server, on local files. They use the same code, so they give the same numbers.
+
+- **Command line.** `pip install -e backend` installs the `terrax` command.
+
+  ```bash
+  terrax tools                                     # each tool's inputs and main parameters
+  terrax run forest -i a=ndvi_2016.tif -i b=ndvi_2024.tif -p mode=ndvi -o forest_result
+  terrax run stack -i files=s2_2019.tif,s2_2020.tif,s2_2021.tif,s2_2022.tif,s2_2023.tif -p mapBreaks=true -o series
+  terrax run canopy -i chm=chm.tif -i plots=plots.geojson --boundary site.geojson -o canopy
+  ```
+
+  Each run writes `result.json`, `report.md` and the output files to the folder: GeoTIFF class maps with their colour tables, slope, hillshade, flow accumulation and wetness, plus GeoJSON polygons, streams, contours and tree tops, CSV tables and PNG pictures. `--json` prints the result, and `--progress` reports progress on stderr. Parameters are `key=value` (JSON values, dotted keys for nested ones) or `--params file.json`.
+- **Python.** `from terrax.local import run`, then `run("hydrology", {"dem": "dem.tif"}, {"method": "dinf"}, out="hydro")`. It returns the result dictionary, the report and the output files, for scripts and Jupyter notebooks.
+- **QGIS.** `qgis-plugin/` is a Processing plugin with ten algorithms:
+  - forest loss, burn severity, Hansen loss by year and disturbance dating;
+  - canopy height, trees and biomass;
+  - land cover;
+  - terrain, hydrology and contours;
+  - Sentinel-1 change.
+
+  It takes your layers (vector layers in any CRS, reprojected for TerraX) and loads the results, with class maps drawn in their colours and labelled. It calls the `terrax` command, so TerraX keeps its own Python and GDAL. Install and build steps are in `qgis-plugin/README.md`.
+- **Jupyter.** `pip install -e 'backend[notebook]'`, then `show(result)` from `terrax.notebook` puts a run's outputs on an interactive map (ipyleaflet, in the style of geemap and leafmap).
+  - GeoTIFFs are reprojected to the map's Web Mercator, so class maps line up with their polygons, and class maps get a legend.
+  - A result displays as its report.
+  - `notebooks/terrax_quickstart.ipynb` walks through forest loss, hydrology, canopy and disturbance dating; the tests execute it from top to bottom.
+- **R and Julia.** `clients/R/terrax` (an R package; results as lists, outputs ready for `terra` and `sf`) and `clients/julia/TerraX` (results as Dicts). Both run the `terrax` command; see `clients/README.md`, which also shows the web API for any other language.
+- Only the live-catalogue tools (Sentinel-1 and Sentinel-2 search) and the residential plot tool stay web-only.
+
 ## Storage and backups
 
 - **Object storage.** Set `TERRAX_S3_BUCKET` (and, for a service other than AWS S3, `TERRAX_S3_ENDPOINT`, `TERRAX_S3_REGION`, `TERRAX_S3_PATH_STYLE`) with the usual `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Cloudflare R2, Backblaze B2, MinIO and Wasabi all work. The Docker images include the client (`pip install 'terrax[s3]'` otherwise).
@@ -252,11 +282,13 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 260 tests (3 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: object storage against an in-process S3 (moto; with `TERRAX_TEST_S3_ENDPOINT`, a real server, which CI runs with SeaweedFS), database backup and restore, interrupted jobs, accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 271 tests (3 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: the command line and Python API on local files (GeoTIFF georeferencing, colour tables and values checked), notebook maps (overlays aligned with their polygons) and the quickstart notebook run end to end, object storage against an in-process S3 (moto; with `TERRAX_TEST_S3_ENDPOINT`, a real server, which CI runs with SeaweedFS), database backup and restore, interrupted jobs, accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
+| `Rscript clients/R/terrax/tests/run_tests.R` and `julia --project=clients/julia/TerraX -e 'using Pkg; Pkg.test()'` | The R and Julia clients on the samples. They check the web app's answers and that TerraX's error messages arrive as R and Julia errors. In R, `terra` also reads the class map. |
+| `QT_QPA_PLATFORM=offscreen /usr/bin/python3 -m unittest discover -s qgis-plugin/tests` | The QGIS plugin in a real, headless QGIS: every algorithm registers. The main ones run on the samples and give the web app's answers (184.05 ha of loss, 25 tree tops, 54 ha of disturbance). They also load labelled class maps, and TerraX's error messages reach QGIS. |
 
-CI (`.github/workflows/ci.yml`) runs all three, then builds and starts the Docker Compose stack and the one-container image.
+CI (`.github/workflows/ci.yml`) runs all five (the QGIS plugin on QGIS 3.34 LTR, R 4.3 and Julia 1.10), then builds and starts the Docker Compose stack and the one-container image.
 
 `TERRAX_LIVE=1 pytest tests/test_live.py` searches, reads and analyses real Sentinel-1 scenes (Planetary Computer) and Sentinel-2 scenes and a median composite (Earth Search). It checks that the radar backscatter values are physically plausible. The **Live data** workflow (`.github/workflows/live.yml`) runs it weekly, by hand, and on pull requests that change that code. It is kept out of CI because it depends on outside services.
 

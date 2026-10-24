@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..config import settings
 from ..processing.indices import INDICES
 from ..processing.rasterset import analyze_breaks, analyze_stack, breaks_markdown, dataset, raster_report, stack_markdown
@@ -74,12 +76,13 @@ def _breaks_outputs(ctx: ToolContext, b: dict, ref: Raster) -> dict:
     from ..processing.render import hex_rgb
 
     dates = b["dates"]
-    legend = [{"id": 1, "label": "No disturbance", "color": [72, 96, 84]}] + [
+    legend: list[dict[str, Any]] = [{"id": 1, "label": "No disturbance", "color": [72, 96, 84]}] + [
         {"id": k, "label": f"Drop first seen {dates[k]}", "color": list(hex_rgb(BREAK_COLORS[(k - 2) % len(BREAK_COLORS)]))} for k in range(2, len(dates) - 1)]
     image = class_overlay(ctx, "breaks.png", b["classes"], legend, ref, "Disturbance date")
     downloads = [
         ctx.download("Export disturbance dates (GeoTIFF; value = index of the first date after the drop, 1 = none)", "disturbance_date.tif",
-                     ctx.geotiff("disturbance_date.tif", b["classes"], ref.transform, ref.crs, nodata=0), "image/tiff"),
+                     ctx.geotiff("disturbance_date.tif", b["classes"], ref.transform, ref.crs, nodata=0, colormap={int(c["id"]): (c["color"][0], c["color"][1], c["color"][2]) for c in legend},
+                                 description="; ".join(f"{c['id']} = {c['label']}" for c in legend)), "image/tiff") | {"classes": [{"id": c["id"], "label": c["label"]} for c in legend]},
         ctx.download("Export drop size (GeoTIFF)", "disturbance_magnitude.tif", ctx.geotiff("disturbance_magnitude.tif", b["magnitude"], ref.transform, ref.crs, nodata=float("nan")), "image/tiff"),
     ]
     csv = "first_seen,previous_date,pixels,area_ha\n" + "\n".join(f"{x['date']},{x['previous']},{x['pixels']},{'' if x['ha'] is None else round(x['ha'], 4)}" for x in b["byDate"])

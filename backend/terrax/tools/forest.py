@@ -7,7 +7,7 @@ import numpy as np
 from ..processing import forest as fp
 from ..processing.rio import ground_geometry
 from . import tool
-from .common import bands, boundary, class_overlay, clean, number, raster, save_npz
+from .common import bands, boundary, class_geotiff, class_overlay, clean, number, raster, save_npz
 from .context import ToolContext, ToolError
 
 SLOT_NAMES = {
@@ -47,12 +47,17 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     geo = ground_geometry(a.meta, r["width"], r["height"])
     save_npz(ctx.dir / "classes.npz", {"classes": r["classes"], "rowArea": np.asarray(geo.cell_area if geo else np.ones(r["height"]), dtype=np.float64)})
     downloads = []
+    base = a.meta.filename.rsplit(".", 1)[0]
+    tif = class_geotiff(ctx, f"{base}_{'burn_severity' if mode == 'burn' else 'forest_change'}.tif", "burn severity classes" if mode == "burn" else "change classes",
+                        r["classes"], fp.legend(mode), a)
     polys = fp.loss_polygons(r, a)
     if polys is not None:
         kind = "burned" if mode == "burn" else "loss"
         fname = f"{a.meta.filename.rsplit('.', 1)[0]}_{kind}_patches.geojson"
         url = ctx.json(fname, polys["fc"])
         downloads.append(ctx.download(f"Export {kind} polygons (GeoJSON)", fname, url, "application/geo+json") | {"features": len(polys["fc"]["features"]), "truncated": polys["truncated"]})
+    if tif:  # after the polygons, whose button the web app addresses by position
+        downloads.append(tif)
     md = fp.forest_markdown(r, [f"{slot[i]}: {n}" for i, n in enumerate(names)])
     return clean({
         "tool": "forest",
