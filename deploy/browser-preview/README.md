@@ -52,6 +52,20 @@ fixes made since:
   area-weighted sum equals the outlet's D∞ area, and a brute-force push of
   flow down the facets gives the same shares; the cells sending at least half
   export as a polygon.
+- Image series map disturbances per pixel: one abrupt drop on a linear trend (the single-break model of BFAST,
+  Verbesselt et al. 2010), chosen over a trend alone by BIC, dated by the clear observations around it. On 3,000
+  random cloudy series it gives the server's dates and drop sizes exactly; on the synthetic 6-date series, the same
+  three fronts and 54 ha.
+- Forest change and burn severity maps get the stratified validation sample and Olofsson et al. (2014) accuracy
+  and area estimates that land cover already had (one shared component, as on the server).
+- Canopy height takes field plots: a tree count calibrated by the ratio estimator (Cochran 1977), and above-ground
+  biomass AGB = a·TCHᵇ (Asner & Mascaro 2014) with Baskerville's correction, applied to plot-sized cells, a Monte
+  Carlo 95 % interval, carbon and CO₂e. The fit, totals and leave-one-out error equal the server's to 1e-9; the
+  interval comes from this page's own random numbers and agrees within 0.4 %. On the server's test files the total
+  is the same 1,615 Mg.
+- Land cover's random forest can add a Sentinel-1 file's VV, VH and VH/VV (dB) as features. A radar file on
+  another grid is reprojected onto the image bilinearly in linear power; on a WGS84 file warped onto a UTM grid it
+  agrees with rasterio to 2e-5 of the backscatter.
 
 - Projects saved to your claude.ai account. On claude.ai, the Reports view
   can save the boundary, target, reports and preferences to the viewer's
@@ -74,7 +88,7 @@ git apply ../TerraX/deploy/browser-preview/terrax-browser.patch
 cp ../TerraX/backend/data/samples/{s1_vv_vh_2023-01-08,s1_vv_vh_2024-01-03}_synthetic.tif \
    ../TerraX/backend/data/samples/{lidar_forest_synthetic.laz,landcover_training_synthetic.geojson} public/data/samples/
 npm ci
-npx tsx --test tests/*.test.ts      # 109 unit tests
+npx tsx --test tests/*.test.ts      # 116 unit tests
 npm run build:preview               # → dist-preview/
 ```
 
