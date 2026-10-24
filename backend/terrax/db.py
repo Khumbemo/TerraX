@@ -210,6 +210,10 @@ def engine() -> Engine:
         else:
             eng = create_engine(url, pool_pre_ping=True)
         _migrate(eng)
+        if settings().backup_restore_empty:
+            from .backup import restore_if_empty
+
+            restore_if_empty(eng)
         _engines[url] = eng
         return eng
 

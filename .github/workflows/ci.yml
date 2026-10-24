@@ -30,6 +30,16 @@ jobs:
         run: mypy
       - name: Tests (pytest)
         run: pytest -p no:warnings
+      # The bucket tests again, against a real S3-compatible server instead of moto (MinIO no longer publishes
+      # community images). Small, unpreallocated volumes keep it within the runner's disk.
+      - name: Object storage against SeaweedFS
+        env:
+          TERRAX_TEST_S3_ENDPOINT: http://127.0.0.1:8333
+        run: |
+          docker run -d --name s3 --network host chrislusf/seaweedfs:3.80 server -ip=127.0.0.1 -s3 -dir=/data \
+            -master.volumeSizeLimitMB=64 -master.volumePreallocate=false -volume.max=20
+          for i in $(seq 1 90); do curl -s -o /dev/null http://127.0.0.1:8333/ && break; sleep 1; done
+          pytest -p no:warnings tests/test_objectstore.py
 
   backend-postgres:
     name: Python API on PostgreSQL
@@ -59,7 +69,7 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e '.[dev,postgres]'
       - name: Accounts, access, history and the API on PostgreSQL
-        run: pytest -p no:warnings tests/test_accounts.py tests/test_api.py tests/test_tools.py tests/test_hosting.py tests/test_maptiles.py
+        run: pytest -p no:warnings tests/test_accounts.py tests/test_api.py tests/test_tools.py tests/test_hosting.py tests/test_maptiles.py tests/test_backup.py tests/test_objectstore.py tests/test_interrupted.py
 
   frontend:
     name: Web app and end-to-end tests

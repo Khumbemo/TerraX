@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import __version__, auth, db, ratelimit, storage
+from .. import __version__, auth, db, objectstore, ratelimit, storage
 from ..auth import Principal, principal
 from ..config import settings
 from ..monitoring import configure_logging, init_sentry, metrics, new_request_id, record_exception, render_metrics, request_id
@@ -156,13 +156,13 @@ def health() -> dict[str, Any]:
     from ..tools import load_all
 
     return {"ok": True, "version": __version__, "eager": s.eager, "jobs": job_mode(), "redis": redis_ok, "tools": sorted(load_all()), "ai": bool(s.gemini_api_key),
-            "auth": s.auth_mode, "signup": s.signup}
+            "auth": s.auth_mode, "signup": s.signup, "objectStore": bool(s.s3_bucket)}
 
 
 @app.get("/api/health/ready")
 def ready() -> JSONResponse:
-    """Readiness for a load balancer or orchestrator: the database answers, the storage folder takes writes, and
-    (with Celery) Redis answers. 503 when any of them fails."""
+    """Readiness for a load balancer or orchestrator: the database answers, the storage folder takes writes, the
+    bucket (when there is one) answers, and (with Celery) Redis answers. 503 when any of them fails."""
     checks: dict[str, bool] = {"database": db.ping()}
     try:
         probe = storage.root() / f".ready-{storage.new_id()}"
@@ -171,6 +171,8 @@ def ready() -> JSONResponse:
         checks["storage"] = True
     except OSError:
         checks["storage"] = False
+    if objectstore.enabled():
+        checks["objectStore"] = objectstore.ping()
     if job_mode() == "celery":
         try:
             import redis

@@ -58,6 +58,30 @@ class Settings:
     #: Keep signed-in users' uploads and results this many days (0 keeps them until deleted). Job history outlives them.
     user_retention_days: int = field(default_factory=lambda: int(os.environ.get("TERRAX_USER_RETENTION_DAYS", "30")))
 
+    # ── Object storage (S3-compatible; see terrax/objectstore.py) ──
+    #: Bucket for uploads and results; empty keeps them only in the storage folder.
+    s3_bucket: str = field(default_factory=lambda: os.environ.get("TERRAX_S3_BUCKET", "").strip())
+    #: Key prefix inside the bucket, e.g. "terrax/" (a bucket shared with other data).
+    s3_prefix: str = field(default_factory=lambda: (p.strip("/") + "/") if (p := os.environ.get("TERRAX_S3_PREFIX", "").strip()) else "")
+    #: Endpoint of a service other than AWS, e.g. https://<account>.r2.cloudflarestorage.com or http://minio:9000.
+    s3_endpoint: str = field(default_factory=lambda: os.environ.get("TERRAX_S3_ENDPOINT", "").strip())
+    #: Region; empty uses AWS_REGION / AWS_DEFAULT_REGION (R2 takes "auto").
+    s3_region: str = field(default_factory=lambda: os.environ.get("TERRAX_S3_REGION", "").strip())
+    #: Path-style addressing (http://host/bucket/key), which MinIO and some other services need.
+    s3_path_style: bool = field(default_factory=lambda: _bool("TERRAX_S3_PATH_STYLE", False))
+    #: Drop local copies of bucket objects unused for this many hours (the bucket keeps them). At least the job limit.
+    s3_cache_hours: int = field(default_factory=lambda: max(int(os.environ.get("TERRAX_S3_CACHE_HOURS", "24")), int(os.environ.get("TERRAX_JOB_MINUTES", "60")) // 60 + 1))
+
+    # ── Database backups (see terrax/backup.py) ──
+    #: Back the database up every this many hours (0: only on demand with ``python -m terrax.manage backup``).
+    backup_hours: int = field(default_factory=lambda: max(0, int(os.environ.get("TERRAX_BACKUP_HOURS", "24"))))
+    #: How many backups to keep (older ones are deleted after each new one).
+    backup_keep: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_BACKUP_KEEP", "14"))))
+    #: Folder for backups when there is no bucket; empty: storage/backups. With a bucket they go to <prefix>backups/.
+    backup_dir: Path | None = field(default_factory=lambda: Path(p) if (p := os.environ.get("TERRAX_BACKUP_DIR", "").strip()) else None)
+    #: Restore the newest backup into a database that starts with no rows (a host whose disk does not survive a restart).
+    backup_restore_empty: bool = field(default_factory=lambda: _bool("TERRAX_BACKUP_RESTORE_EMPTY", False))
+
     # ── Accounts, access and limits ──
     #: SQLAlchemy URL of the database; empty uses SQLite in the storage folder (storage/terrax.db).
     database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))

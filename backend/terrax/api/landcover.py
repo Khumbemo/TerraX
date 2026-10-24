@@ -53,7 +53,7 @@ def _job(job_id: str, p: Principal) -> tuple[_Map, Path]:
     art = storage.job_dir(job_id) / "artifacts"
     if not res or st["tool"] not in ("landcover", "forest"):
         raise HTTPException(400, "Validation needs a classified map: land cover, forest change or burn severity.")
-    if not (art / "classes.npz").exists():
+    if not storage.has_artifact(job_id, "classes.npz"):  # fetched from the bucket when it is not on this disk
         raise HTTPException(400, "This result was made before maps could be validated. Run the analysis again.")
     if st["tool"] == "landcover":
         return _Map(labels=res["labels"], file=res["file"], filename=res["landcover"]["filename"]), art
@@ -116,9 +116,12 @@ def sample(job_id: str, req: SampleRequest, p: Principal = Depends(principal)) -
         return {"label": label, "filename": name, "url": sign_urls(f"/api/jobs/{job_id}/artifacts/{name}", job_id), "mediaType": media}
 
     downloads = [download("Validation sample (CSV)", f"{base}_validation_sample.csv", "text/csv")]
+    saved = ["sample.json", f"{base}_validation_sample.csv"]
     if feats:
         (art / f"{base}_validation_sample.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": feats}), encoding="utf-8")
+        saved.append(f"{base}_validation_sample.geojson")
         downloads.insert(0, download("Validation sample (GeoJSON)", f"{base}_validation_sample.geojson", "application/geo+json"))
+    storage.save_artifacts(job_id, *saved)
     weights = areas / areas.sum() if areas.sum() else areas
     unit = "ha" if np.any(row_area != 1) else "px"
     scale = 1e-4 if unit == "ha" else 1.0
@@ -156,10 +159,10 @@ def _read_labels(path, name: str) -> dict[str, str]:
 @router.post("/api/jobs/{job_id}/validation/accuracy")
 @router.post("/api/landcover/{job_id}/accuracy")
 def accuracy(job_id: str, req: AccuracyRequest, who: Principal = Depends(principal)) -> dict:
-    _, art = _job(job_id, who)
+    _job(job_id, who)
     try:
-        s = json.loads((art / "sample.json").read_text())
-    except FileNotFoundError:
+        s = json.loads(storage.artifact_path(job_id, "sample.json").read_text())
+    except KeyError:
         raise HTTPException(400, "Create the validation sample first, then label it.") from None
     try:
         auth.own_file(who, req.file)
