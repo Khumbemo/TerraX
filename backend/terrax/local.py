@@ -78,6 +78,10 @@ class Result:
     def __getitem__(self, key: str) -> Any:
         return self.result[key]
 
+    def _repr_markdown_(self) -> str:
+        """Jupyter shows a result as its report; terrax.notebook.show(result) puts its outputs on a map."""
+        return self.markdown
+
 
 def cache_dir() -> Path:
     return Path(os.environ.get("TERRAX_STORAGE") or Path.home() / ".cache" / "terrax-local")

@@ -71,7 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="terrax", description="TerraX earth-observation tools on local files.")
     ap.add_argument("--version", action="version", version=f"terrax {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("tools", help="list the tools, their inputs and main parameters")
+    t = sub.add_parser("tools", help="list the tools, their inputs and main parameters")
+    t.add_argument("--json", action="store_true", help="as JSON (for the R and Julia clients and other programs)")
     r = sub.add_parser("run", help="run one tool")
     r.add_argument("tool", help="tool name (see `terrax tools`)")
     r.add_argument("-i", "--input", action="append", default=[], metavar="SLOT=PATH", help="an input file (repeat for each slot)")
@@ -83,7 +84,10 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--progress", action="store_true", help="report progress on stderr as lines “PROGRESS <0–1> <message>” (for programs that run this)")
     a = ap.parse_args(argv)
     if a.cmd == "tools":
-        _print_tools()
+        if a.json:
+            print(json.dumps({"tools": TOOLS, "webOnly": list(WEB_ONLY)}, ensure_ascii=False, indent=2))
+        else:
+            _print_tools()
         return 0
     params = _params(a.param, a.params)
     try:

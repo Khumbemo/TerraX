@@ -100,6 +100,7 @@ def test_command_line(tmp_path, capsys):
         "mode": "ndvi", "mmuHa": 0.5, "view": {"mode": "index", "bands": {"red": 2}}, "labels": ["a", "b"]}
     assert _inputs(["a=x.tif", "files=1.tif,2.tif", "files2=one.tif"]) == {"a": "x.tif", "files": ["1.tif", "2.tif"], "files2": "one.tif"}
     assert main(["tools"]) == 0 and "forest" in capsys.readouterr().out
+    assert main(["tools", "--json"]) == 0 and "a" in json.loads(capsys.readouterr().out)["tools"]["forest"]["inputs"]
     out = tmp_path / "terrain"
     assert main(["run", "terrain", "-i", f"dem={SAMPLES / 'terrain_dem_synthetic.tif'}", "-o", str(out)]) == 0
     assert "Hypsometric integral" in capsys.readouterr().out and (out / "slope_deg.tif").is_file()

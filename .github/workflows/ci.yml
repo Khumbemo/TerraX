@@ -92,6 +92,28 @@ jobs:
         run: TERRAX_COMMAND="$(which terrax)" /usr/bin/python3 -W error::ResourceWarning -m unittest discover -s qgis-plugin/tests -v
       - run: python qgis-plugin/build.py
 
+  clients:
+    name: R and Julia clients
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: pip install -e backend
+      - name: R (Ubuntu's, with jsonlite and terra)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends r-base-core r-cran-jsonlite r-cran-terra
+      - name: R client
+        run: Rscript clients/R/terrax/tests/run_tests.R && R CMD INSTALL -l "$RUNNER_TEMP" clients/R/terrax
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+      - name: Julia client
+        run: julia --project=clients/julia/TerraX -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+
   frontend:
     name: Web app and end-to-end tests
     runs-on: ubuntu-latest
