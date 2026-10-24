@@ -42,6 +42,23 @@ services:
       # internal URL written as postgresql+psycopg://USER:PASSWORD@HOST/DB.
       - key: DATABASE_URL
         sync: false
+      # Optional, instead of (or as well as) PostgreSQL: an S3-compatible bucket (Cloudflare R2 and Backblaze B2 have free
+      # tiers) keeps uploads and results, and hourly database backups that an empty database restores at start-up, so
+      # a restart loses at most the last hour.
+      - key: TERRAX_S3_BUCKET
+        sync: false
+      - key: TERRAX_S3_ENDPOINT
+        sync: false
+      - key: TERRAX_S3_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: TERRAX_BACKUP_HOURS
+        value: "1"
+      - key: TERRAX_BACKUP_RESTORE_EMPTY
+        value: "true"
       # Signs links to result pictures and tiles; generated once by Render so it survives restarts.
       - key: TERRAX_SECRET_KEY
         generateValue: true

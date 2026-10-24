@@ -39,12 +39,22 @@ celery_app.conf.update(
     worker_max_memory_per_child=_s.worker_max_memory_mb * 1024 or None,
     result_expires=3600,
     broker_connection_retry_on_startup=True,
-    beat_schedule={"purge-old-files": {"task": "terrax.purge", "schedule": 3600.0}},
+    # Hourly: expired uploads and results, and a database backup when TERRAX_BACKUP_HOURS have passed since the last.
+    beat_schedule={"purge-old-files": {"task": "terrax.purge", "schedule": 3600.0}, "backup-db": {"task": "terrax.backup", "schedule": 3600.0}},
 )
 
 
 def run_job(job_id: str) -> dict:
     """Runs one job to completion and records the outcome in its status file."""
+    storage.fetch_job(job_id)  # a worker on another machine than the API gets the request from the bucket
+    storage.claim(job_id)
+    try:
+        return _run(job_id)
+    finally:
+        storage.release(job_id)
+
+
+def _run(job_id: str) -> dict:
     from .tools import load_all
     from .tools.context import ToolContext, ToolError
 
@@ -58,6 +68,7 @@ def run_job(job_id: str) -> dict:
             raise ToolError(f"Unknown tool “{req['tool']}”.")
         result = runner(ToolContext(job_id), req.get("inputs") or {}, req.get("params") or {})
         storage.write_json(storage.job_dir(job_id) / "result.json", result)
+        storage.publish_job(job_id)
         name = result.get("name") if isinstance(result, dict) else None
         return storage.update_job(job_id, state="done", progress=1.0, message="Done", seconds=round(time.time() - started, 2), name=str(name or "")[:300])
     except ToolError as err:
@@ -95,6 +106,13 @@ def purge_task() -> int:
     return storage.purge_old()
 
 
+@celery_app.task(name="terrax.backup")
+def backup_task() -> dict | None:
+    from .backup import run_if_due
+
+    return run_if_due()
+
+
 @worker_process_init.connect
 def _worker_start(**_kwargs) -> None:
     configure_logging()
@@ -112,6 +130,7 @@ def submit(job_id: str) -> None:
     if s.eager:
         run_job(job_id)
     elif s.job_threads > 0:
+        storage.claim(job_id)  # queued in this process: its status lives on this disk from now on
         _job_pool(s.job_threads).submit(run_job, job_id)
     else:
         run_job_task.delay(job_id)
@@ -146,6 +165,12 @@ def start_purge_thread(every_s: float = 3600.0) -> None:
                     log.info("purged %d old upload/job folders", n)
             except Exception:  # a failed clean-up must not stop later ones
                 log.exception("purge failed")
+            try:
+                from .backup import run_if_due
+
+                run_if_due()
+            except Exception:
+                log.exception("database backup failed")
             time.sleep(every_s)
 
     threading.Thread(target=loop, name="terrax-purge", daemon=True).start()

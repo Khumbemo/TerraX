@@ -96,7 +96,7 @@ def watershed(job_id: str, req: OutletRequest, request: Request, p: Principal = 
     res = storage.job_result(job_id)
     if st["tool"] != "hydrology" or not res:
         raise HTTPException(400, "Run the hydrology step first.")
-    npz = storage.job_dir(job_id) / "artifacts" / "flow.npz"
+    npz = storage.artifact_path(job_id, "flow.npz")
     d = np.load(npz)
     acc, direction = d["acc"], d["dir"]
     h, w = acc.shape
@@ -106,10 +106,10 @@ def watershed(job_id: str, req: OutletRequest, request: Request, p: Principal = 
     cell = d["cell"]
     area = float(mask.sum(axis=1) @ cell)
     z, s = d["dem"][mask], d["slope"][mask]
-    n = len([p for p in (storage.job_dir(job_id) / "artifacts").glob("basin_*.png")])
-    name = f"basin_{n + 1}.png"
+    name = f"basin_{int(outlet[0])}_{int(outlet[1])}.png"  # one picture per outlet cell, whichever machine draws it
     shade = d["shade"] if "shade" in d else display_grid(d["hillshade"])  # jobs saved before the display-size shade
     flow_png(storage.job_dir(job_id) / "artifacts", name, d["dem"], shade, acc, d["order"], mask, outlet)
+    storage.save_artifacts(job_id, name)
     r = _raster(res["demFile"], max_pixels=settings().dem_pixels)
     fc = None
     out = patches_to_geojson(mask.astype(np.int32), 1, np.array([0.0, area]), r, lambda _i, a: {"name": "Watershed", "area_ha": round(a / 100) / 100})

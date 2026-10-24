@@ -59,7 +59,7 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e '.[dev,postgres]'
       - name: Accounts, access, history and the API on PostgreSQL
-        run: pytest -p no:warnings tests/test_accounts.py tests/test_api.py tests/test_tools.py tests/test_hosting.py tests/test_maptiles.py
+        run: pytest -p no:warnings tests/test_accounts.py tests/test_api.py tests/test_tools.py tests/test_hosting.py tests/test_maptiles.py tests/test_backup.py tests/test_objectstore.py
 
   frontend:
     name: Web app and end-to-end tests

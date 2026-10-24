@@ -8,6 +8,9 @@
     purge                                       delete expired uploads, results and old recorded errors now
     migrate status|upgrade                      the database's schema revision, or upgrade it (also done at start-up)
     check                                       database, storage and settings at a glance
+    backup                                      back the database up now (to the bucket, or TERRAX_BACKUP_DIR)
+    backups                                     list the stored backups, newest first
+    restore NAME|FILE --yes                     replace every row of the database with a backup's
 """
 
 from __future__ import annotations
@@ -59,6 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("purge")
     sub.add_parser("migrate").add_argument("action", choices=["status", "upgrade"])
     sub.add_parser("check")
+    sub.add_parser("backup")
+    sub.add_parser("backups")
+    rs = sub.add_parser("restore")
+    rs.add_argument("name", help="a backup's name (from `backups`) or the path of a backup file")
+    rs.add_argument("--yes", action="store_true", help="confirm: every row now in the database is replaced")
     a = ap.parse_args(argv)
     from fastapi import HTTPException
 
@@ -94,12 +102,39 @@ def main(argv: list[str] | None = None) -> int:
                 current = MigrationContext.configure(conn).get_current_revision()
             head = ScriptDirectory.from_config(db.alembic_config()).get_current_head()
             print(f"database revision {current or 'none'}; newest {head}{' (up to date)' if current == head else ''}")
+        elif a.cmd == "backup":
+            from . import backup
+
+            made = backup.create()
+            print(f"Backed up {sum(made['rows'].values())} rows to {made['name']} ({made['size']:,} bytes)" + (f"; removed {len(made['removed'])} older." if made["removed"] else "."))
+        elif a.cmd == "backups":
+            from . import backup
+
+            for b in backup.list_backups():
+                when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(b["created"]))
+                print(f"{b['name']}  {when}" + (f"  {b['size']:,} bytes" if b["size"] is not None else ""))
+        elif a.cmd == "restore":
+            from . import backup
+
+            if not a.yes:
+                sys.exit("Restoring replaces every row in the database (accounts, history, projects). Add --yes to go ahead.")
+            try:
+                n = backup.load(backup.read(a.name))
+            except KeyError:
+                sys.exit(f"There is no backup {a.name}; `python -m terrax.manage backups` lists them.")
+            except ValueError as e:
+                sys.exit(str(e))
+            print(f"Restored {sum(n.values())} rows from {a.name}.")
         elif a.cmd == "purge":
             print(f"Removed {storage.purge_old()} expired folders and {purge_errors()} old error records.")
         elif a.cmd == "check":
             s = settings()
             print(f"database  {db.database_url().split('@')[-1]}  {'ok' if db.ping() else 'NOT REACHABLE'}")
-            print(f"storage   {s.storage_dir}")
+            from . import objectstore
+
+            bucket = f"; bucket {s.s3_bucket} ({'ok' if objectstore.ping() else 'NOT REACHABLE'})" if s.s3_bucket else "; no bucket (uploads live only on this disk)"
+            print(f"storage   {s.storage_dir}{bucket}")
+            print(f"backups   {'every ' + str(s.backup_hours) + ' h' if s.backup_hours else 'on demand only'}, keep {s.backup_keep}, to {'the bucket' if s.s3_bucket else s.backup_dir or s.storage_dir / 'backups'}")
             print(f"accounts  TERRAX_AUTH={s.auth_mode}, sign-up {s.signup}, {auth.count_admins()} active admin(s)")
             print(f"limits    {'on' if s.rate_limits else 'off'}: {s.jobs_per_minute} jobs/min, {s.uploads_per_hour} uploads/h; quota user {s.user_quota_mb} MB, guest {s.guest_quota_mb} MB")
             print(f"retention guests {s.retention_hours} h, accounts {s.user_retention_days or 'unlimited'} d")

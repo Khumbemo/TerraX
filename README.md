@@ -212,6 +212,19 @@ For heavy workloads:
   - `python -m terrax.manage migrate status` shows the revision; `migrate upgrade` applies pending ones without starting the server.
   - The hourly clean-up deletes expired files. History rows stay, marked expired.
 
+## Storage and backups
+
+- **Object storage.** Set `TERRAX_S3_BUCKET` (and, for a service other than AWS S3, `TERRAX_S3_ENDPOINT`, `TERRAX_S3_REGION`, `TERRAX_S3_PATH_STYLE`) with the usual `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. Cloudflare R2, Backblaze B2, MinIO and Wasabi all work. The Docker images include the client (`pip install 'terrax[s3]'` otherwise).
+  - Every upload is copied to the bucket before it is indexed. A finished job's result and pictures are copied before its status says "done", so a reader that sees "done" always finds the result.
+  - The storage folder becomes a cache. Whatever is not on this machine's disk is fetched from the bucket when it is first needed. This covers restarts on a host whose disk does not survive one, and API and worker machines that share no disk. Copies unused for `TERRAX_S3_CACHE_HOURS` (24) are dropped from the disk; the bucket keeps them until they expire.
+  - While a job runs elsewhere, its progress reaches the bucket at most every 3 seconds. The API shows the newer of its own and the bucket's status, and never writes the bucket's over a status on its own disk.
+  - Expiry and deletion remove the bucket's copies too. `/api/health/ready` reports whether the bucket answers.
+- **Database backups.** Every `TERRAX_BACKUP_HOURS` (24) the hourly clean-up backs the database up, and keeps the newest `TERRAX_BACKUP_KEEP` (14).
+  - Backups go to `backups/` in the bucket, or else to `TERRAX_BACKUP_DIR` (default `storage/backups`, which only protects against losing the database file, not the disk).
+  - A backup is a consistent snapshot: SQLite's online backup API, or one `REPEATABLE READ` transaction on PostgreSQL. It is written as gzipped JSON lines, one row per line, so a SQLite backup restores into PostgreSQL and back. Rate-limit counters and sign-in round trips are left out.
+  - `python -m terrax.manage backup` makes one now, `backups` lists them, and `restore NAME --yes` replaces every row with a backup's in one transaction. Backups from older schema revisions restore; a newer one is refused. On PostgreSQL the id sequences are moved past the restored rows.
+  - With `TERRAX_BACKUP_RESTORE_EMPTY=true`, a server that starts with an empty database restores the newest backup itself. This suits SQLite on a host whose disk is wiped on restart, with backups in a bucket.
+
 ## Monitoring
 
 - **Request IDs and logs.**
@@ -237,7 +250,7 @@ Without a key, the built-in assistant answers. It has no AI model. It handles qu
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 242 tests (3 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 257 tests (3 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: object storage against an in-process S3 (moto), database backup and restore, accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 window reading, maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 
@@ -261,7 +274,7 @@ The root `Dockerfile` builds a single container for hosts that run one service. 
 
 **Render.** [Deploy with the blueprint](https://render.com/deploy?repo=https://github.com/Khumbemo/TerraX) (`render.yaml`). The free plan has 512 MB of memory. It runs the sample data one analysis at a time, sleeps after 15 idle minutes and takes about a minute to wake. Large rasters need a paid plan.
 
-On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are lost when the container restarts. So is the built-in SQLite database, with its accounts, history and projects. For accounts that last, set `DATABASE_URL` to a PostgreSQL database. `render.yaml` asks for it, along with `TERRAX_AUTH=required` and the first admin's e-mail and password. It also generates `TERRAX_SECRET_KEY`. For password-reset e-mail or single sign-on, add the `TERRAX_SMTP_*` or `TERRAX_OIDC_*` settings and `TERRAX_PUBLIC_URL`.
+On both hosts, add `GEMINI_API_KEY` as a secret if the AI assistants should use a server key. Uploads and results are lost when the container restarts. So is the built-in SQLite database, with its accounts, history and projects. To keep them, set `TERRAX_S3_BUCKET` (Cloudflare R2 and Backblaze B2 have free tiers) for uploads and results. Then either set `DATABASE_URL` to a PostgreSQL database, or keep SQLite with `TERRAX_BACKUP_HOURS=1` and `TERRAX_BACKUP_RESTORE_EMPTY=true`, so a restart loses at most the last hour of account changes (see [Storage and backups](#storage-and-backups)). `render.yaml` asks for it, along with `TERRAX_AUTH=required` and the first admin's e-mail and password. It also generates `TERRAX_SECRET_KEY`. For password-reset e-mail or single sign-on, add the `TERRAX_SMTP_*` or `TERRAX_OIDC_*` settings and `TERRAX_PUBLIC_URL`.
 
 To run the same container yourself:
 
