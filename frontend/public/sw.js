@@ -64,15 +64,19 @@ self.addEventListener('fetch', event => {
     }
     return res;
   };
+  // Same-origin static files are the same whatever the request's Origin header, but servers may send `Vary: Origin`
+  // (Vite's does), and the page loads scripts and styles as CORS requests that carry one while the precache did not:
+  // without ignoreVary those lookups miss, and offline the files would not load.
+  const cached = () => caches.match(req, { ignoreVary: true });
   // Built assets have content hashes in their names, so cache-first is safe.
   if (url.pathname.includes('/assets/')) {
-    event.respondWith(caches.match(req).then(hit => hit || fetch(req).then(save)));
+    event.respondWith(cached().then(hit => hit || fetch(req).then(save)));
     return;
   }
   // Other files (maps, samples) keep their names between releases: answer from the cache at once,
   // and refresh it in the background so an update arrives on the next visit.
   event.respondWith(
-    caches.match(req).then(hit => {
+    cached().then(hit => {
       const fresh = fetch(req).then(save);
       if (!hit) return fresh;
       fresh.catch(() => undefined);
