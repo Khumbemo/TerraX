@@ -108,7 +108,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends r-base-core r-cran-jsonlite r-cran-terra
       - name: R client
         run: Rscript clients/R/terrax/tests/run_tests.R && R CMD INSTALL -l "$RUNNER_TEMP" clients/R/terrax
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.10'
       - name: Julia client
