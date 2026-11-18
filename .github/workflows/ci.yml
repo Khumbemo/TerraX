@@ -74,7 +74,7 @@ jobs:
   qgis-plugin:
     name: QGIS plugin
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40  # an uncached QGIS install (about 200 MB) can take 20 minutes on a slow mirror
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -84,7 +84,18 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       # The terrax command in its own environment (as users install it); QGIS's Python runs the plugin and its tests.
       - run: pip install -e backend
+      # Ubuntu's packages, kept between runs (a slow mirror cannot deliver them all within the job's time); a new
+      # cache each week picks up Ubuntu's updates. See .github/scripts/apt-install.sh.
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: apt-qgis-${{ runner.os }}-${{ steps.week.outputs.week }}
+          restore-keys: apt-qgis-${{ runner.os }}-
       - name: QGIS 3.34 LTR (Ubuntu's)
+        env:
+          APT_ARCHIVES: ${{ runner.temp }}/apt-archives
         run: .github/scripts/apt-install.sh python3-qgis qgis-providers
       - name: Plugin tests in headless QGIS
         env:
@@ -104,7 +115,18 @@ jobs:
           cache: pip
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e backend
+      # Ubuntu's packages, kept between runs (a slow mirror cannot deliver them all within the job's time); a new
+      # cache each week picks up Ubuntu's updates. See .github/scripts/apt-install.sh.
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: apt-r-${{ runner.os }}-${{ steps.week.outputs.week }}
+          restore-keys: apt-r-${{ runner.os }}-
       - name: R (Ubuntu's, with jsonlite and terra)
+        env:
+          APT_ARCHIVES: ${{ runner.temp }}/apt-archives
         run: .github/scripts/apt-install.sh r-base-core r-cran-jsonlite r-cran-terra
       - name: R client
         run: Rscript clients/R/terrax/tests/run_tests.R && R CMD INSTALL -l "$RUNNER_TEMP" clients/R/terrax
