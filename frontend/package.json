@@ -27,7 +27,7 @@
     "world-atlas": "^2.0.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1",
+    "@playwright/test": "^1.65.1",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",

@@ -193,7 +193,12 @@ def test_two_factor_sign_in(app):
     secret = setup["secret"]
     assert len(base64.b32decode(secret + "=" * (-len(secret) % 8))) == 20 and "otpauth://totp/" in setup["uri"]
     assert c.post("/api/auth/2fa/enable", json={"code": "000000" if _code(secret) != "000000" else "111111"}).status_code == 400
-    on = c.post("/api/auth/2fa/enable", json={"code": _code(secret)}).json()
+    # The code and its 30-second step are kept: computing "the same" code again later can land in the next step.
+    from terrax import totp
+
+    used_step = totp.step()
+    used = totp.hotp(secret, used_step)
+    on = c.post("/api/auth/2fa/enable", json={"code": used}).json()
     assert on["enabled"] and len(set(on["recoveryCodes"])) == 10
     assert c.get("/api/auth/me").json()["user"]["twoFactor"] is True
     assert c.post("/api/auth/2fa/setup").status_code == 400
@@ -205,8 +210,8 @@ def test_two_factor_sign_in(app):
     assert d.post("/api/auth/login", json=pw | {"code": "12"}).status_code == 401
     assert d.post("/api/auth/login", json={**pw, "password": "wrong", "code": _code(secret)}).status_code == 401
     # The code used to turn it on is spent: a replay is refused, the next one works.
-    assert d.post("/api/auth/login", json=pw | {"code": _code(secret)}).status_code == 401
-    assert d.post("/api/auth/login", json=pw | {"code": _code(secret, 1)}).status_code == 200
+    assert d.post("/api/auth/login", json=pw | {"code": used}).status_code == 401
+    assert d.post("/api/auth/login", json=pw | {"code": totp.hotp(secret, used_step + 1)}).status_code == 200
     assert d.get("/api/auth/me").json()["user"]["email"] == email
     # A recovery code works once.
     rc = on["recoveryCodes"][0]
