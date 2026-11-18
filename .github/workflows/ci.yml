@@ -85,7 +85,7 @@ jobs:
       # The terrax command in its own environment (as users install it); QGIS's Python runs the plugin and its tests.
       - run: pip install -e backend
       - name: QGIS 3.34 LTR (Ubuntu's)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends python3-qgis qgis-providers
+        run: .github/scripts/apt-install.sh python3-qgis qgis-providers
       - name: Plugin tests in headless QGIS
         env:
           QT_QPA_PLATFORM: offscreen
@@ -105,7 +105,7 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - run: pip install -e backend
       - name: R (Ubuntu's, with jsonlite and terra)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends r-base-core r-cran-jsonlite r-cran-terra
+        run: .github/scripts/apt-install.sh r-base-core r-cran-jsonlite r-cran-terra
       - name: R client
         run: Rscript clients/R/terrax/tests/run_tests.R && R CMD INSTALL -l "$RUNNER_TEMP" clients/R/terrax
       - uses: julia-actions/setup-julia@v3
