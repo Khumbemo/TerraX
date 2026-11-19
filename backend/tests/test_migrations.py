@@ -31,7 +31,7 @@ def test_a_pre_alembic_database_is_stamped_and_upgraded(tmp_path, monkeypatch):
     tables = set(inspect(new).get_table_names())
     assert {"tokens", "audit", "rate_counters", "recovery_codes", "oidc_states", "alembic_version"} <= tables and "schema_version" not in tables
     with new.connect() as c:
-        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0002"
+        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
         # the existing account is kept and counts as verified
         assert c.execute(text("SELECT email, email_verified FROM users")).one() == ("old@example.org", True)
 
@@ -62,10 +62,10 @@ def test_downgrade_and_upgrade_again(tmp_path):
     with eng.begin() as c:
         command.downgrade(db.alembic_config(c), "0001")
     with eng.begin() as c:
-        assert "tokens" not in inspect(c).get_table_names()
+        assert not {"tokens", "monitors", "monitor_alerts"} & set(inspect(c).get_table_names())
         command.upgrade(db.alembic_config(c), "head")
     with eng.connect() as c:
-        assert "tokens" in inspect(c).get_table_names()
+        assert {"tokens", "monitors", "monitor_alerts"} <= set(inspect(c).get_table_names())
     eng.dispose()
 
 
@@ -74,4 +74,4 @@ def test_manage_migrate(cmd, capsys):
     from terrax import manage
 
     assert manage.main(["migrate", cmd]) == 0
-    assert "0002" in capsys.readouterr().out
+    assert "0003" in capsys.readouterr().out

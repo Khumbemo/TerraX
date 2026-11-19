@@ -140,6 +140,40 @@ test('series: per-pixel disturbance dates for a clearing front', async ({ page }
   expect(errors).toEqual([]);
 });
 
+test('series: the seasonal model maps a clearing in monthly images from every season', async ({ page }) => {
+  const errors = await start(page);
+  // 36 monthly NDVI images (2019–2021), 20 × 20 px of 30 m, with an annual cycle of ± 0.15. The left half (200 px, 18 ha)
+  // is cleared in July 2020; the right half stays forest, whose dry-season lows must not read as disturbances.
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-seasonal-'));
+  const out = execFileSync('python3', ['-c', `
+import numpy as np, rasterio, os
+from rasterio.transform import from_origin
+rng = np.random.default_rng(3)
+for m in range(36):
+    year, month = 2019 + m // 12, m % 12 + 1
+    t = year + (month - 0.5) / 12
+    a = np.full((20, 20), 0.6 + 0.15 * np.cos(2 * np.pi * (t - 0.6)))
+    if t >= 2020.5:
+        a[:, :10] -= 0.3
+    a = (a + rng.normal(0, 0.02, a.shape)).astype(np.float32)
+    p = os.path.join(${JSON.stringify(dir)}, f"ndvi_{year}-{month:02d}-15.tif")
+    with rasterio.open(p, 'w', driver='GTiff', width=20, height=20, count=1, dtype='float32', crs='EPSG:32646', transform=from_origin(600000, 2850000, 30, 30), nodata=float('nan')) as d:
+        d.write(a, 1)
+    print(p)
+`]).toString().trim().split('\n');
+  await openTool(page, 'Satellite imagery');
+  await page.check('#stack-breaks');
+  await page.selectOption('#stack-break-model', 'seasonal');
+  await expect(page.locator('#stack-consecutive')).toHaveValue('3');
+  await page.setInputFiles('#stack-files', out);
+  await expect(page.locator('#stack-breaks-total')).toContainText('18 ha');
+  await expect(page.locator('#stack-breaks-table')).toContainText('2020-07-15');
+  await expect(page.locator('#stack-breaks-seasonal')).toContainText('Disturbed more than once: 0 ha');
+  await expect(page.locator('.report-card')).toContainText('CCDC');
+  await expect(page.locator('a, button', { hasText: 'number of disturbances' }).first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('land cover: radar separates classes the optical bands cannot', async ({ page }) => {
   const errors = await start(page);
   // Forest and plantation with the same optical spectra but VH 6 dB apart (the API test checks the accuracies in detail).

@@ -178,6 +178,39 @@ oidc_states = Table(
     Column("created", Float, nullable=False),
 )
 
+# Areas watched for new forest loss in new Sentinel-2 scenes (terrax/monitors.py), and the alerts they raised.
+monitors = Table(
+    "monitors", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("owner", String(32), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("name", String(200), nullable=False),
+    Column("geojson", JSON, nullable=False),  # the watched polygons, WGS84
+    Column("bbox", JSON, nullable=False),  # [west, south, east, north]
+    Column("settings", JSON, nullable=False),  # forestNdvi, drop, minAreaHa, maxCloud, checkHours
+    Column("email", Boolean, nullable=False, default=True),
+    Column("active", Boolean, nullable=False, default=True),
+    Column("reference", JSON),  # the scenes and dates of the reference composite, once built
+    Column("last_scene", String(40)),  # datetime of the newest scene looked at
+    Column("last_checked", Float),
+    Column("next_check", Float, nullable=False),
+    Column("status", String(500), nullable=False, default=""),
+    Column("created", Float, nullable=False),
+    Column("updated", Float, nullable=False),
+)
+
+monitor_alerts = Table(
+    "monitor_alerts", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("monitor_id", String(32), ForeignKey("monitors.id", ondelete="CASCADE"), nullable=False, index=True),
+    Column("created", Float, nullable=False),
+    Column("first_seen", String(10), nullable=False),  # date of the first scene that showed the drop
+    Column("confirmed", String(10), nullable=False),  # date of the scene that confirmed it
+    Column("area_ha", Float, nullable=False),
+    Column("patches", Integer, nullable=False),
+    Column("geojson", JSON, nullable=False),
+    Column("emailed", Boolean, nullable=False, default=False),
+)
+
 _engines: dict[str, Engine] = {}
 _lock = threading.Lock()
 

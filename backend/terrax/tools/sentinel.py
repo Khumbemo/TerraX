@@ -1,4 +1,4 @@
-"""Sentinel-2 L2A windows from Earth Search and Sentinel-1 RTC windows from the Planetary Computer, stored as new GeoTIFF uploads."""
+"""Sentinel-2 L2A windows from Earth Search, and Sentinel-1 RTC and Landsat Collection 2 Level-2 windows from the Planetary Computer, stored as new GeoTIFF uploads."""
 
 from __future__ import annotations
 
@@ -6,7 +6,17 @@ import tempfile
 from pathlib import Path
 
 from .. import storage
-from ..services.live import S1Item, StacItem, composite_s2, read_s1_window, read_s2_window, sas_token
+from ..services.live import (
+    PC_LANDSAT_SAS_TOKEN,
+    S1Item,
+    StacItem,
+    composite_landsat,
+    composite_s2,
+    read_landsat_window,
+    read_s1_window,
+    read_s2_window,
+    sas_token,
+)
 from . import tool
 from .context import ToolContext, ToolError
 
@@ -76,3 +86,54 @@ def run_s1(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         ctx.progress(0.9, "Storing the scene")
         f = storage.save_file(out.name, out, owner=ctx.owner)
     return {"file": f.public(), "notes": notes}
+
+
+def _scene_and_box(params: dict) -> tuple[StacItem, list[float]]:
+    item_d, bbox = params.get("item"), params.get("bbox")
+    if not isinstance(item_d, dict) or not item_d.get("id"):
+        raise ToolError("Choose a scene first.")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        raise ToolError("The area to read is missing.")
+    return StacItem.from_public(item_d), [float(v) for v in bbox]
+
+
+@tool("landsat")
+def run_landsat(ctx: ToolContext, inputs: dict, params: dict) -> dict:
+    """One Landsat Collection 2 Level-2 scene over the area (services.live.read_landsat_window), stored as a GeoTIFF upload."""
+    item, bbox = _scene_and_box(params)
+    ctx.progress(0.05, "Getting a data token from the Planetary Computer")
+    token = sas_token(url=PC_LANDSAT_SAS_TOKEN)
+    ctx.progress(0.15, "Reading Landsat bands from the Planetary Computer")
+    with tempfile.TemporaryDirectory(dir=storage.root()) as tmp:
+        out = Path(tmp) / f"{storage.safe_name(item.id)}.tif"
+        try:
+            notes = read_landsat_window(item, bbox, out, token)
+        except ValueError as e:
+            raise ToolError(str(e)) from None
+        ctx.progress(0.9, "Storing the scene")
+        f = storage.save_file(out.name, out, owner=ctx.owner)
+    return {"file": f.public(), "notes": notes}
+
+
+@tool("landsat_composite")
+def run_landsat_composite(ctx: ToolContext, inputs: dict, params: dict) -> dict:
+    """A cloud-free median composite of several Landsat scenes (services.live.composite_landsat), stored as a GeoTIFF upload."""
+    items_d, bbox = params.get("items"), params.get("bbox")
+    if not isinstance(items_d, list) or not all(isinstance(d, dict) and d.get("id") for d in items_d):
+        raise ToolError("Choose the scenes to combine.")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        raise ToolError("The area to read is missing.")
+    items = [StacItem.from_public(d) for d in items_d]
+    ctx.progress(0.05, "Getting a data token from the Planetary Computer")
+    token = sas_token(url=PC_LANDSAT_SAS_TOKEN)
+    ctx.progress(0.1, f"Reading {len(items)} Landsat scenes from the Planetary Computer")
+    with tempfile.TemporaryDirectory(dir=storage.root()) as tmp:
+        first, last = (storage.safe_name(d) for d in (min(i.datetime[:10] for i in items), max(i.datetime[:10] for i in items)))
+        out = Path(tmp) / f"Landsat_median_{first}_{last}.tif"
+        try:
+            info = composite_landsat(items, [float(v) for v in bbox], out, Path(tmp), token)
+        except ValueError as e:
+            raise ToolError(str(e)) from None
+        ctx.progress(0.9, "Storing the composite")
+        f = storage.save_file(out.name, out, owner=ctx.owner)
+    return {"file": f.public(), "notes": info["notes"], "composite": {k: v for k, v in info.items() if k != "notes"}}

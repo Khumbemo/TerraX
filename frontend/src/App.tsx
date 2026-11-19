@@ -35,6 +35,7 @@ const LandCoverTool = lazy(() => import('./components/tools/LandCoverTool'));
 const TerrainTool = lazy(() => import('./components/tools/TerrainTool'));
 const PhotoTool = lazy(() => import('./components/tools/PhotoTool'));
 const RadarTool = lazy(() => import('./components/tools/RadarTool'));
+const WaterTool = lazy(() => import('./components/tools/WaterTool'));
 const CanopyTool = lazy(() => import('./components/tools/CanopyTool'));
 const ReportsView = lazy(() => import('./components/ReportsView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
@@ -399,6 +400,7 @@ export default function App() {
                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}
                       {tool === 'radar' && <RadarTool onOutput={setOutput} boundary={boundary} target={target} />}
+                      {tool === 'water' && <WaterTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'canopy' && <CanopyTool onOutput={setOutput} />}
                     </Suspense>
                   </section>

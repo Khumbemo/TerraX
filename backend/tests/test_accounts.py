@@ -268,6 +268,9 @@ def test_rate_limits_answer_429_with_retry_after(app, monkeypatch):
     from terrax import ratelimit
 
     ratelimit.reset()
+    # Windows are fixed clock minutes: held mid-window, requests cannot straddle a boundary into a fresh count.
+    held = (time.time() // 3600) * 3600 + 30
+    monkeypatch.setattr(ratelimit, "_now", lambda: held)
     monkeypatch.setenv("TERRAX_RATE_LIMITS", "true")
     monkeypatch.setenv("TERRAX_JOBS_PER_MINUTE", "2")
     c = new_client(app)

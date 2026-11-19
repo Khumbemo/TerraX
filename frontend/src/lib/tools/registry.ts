@@ -2,7 +2,7 @@ import type { FeatureCollection } from 'geojson';
 import type { LatLngBounds } from '../geo';
 import type { ResultImage } from '../api';
 
-export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'radar' | 'canopy' | 'terrain' | 'photo';
+export type ToolId = 'forest' | 'carbon' | 'survey' | 'residential' | 'weather' | 'satellite' | 'landcover' | 'radar' | 'water' | 'canopy' | 'terrain' | 'photo';
 
 export interface ToolInfo {
   id: ToolId;
@@ -88,6 +88,15 @@ export const TOOLS: ToolInfo[] = [
     measures: ['Lee speckle filter, VV, VH, VH/VV and RVI', 'VH log-ratio change map with areas', 'Change classes as GeoTIFF'],
     formats: 'Sentinel-1 GeoTIFF (VV, VH; dB or linear)',
     mark: 'Sa',
+  },
+  {
+    id: 'water',
+    name: 'Water & floods',
+    group: 'Remote sensing',
+    summary: 'Map open water from optical or radar images, and new water (floods) between two dates.',
+    measures: ['MNDWI / NDWI or Sentinel-1 VV with an automatic threshold', 'Permanent water, new water and water gone in hectares', 'Water polygons and class GeoTIFF'],
+    formats: 'Sentinel-2 / Landsat GeoTIFF · Sentinel-1 VV GeoTIFF',
+    mark: 'Wf',
   },
   {
     id: 'canopy',

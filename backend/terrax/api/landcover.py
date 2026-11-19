@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from .. import auth, storage
 from ..auth import Principal, principal
 from ..config import settings
+from ..processing import emissions as em
 from ..processing.accuracy import allocate, assess, stratified_sample
 from ..processing.rio import Raster, grid_to_lonlat_arrays
 from ..processing.stats import fmt
@@ -196,7 +197,27 @@ def accuracy(job_id: str, req: AccuracyRequest, who: Principal = Depends(princip
     areas = np.array(s["areas"]) * (1e-4 if unit == "ha" else 1.0)
     out = assess(counts, areas, labels)
     out.update({"unit": unit, "unlabelled": missing, "markdown": accuracy_markdown(out, unit, missing)})
+    validated = _validated_emissions(job_id, out, unit)
+    if validated:
+        out["emissions"] = validated
+        out["markdown"] += "\n\n" + em.emissions_markdown(validated, "CO₂ emissions from the estimated loss area")
     return out
+
+
+def _validated_emissions(job_id: str, acc: dict, unit: str) -> dict | None:
+    """Emissions from the sample's estimated loss area and its 95 % interval, when the forest run estimated emissions."""
+    res = storage.job_result(job_id) or {}
+    settings_ = (res.get("emissions") or {}).get("settings")
+    loss = next((c for c in acc["classes"] if c["label"] == "Forest loss"), None)
+    if res.get("tool") != "forest" or not settings_ or loss is None or unit != "ha":
+        return None
+    s = settings_
+    try:
+        return em.estimate(max(loss["area"], 0.0), loss["areaCi"], s["agb"], s["agbCi"], zone=s["zone"], ratio=s["ratio"], total_biomass=s["totalBiomass"],
+                           carbon_fraction=s["carbonFraction"], carbon_fraction_ci=s["carbonFractionCi"], after_biomass=s["afterBiomass"],
+                           area_source="sample", biomass_source=s["biomassSource"])
+    except ValueError:
+        return None
 
 
 def accuracy_markdown(a: dict, unit: str, missing: int) -> str:

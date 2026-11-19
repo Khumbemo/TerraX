@@ -18,6 +18,11 @@ from fastapi import HTTPException
 from .config import settings
 
 
+def _now() -> float:
+    """The clock the windows are counted on (one place, so tests can hold it inside a window)."""
+    return time.time()
+
+
 @dataclass(frozen=True)
 class Limit:
     name: str
@@ -48,7 +53,7 @@ class _MemoryCounter:
 
     def hit(self, key: str, seconds: int) -> tuple[int, int]:
         """(count in the current window after this hit, seconds until the window ends)."""
-        now = time.time()
+        now = _now()
         window = int(now // seconds)
         with self._lock:
             w, n = self._windows.get(key, (window, 0))
@@ -75,7 +80,7 @@ def _redis():
 
     if job_mode() != "celery":
         return None
-    now = time.time()
+    now = _now()
     if _redis_client is None and now - _redis_checked > 60:
         _redis_checked = now
         try:
@@ -93,7 +98,7 @@ def _db_hit(key: str, seconds: int) -> tuple[int, int]:
     """Atomic upsert of the window's counter (INSERT … ON CONFLICT DO UPDATE … RETURNING, SQLite ≥ 3.35 and PostgreSQL)."""
     from . import db
 
-    now = time.time()
+    now = _now()
     start = int(now // seconds) * seconds
     with db.connect() as c:
         dialect = c.dialect.name
@@ -119,7 +124,7 @@ def purge_counters() -> int:
     from . import db
 
     with db.connect() as c:
-        return int(c.execute(delete(db.rate_counters).where(db.rate_counters.c.window < time.time() - 86400)).rowcount or 0)
+        return int(c.execute(delete(db.rate_counters).where(db.rate_counters.c.window < _now() - 86400)).rowcount or 0)
 
 
 def store() -> str:
@@ -144,13 +149,13 @@ def _hit(key: str, seconds: int) -> tuple[int, int]:
     r = _redis()
     if r is not None:
         try:
-            window = int(time.time() // seconds)
+            window = int(_now() // seconds)
             k = f"terrax:rl:{key}:{window}"
             pipe = r.pipeline()
             pipe.incr(k)
             pipe.expire(k, seconds + 5)
             n, _ = pipe.execute()
-            return int(n), int((window + 1) * seconds - time.time()) + 1
+            return int(n), int((window + 1) * seconds - _now()) + 1
         except Exception:  # Redis gone: fall back to the database
             pass
     try:

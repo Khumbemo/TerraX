@@ -39,10 +39,11 @@ celery_app.conf.update(
     worker_max_memory_per_child=_s.worker_max_memory_mb * 1024 or None,
     result_expires=3600,
     broker_connection_retry_on_startup=True,
-    # Hourly: expired uploads and results, and a database backup when TERRAX_BACKUP_HOURS have passed since the last.
-    # Every minute: jobs whose worker died (no heartbeat for storage.STALE_S) are marked failed.
+    # Hourly: expired uploads and results, a database backup when TERRAX_BACKUP_HOURS have passed since the last, and
+    # the forest-loss monitors whose next check is due. Every minute: jobs whose worker died (no heartbeat for
+    # storage.STALE_S) are marked failed.
     beat_schedule={"purge-old-files": {"task": "terrax.purge", "schedule": 3600.0}, "backup-db": {"task": "terrax.backup", "schedule": 3600.0},
-                   "fail-stale-jobs": {"task": "terrax.stale", "schedule": 60.0}},
+                   "fail-stale-jobs": {"task": "terrax.stale", "schedule": 60.0}, "check-monitors": {"task": "terrax.monitors", "schedule": 3600.0}},
 )
 
 
@@ -113,6 +114,33 @@ def backup_task() -> dict | None:
     from .backup import run_if_due
 
     return run_if_due()
+
+
+@celery_app.task(name="terrax.monitors")
+def monitors_task() -> int:
+    from .monitors import check_due
+
+    return check_due()
+
+
+@celery_app.task(name="terrax.monitor_check")
+def monitor_check_task(monitor_id: str) -> dict:
+    from .monitors import check
+
+    return check(monitor_id)
+
+
+def submit_monitor_check(monitor_id: str) -> None:
+    """Checks one monitor now: inline in eager mode, on a job thread, or on a Celery worker."""
+    from .monitors import check
+
+    s = settings()
+    if s.eager:
+        check(monitor_id)
+    elif s.job_threads > 0:
+        _job_pool(s.job_threads).submit(check, monitor_id)
+    else:
+        monitor_check_task.delay(monitor_id)
 
 
 @celery_app.task(name="terrax.stale")
@@ -201,6 +229,12 @@ def start_purge_thread(every_s: float = 3600.0, tick_s: float = 60.0) -> None:
             run_if_due()
         except Exception:
             log.exception("database backup failed")
+        try:
+            from .monitors import check_due
+
+            check_due()
+        except Exception:
+            log.exception("checking monitors failed")
 
     def loop() -> None:
         last = 0.0

@@ -13,7 +13,9 @@ import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
 import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
-import MapValidation from './MapValidation';
+import { EmissionSettings, EmissionsResult, NO_EMISSIONS, emissionRequest, type Emissions, type EmissionInputs } from './EmissionsPanel';
+import MapValidation, { type AccuracyResult } from './MapValidation';
+import MonitorPanel from './MonitorPanel';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -56,6 +58,7 @@ interface ForestJob {
   result: ForestResult;
   legend: { id: number; label: string; color: number[] }[];
   downloads: Download[];
+  emissions?: Emissions | null;
 }
 
 const AXIS = { stroke: '#4a6580', fontSize: 11, fontFamily: 'Space Mono, monospace' };
@@ -130,6 +133,8 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
   const [canopyThr, setCanopyThr] = useState('30');
   const [mmu, setMmu] = useState('0');
   const [out, setOut] = useState<ForestJob | null>(null);
+  const [emis, setEmis] = useState<EmissionInputs>(NO_EMISSIONS);
+  const [validated, setValidated] = useState<(AccuracyResult & { emissions?: Emissions }) | null>(null);
   const report = (r: ForestJob, accuracyMarkdown: string | null) =>
     onOutput({ tool: 'forest', name: r.name, markdown: r.markdown + (accuracyMarkdown ?? ''), map: r.map, figures: r.map.image ? [{ title: r.map.image.label, url: r.map.image.url }] : [] });
   const result = out?.result ?? null;
@@ -142,6 +147,11 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
     setB(null);
     setOut(null);
     onOutput(null);
+  };
+
+  const loadBiomass = async (file: File) => {
+    const f = await job.run('biomass', signal => files.upload(file, signal), fail);
+    if (f) setEmis(e => ({ ...e, map: f }));
   };
 
   const load = async (file: File, which: 'a' | 'b') => {
@@ -159,13 +169,15 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
     if (!Number.isFinite(mmuHa) || mmuHa < 0 || mmuHa > 1000) return fail('Set the minimum mapping unit between 0 (off) and 1,000 ha.');
     if (m === 'ndvi' && (!Number.isFinite(fThr) || !Number.isFinite(lThr) || fThr < -1 || fThr > 1 || lThr >= 0 || lThr < -2)) return fail('Set the forest threshold between −1 and 1, and the loss threshold below 0 (for example −0.2).');
     if (m === 'hansen' && (!Number.isFinite(cThr) || cThr < 0 || cThr > 100)) return fail('Set the canopy threshold between 0 and 100 %.');
+    const em = m === 'burn' ? null : emissionRequest(emis);
+    if (typeof em === 'string') return fail(em);
     const r = await job.run(
       'run',
       (signal, onProgress) =>
         runJob<ForestJob>(
           'forest',
-          { a: sa.file.id, b: sb?.file.id },
-          { mode: m, bandsA: sa.bands, bandsB: sb?.bands ?? {}, forestThreshold: fThr, lossThreshold: lThr, canopyThreshold: cThr, mmuHa, boundary },
+          { a: sa.file.id, b: sb?.file.id, biomass: em?.biomass },
+          { mode: m, bandsA: sa.bands, bandsB: sb?.bands ?? {}, forestThreshold: fThr, lossThreshold: lThr, canopyThreshold: cThr, mmuHa, boundary, emissions: em?.params },
           { signal, onProgress },
         ),
       msg => {
@@ -176,6 +188,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
     );
     if (!r) return;
     setOut(r);
+    setValidated(null);
     report(r, null);
   };
 
@@ -269,6 +282,8 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
           </button>
         </div>
       </div>
+      {mode !== 'burn' && <EmissionSettings value={emis} onChange={setEmis} onMapFile={loadBiomass} busy={busy === 'biomass'} />}
+      {mode !== 'burn' && <MonitorPanel boundary={boundary} />}
       <JobStatus job={job} onCancel={job.cancel} />
 
       {result && out && (
@@ -340,6 +355,8 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
 
           <Notes items={result.notes} />
 
+          {out.emissions && <EmissionsResult id="forest-emissions" e={out.emissions} title="CO₂ emissions from the mapped loss" />}
+
           {out.map.image && (
             <MapValidation
               key={out.map.image.url}
@@ -351,9 +368,13 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
                   ? 'Mapped burned areas include the map’s errors. Draw a stratified random sample, label each point’s true severity class from field plots (e.g. CBI) or finer imagery without looking at the map, then upload it for accuracy and area estimates with 95 % confidence intervals (Olofsson et al. 2014).'
                   : 'Mapped loss includes the map’s errors, and loss the map missed hides in the large stable classes. Draw a stratified random sample, label each point’s true change from field visits or finer imagery of both dates without looking at the map, then upload it for loss area with a 95 % confidence interval (Olofsson et al. 2014), as IPCC and REDD+ reporting expect.'
               }
-              onAccuracy={a => report(out, a ? a.markdown : null)}
+              onAccuracy={a => {
+                setValidated(a);
+                report(out, a ? a.markdown : null);
+              }}
             />
           )}
+          {validated?.emissions && <EmissionsResult id="forest-emissions-validated" e={validated.emissions} title="CO₂ emissions from the estimated loss area" />}
         </div>
       )}
     </div>

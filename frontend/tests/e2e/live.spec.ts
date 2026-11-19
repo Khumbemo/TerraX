@@ -92,7 +92,7 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
     });
   });
   await openTool(page, 'Satellite imagery');
-  await page.locator('summary', { hasText: 'Search Sentinel-2 scenes' }).click();
+  await page.locator('summary', { hasText: 'Search Sentinel-2 or Landsat scenes' }).click();
   await page.click('#s2-search');
   await expect(page.locator('td', { hasText: 'S2B_46RFQ_20240301_0_L2A' })).toBeVisible();
   await page.click('button:has-text("Load")');
@@ -129,7 +129,7 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
     await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: '0'.repeat(32), tool: 'sentinel_composite', state: 'done', progress: 1, message: 'Done', result: { file, notes: ['Median composite of 2 Sentinel-2 L2A scenes.'] } }) });
   });
   await openTool(page, 'Satellite imagery');
-  await page.locator('summary', { hasText: 'Search Sentinel-2 scenes' }).click();
+  await page.locator('summary', { hasText: 'Search Sentinel-2 or Landsat scenes' }).click();
   await page.click('#s2-search');
   await expect(page.locator('#s2-composite')).toBeDisabled();
   await page.check(`input[aria-label="Combine ${items[0].id}"]`);
@@ -140,6 +140,48 @@ with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height
   // Every pixel kept: NDVI = (0.34 − 0.04) / (0.34 + 0.04) = 0.7895, and no quality mask.
   await expect(page.locator('.report-card')).toContainText('0.7895');
   await expect(page.locator('.report-card')).not.toContainText('Quality mask from band 5');
+  expect(errors).toEqual([]);
+});
+
+test('satellite: a Landsat scene loads with its SWIR bands and QA_PIXEL cloud mask', async ({ page }) => {
+  const errors = await start(page);
+  // A window as the server writes it: six reflectance bands and QA_PIXEL in band 7, cloud (bit 3) on the left half.
+  const dir = mkdtempSync(join(tmpdir(), 'terrax-ls-'));
+  const path = join(dir, 'LC08_L2SP_135042_20240301_02_T1.tif');
+  execFileSync('python3', ['-c', `
+import numpy as np, rasterio
+from rasterio.transform import from_origin
+w = 100
+b = [np.full((w, w), v, np.float32) for v in (0.02, 0.05, 0.04, 0.34, 0.15, 0.07)]
+qa = np.where(np.arange(w)[None, :].repeat(w, 0) < w // 2, 8, 64).astype(np.float32)
+with rasterio.open(${JSON.stringify(path)}, 'w', driver='GTiff', width=w, height=w, count=7, dtype='float32', crs='EPSG:32646', transform=from_origin(609000, 2842000, 30, 30), nodata=float('nan')) as d:
+    for i, a in enumerate(b + [qa], 1):
+        d.write(a, i)
+`]);
+  const file = await upload(page.request, 'LC08_L2SP_135042_20240301_02_T1.tif', readFileSync(path), 'image/tiff');
+  const item = { id: 'LC08_L2SP_135042_20240301_02_T1', datetime: '2024-03-01T04:10:00Z', cloud: 8.2, epsg: 32646, assets: {}, processingBaseline: null, platform: 'landsat-8' };
+  let searched = '';
+  await page.route('**/api/live/landsat/search', async route => {
+    searched = route.request().url();
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [item] }) });
+  });
+  await page.route('**/api/jobs', async route => {
+    const body = JSON.parse(route.request().postData() ?? '{}');
+    if (route.request().method() !== 'POST' || body.tool !== 'landsat') return route.fallback();
+    await route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: '0'.repeat(32), tool: 'landsat', state: 'done', progress: 1, message: 'Done', result: { file, notes: ['Landsat 8 Collection 2 Level-2 scene.'] } }) });
+  });
+  await openTool(page, 'Satellite imagery');
+  await page.locator('summary', { hasText: 'Search Sentinel-2 or Landsat scenes' }).click();
+  await page.click('#mission-landsat');
+  await expect(page.locator('#s2-start')).toHaveAttribute('min', '1982-07-16');
+  await page.click('#s2-search');
+  expect(searched).toContain('/api/live/landsat/search');
+  await expect(page.locator('td', { hasText: 'Landsat 8' })).toBeVisible();
+  await page.click('button:has-text("Load")');
+  await expect(page.locator('.core-analysis-module')).toContainText('LC08_L2SP_135042_20240301_02_T1.tif');
+  // NDVI = (0.34 − 0.04) / (0.34 + 0.04) = 0.7895 on the clear half; the cloudy half is masked by QA_PIXEL.
+  await expect(page.locator('.report-card')).toContainText('0.7895');
+  await expect(page.locator('.report-card')).toContainText('Quality mask from band 7');
   expect(errors).toEqual([]);
 });
 

@@ -195,13 +195,16 @@ class StacItem:
     epsg: int | None
     assets: dict[str, dict[str, Any]] = field(default_factory=dict)
     processing_baseline: str | None = None
+    platform: str | None = None
 
     def public(self) -> dict[str, Any]:
-        return {"id": self.id, "datetime": self.datetime, "cloud": self.cloud, "epsg": self.epsg, "assets": self.assets, "processingBaseline": self.processing_baseline}
+        return {"id": self.id, "datetime": self.datetime, "cloud": self.cloud, "epsg": self.epsg, "assets": self.assets, "processingBaseline": self.processing_baseline,
+                "platform": self.platform}
 
     @classmethod
     def from_public(cls, d: dict[str, Any]) -> StacItem:
-        return cls(id=str(d["id"]), datetime=str(d.get("datetime", "")), cloud=d.get("cloud"), epsg=d.get("epsg"), assets=d.get("assets") or {}, processing_baseline=d.get("processingBaseline"))
+        return cls(id=str(d["id"]), datetime=str(d.get("datetime", "")), cloud=d.get("cloud"), epsg=d.get("epsg"), assets=d.get("assets") or {}, processing_baseline=d.get("processingBaseline"),
+                   platform=d.get("platform") if isinstance(d.get("platform"), str) else None)
 
 
 def stac_search_body(bbox: list[float], start: str, end: str, max_cloud: float, limit: int = 12) -> dict[str, Any]:
@@ -248,6 +251,7 @@ def parse_stac_items(fc: Any) -> list[StacItem]:
                 epsg=int(code) if isinstance(code, (int, float)) else None,
                 assets=assets,
                 processing_baseline=pb if isinstance(pb, str) else None,
+                platform=props["platform"] if isinstance(props.get("platform"), str) else None,
             )
         )
     return out
@@ -375,6 +379,27 @@ S2_COMPOSITE_MAX = 12
 
 
 def composite_s2(items: list[StacItem], bbox: list[float], out: Path, workdir: Path, read=None) -> dict[str, Any]:
+    """Sentinel-2 median composite (see median_composite)."""
+    return median_composite(items, bbox, out, workdir, read or read_s2_window, S2_COMPOSITE)
+
+
+@dataclass
+class CompositeSpec:
+    """What differs between missions in a median composite."""
+
+    qa_kind: str  # processing.rio.qa_masked kind of the scene files' last band
+    band_names: list[str]  # the reflectance bands, in the scene files' order
+    source: str  # "Sentinel-2 L2A scenes from Earth Search"
+    masked: str  # the masking rule, as a sentence
+    scene_notes: int = 1  # leading notes of a scene read (how reflectance was computed), kept from the first scene
+    reprojected: str = "Scenes on other UTM grids were reprojected onto the first scene's grid (bilinear for reflectance, nearest for the classification)."
+
+
+S2_COMPOSITE = CompositeSpec("scl", ["blue (B2)", "green (B3)", "red (B4)", "nir (B8)"], "Sentinel-2 L2A scenes from Earth Search",
+                             "the scene's own classification (SCL) marks clear. Masked: SCL 0, 1, 3, 8, 9, 10 and 11 (no data, defective, cloud shadow, clouds, cirrus, snow).")
+
+
+def median_composite(items: list[StacItem], bbox: list[float], out: Path, workdir: Path, read, spec: CompositeSpec) -> dict[str, Any]:
     """Per-pixel median of the cloud-free observations of several Sentinel-2 L2A scenes over a WGS84 box.
 
     Each scene is read like a single one (reflectance, offset checked against the data), masked with its own scene
@@ -391,7 +416,6 @@ def composite_s2(items: list[StacItem], bbox: list[float], out: Path, workdir: P
 
     from ..processing.rio import qa_masked
 
-    read = read or read_s2_window
     if not 2 <= len(items) <= S2_COMPOSITE_MAX:
         raise ValueError(f"Choose between 2 and {S2_COMPOSITE_MAX} scenes for a composite.")
     scenes: list[tuple[StacItem, Path]] = []
@@ -405,7 +429,7 @@ def composite_s2(items: list[StacItem], bbox: list[float], out: Path, workdir: P
             skipped.append(f"{item.id} ({err})")
             continue
         if not scenes:
-            notes.append(scene_notes[0])  # how reflectance was computed, from the first scene
+            notes += scene_notes[: spec.scene_notes]  # how reflectance was computed, from the first scene
         scenes.append((item, path))
     if len(scenes) < 2:
         raise ValueError("Fewer than two of the scenes could be read over this area" + (f": {'; '.join(skipped)}" if skipped else "") + ".")
@@ -421,9 +445,10 @@ def composite_s2(items: list[StacItem], bbox: list[float], out: Path, workdir: P
                       dst_crs=crs, dst_nodata=np.nan, resampling=Resampling.nearest if nearest else Resampling.bilinear)
             return dst
 
-    masks = [qa_masked("scl", on_grid(p, 5, nearest=True)) for _, p in scenes]
+    nb = len(spec.band_names)
+    masks = [qa_masked(spec.qa_kind, on_grid(p, nb + 1, nearest=True)) for _, p in scenes]
     bands: list[np.ndarray] = []
-    for b in range(1, 5):
+    for b in range(1, nb + 1):
         stack = np.stack([np.where(m, np.nan, on_grid(p, b, nearest=False)) for (_, p), m in zip(scenes, masks, strict=True)])
         with warnings.catch_warnings():  # pixels with no clear observation are NaN, as intended
             warnings.simplefilter("ignore", RuntimeWarning)
@@ -431,23 +456,22 @@ def composite_s2(items: list[StacItem], bbox: list[float], out: Path, workdir: P
         if b == 3:
             clear = np.isfinite(stack).sum(axis=0).astype(np.float32)
     covered = clear > 0
-    profile = {"driver": "GTiff", "width": w, "height": h, "count": 5, "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan, "compress": "deflate", "tiled": True}
+    profile = {"driver": "GTiff", "width": w, "height": h, "count": nb + 1, "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan, "compress": "deflate", "tiled": True}
     with rasterio.open(out, "w", **profile) as dst:
-        for i, (band, name) in enumerate(zip([*bands, clear], ["blue (B2)", "green (B3)", "red (B4)", "nir (B8)", "clear observations"], strict=True), start=1):
+        for i, (band, name) in enumerate(zip([*bands, clear], [*spec.band_names, "clear observations"], strict=True), start=1):
             dst.write(band, i)
             dst.set_band_description(i, name)
     dates = sorted(it.datetime[:10] for it, _ in scenes)
     cc = clear[covered]
     notes += [
-        f"Median composite of {len(scenes)} Sentinel-2 L2A scenes from Earth Search ({dates[0]} to {dates[-1]}): for each pixel and band, the median of the observations "
-        "that the scene's own classification (SCL) marks clear. Masked: SCL 0, 1, 3, 8, 9, 10 and 11 (no data, defective, cloud shadow, clouds, cirrus, snow). "
-        "Band 5 is the number of clear observations per pixel.",
+        f"Median composite of {len(scenes)} {spec.source} ({dates[0]} to {dates[-1]}): for each pixel and band, the median of the observations "
+        f"that {spec.masked} Band {nb + 1} is the number of clear observations per pixel.",
         f"Clear observations per pixel: median {float(np.median(cc)) if cc.size else 0:.0f} of {len(scenes)}; {float((~covered).mean()) * 100:.1f} % of pixels had none and are empty (no data).",
         "Each band's median is taken on its own, so a pixel's bands can come from different dates. For indices of one band pair (NDVI) this is the usual practice; "
         "a medoid composite keeps the bands of one date together (Flood 2013).",
     ]
     if len({it.epsg for it, _ in scenes}) > 1:
-        notes.append("Scenes on other UTM grids were reprojected onto the first scene's grid (bilinear for reflectance, nearest for the classification).")
+        notes.append(spec.reprojected)
     if skipped:
         notes.append(f"Left out (could not be read over the area): {'; '.join(skipped)}.")
     return {"notes": notes, "scenes": [it.id for it, _ in scenes], "dates": dates, "clearMedian": float(np.median(cc)) if cc.size else 0.0,
@@ -533,9 +557,9 @@ def _allowed_s1_href(href: str) -> bool:
     return bool(re.match(r"^https://[a-z0-9]{3,24}\.blob\.core\.windows\.net/[^?#]+\.tiff?$", href))
 
 
-def sas_token(fetch=None) -> str:
-    """A short-lived read token for the Planetary Computer's Sentinel-1 RTC container (no account needed)."""
-    j = (fetch or fetch_json)(PC_SAS_TOKEN)
+def sas_token(fetch=None, url: str = PC_SAS_TOKEN) -> str:
+    """A short-lived read token for a Planetary Computer collection's storage (Sentinel-1 RTC by default; no account needed)."""
+    j = (fetch or fetch_json)(url)
     token = j.get("token") if isinstance(j, dict) else None
     if not isinstance(token, str) or not token:
         raise ValueError("The Planetary Computer did not issue a data token.")
@@ -621,3 +645,131 @@ def read_s1_window(item: S1Item, bbox: list[float], out: Path, token: str, match
     notes.append(f"Sentinel-1 RTC scene {item.id} ({item.datetime[:10]}, {item.platform or 'Sentinel-1'}, {orbit}) from the Microsoft Planetary Computer: "
                  "γ⁰ backscatter in linear power, radiometrically terrain corrected, 10 m (contains modified Copernicus Sentinel data).")
     return notes
+
+
+# ── Landsat Collection 2 Level-2 via the Planetary Computer ──────────────────
+
+PC_LANDSAT_SAS_TOKEN = "https://planetarycomputer.microsoft.com/api/sas/v1/token/landsat-c2-l2"
+LANDSAT_MAX_SIDE = 1500  # 45 km at 30 m
+# The Planetary Computer's asset keys (common names, the same for TM, ETM+ and OLI) and the roles TerraX gives them.
+LANDSAT_BANDS = [("blue", "blue"), ("green", "green"), ("red", "red"), ("nir08", "nir"), ("swir16", "swir1"), ("swir22", "swir2")]
+# Surface reflectance = DN × 0.0000275 − 0.2 (USGS Landsat Collection 2 Level-2 Science Product Guides, LSDS-1618 for
+# Landsat 4–7 and LSDS-1619 for 8–9), used when a scene's STAC metadata gives no scale.
+USGS_SR_SCALE, USGS_SR_OFFSET = 2.75e-5, -0.2
+OLI_PLATFORMS = ("landsat-8", "landsat-9")
+SLC_OFF = "2003-05-31"  # Landsat 7's scan line corrector failed on this date
+
+
+def landsat_search_body(bbox: list[float], start: str, end: str, max_cloud: float, limit: int = 12) -> dict[str, Any]:
+    """Tier 1 scenes only: Tier 2 has poorer geolocation, which shows up as false change in time series."""
+    body = stac_search_body(bbox, start, end, max_cloud, limit)
+    body["collections"] = ["landsat-c2-l2"]
+    body["query"]["landsat:collection_category"] = {"eq": "T1"}
+    return body
+
+
+def _allowed_landsat_href(href: str) -> bool:
+    # Azure Blob Storage, where the Planetary Computer keeps its data (see _allowed_s1_href); USGS names end in .TIF.
+    return bool(re.match(r"^https://[a-z0-9]{3,24}\.blob\.core\.windows\.net/[^?#]+\.(tiff?|TIFF?)$", href))
+
+
+def _landsat_band_names(platform: str | None) -> list[str]:
+    numbers = ["B2", "B3", "B4", "B5", "B6", "B7"] if platform in OLI_PLATFORMS else ["B1", "B2", "B3", "B4", "B5", "B7"]
+    return [f"{role} ({n})" for (_, role), n in zip(LANDSAT_BANDS, numbers, strict=True)]
+
+
+def read_landsat_window(item: StacItem, bbox: list[float], out: Path, token: str) -> list[str]:
+    """Reads the six reflective bands (30 m) and QA_PIXEL of a Landsat Collection 2 Level-2 scene for a WGS84 box.
+
+    Writes a 7-band float32 GeoTIFF: surface reflectance (NaN for fill) in the order blue, green, red, NIR, SWIR1,
+    SWIR2, and QA_PIXEL in band 7 (TerraX's "landsat" quality mask uses its bits 0–5). Returns notes for the report.
+    """
+    import rasterio
+    import rasterio.errors
+    from pyproj import Transformer
+    from rasterio.windows import Window, from_bounds
+
+    keys = [k for k, _ in LANDSAT_BANDS] + ["qa_pixel"]
+    missing = [k for k in keys if k not in item.assets]
+    if missing:
+        raise ValueError(f"The scene lacks assets: {', '.join(missing)}.")
+    if not all(_allowed_landsat_href(item.assets[k]["href"]) for k in keys):
+        raise ValueError("The scene's files are not on the Planetary Computer's storage.")
+    signed = {k: _sign(item.assets[k]["href"], token) for k in keys}
+    env = {"GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "GDAL_HTTP_MAX_RETRY": "3", "GDAL_HTTP_RETRY_DELAY": "1"}
+    stack: list[np.ndarray] = []
+    scales: set[tuple[float, float]] = set()
+    try:
+        with rasterio.Env(**env):
+            with rasterio.open(signed["red"]) as ds:
+                if ds.crs is None:
+                    raise ValueError("The scene has no coordinate reference system.")
+                tr = Transformer.from_crs(4326, ds.crs, always_xy=True)
+                w, s, e, n = bbox
+                xs, ys = tr.transform([w, e, w, e], [s, s, n, n])
+                win = from_bounds(min(xs), min(ys), max(xs), max(ys), ds.transform)
+                c0, r0 = max(0, math.floor(win.col_off)), max(0, math.floor(win.row_off))
+                c1, r1 = min(ds.width, math.ceil(win.col_off + win.width)), min(ds.height, math.ceil(win.row_off + win.height))
+                if c1 <= c0 or r1 <= r0:
+                    raise ValueError("The area does not overlap this scene.")
+                gw, gh = c1 - c0, r1 - r0
+                if max(gw, gh) > LANDSAT_MAX_SIDE:
+                    raise ValueError(f"The area is {gw} × {gh} pixels at 30 m; choose an area under {LANDSAT_MAX_SIDE * 30 // 1000} km across.")
+                window = Window(c0, r0, gw, gh)
+                grid = (ds.transform, ds.width, ds.height, ds.crs)
+                transform, crs = ds.window_transform(window), ds.crs
+            for k in keys:
+                with rasterio.open(signed[k]) as ds:
+                    if (ds.transform, ds.width, ds.height, ds.crs) != grid:
+                        raise ValueError(f"The scene's {k} file is not on the same grid as its red band.")
+                    dn = ds.read(1, window=window).astype(np.float32)
+                if k == "qa_pixel":
+                    stack.append(dn)
+                    continue
+                a = item.assets[k]
+                scale, offset = (float(a["scale"]), float(a.get("offset") or 0)) if a.get("scale") is not None else (USGS_SR_SCALE, USGS_SR_OFFSET)
+                scales.add((scale, offset))
+                stack.append(np.where(dn == 0, np.nan, dn * np.float32(scale) + np.float32(offset)).astype(np.float32))  # 0 is fill
+    except rasterio.errors.RasterioIOError as err:
+        raise ValueError(f"Could not read the scene from the Planetary Computer ({err}). Search again for a fresh link.") from err
+    if not np.isfinite(stack[2]).any():
+        raise ValueError("The scene has no data over this area.")
+    names = [*_landsat_band_names(item.platform), "qa_pixel"]
+    profile = {"driver": "GTiff", "width": gw, "height": gh, "count": len(stack), "dtype": "float32", "crs": crs, "transform": transform, "nodata": np.nan,
+               "compress": "deflate", "tiled": True}
+    with rasterio.open(out, "w", **profile) as dst:
+        for i, (band, name) in enumerate(zip(stack, names, strict=True), start=1):
+            dst.write(band, i)
+            dst.set_band_description(i, name)
+    scale_note = ("Reflectance = DN × " + " / ".join(f"{sc:g} {'+' if off >= 0 else '−'} {abs(off):g}" for sc, off in sorted(scales))
+                  + (" from the STAC raster:bands metadata." if all(item.assets[k].get("scale") is not None for k, _ in LANDSAT_BANDS)
+                     else " (USGS Collection 2 Level-2 scale factors; the metadata gives none)."))
+    platform = (item.platform or "Landsat").replace("landsat-", "Landsat ")
+    cloud = _js_num(item.cloud) if item.cloud is not None else "?"
+    notes = [scale_note,
+             f"{platform} Collection 2 Level-2 scene {item.id} ({item.datetime[:10]}, {cloud} % cloud over the scene) from the Microsoft Planetary Computer: "
+             "surface reflectance at 30 m in bands 1–6 (blue, green, red, NIR, SWIR1, SWIR2) and QA_PIXEL in band 7, for TerraX's Landsat cloud mask "
+             "(bits 0–5: fill, dilated cloud, cirrus, cloud, cloud shadow, snow). Landsat data courtesy of the U.S. Geological Survey."]
+    if item.platform == "landsat-7" and item.datetime[:10] > SLC_OFF:
+        notes.append("Landsat 7 after 31 May 2003 (scan line corrector off): about 22 % of each scene is missing in wedge-shaped stripes, which are empty (no data) here.")
+    return notes
+
+
+def landsat_composite_spec(items: list[StacItem]) -> CompositeSpec:
+    oli = all(i.platform in OLI_PLATFORMS for i in items)
+    return CompositeSpec("landsat", _landsat_band_names(items[0].platform if oli else None) if oli else [r for _, r in LANDSAT_BANDS],
+                         "Landsat Collection 2 Level-2 scenes from the Microsoft Planetary Computer",
+                         "the scene's QA_PIXEL band marks clear. Masked: QA_PIXEL bits 0–5 (fill, dilated cloud, cirrus, cloud, cloud shadow, snow).",
+                         scene_notes=1, reprojected="Scenes on other grids (another WRS-2 path/row or UTM zone) were reprojected onto the first scene's grid "
+                                                    "(bilinear for reflectance, nearest for QA_PIXEL).")
+
+
+def composite_landsat(items: list[StacItem], bbox: list[float], out: Path, workdir: Path, token: str, read=None) -> dict[str, Any]:
+    """Per-pixel median of the clear observations of several Landsat scenes (see median_composite)."""
+    info = median_composite(items, bbox, out, workdir, read or (lambda it, b, o: read_landsat_window(it, b, o, token)), landsat_composite_spec(items))
+    if len({i.platform in OLI_PLATFORMS for i in items}) > 1:
+        info["notes"].append("The composite mixes TM/ETM+ and OLI scenes. Their reflectances differ slightly (Roy et al. 2016 give cross-sensor "
+                             "transformations); TerraX does not adjust them.")
+    if any(i.platform == "landsat-7" and i.datetime[:10] > SLC_OFF for i in items):
+        info["notes"].append("Some scenes are Landsat 7 after May 2003 (scan line corrector off); other dates fill their missing stripes.")
+    return info

@@ -29,6 +29,30 @@ test('forest loss: synthetic sample gives areas and a report', async ({ page }) 
   expect(errors).toEqual([]);
 });
 
+test('forest loss: CO₂ emissions from a biomass value', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Forest loss');
+  await page.click('summary:has-text("CO₂ emissions")');
+  await page.check('#emissions-on');
+  // Without biomass the run is refused with the reason.
+  await page.click('button:has-text("Try synthetic sample")');
+  await expect(page.locator('.toast')).toContainText('above-ground biomass');
+  await page.fill('#emissions-agb', '250');
+  await page.fill('#emissions-agb-ci', '50');
+  await page.selectOption('#emissions-zone', 'trop-moist');
+  await page.click('button:has-text("Try synthetic sample")');
+  // 184.05 ha × 250 t/ha × (1 + 0.24) × 0.47 × 44/12 = 98,325.6 t CO₂, ± about 20 % from the biomass.
+  const panel = page.locator('#forest-emissions');
+  await expect(panel.locator('.stat', { hasText: 'CO₂ emitted' })).toContainText('98,325.6 t');
+  await expect(panel.locator('.stat', { hasText: '95 % interval' })).toContainText('–');
+  await expect(panel).toContainText('root-to-shoot 0.240');
+  await expect(page.locator('.report-card')).toContainText('CO₂ emissions from forest loss');
+  // Burn severity has no emissions settings: fire emissions need combustion factors.
+  await page.click('button[role="radio"]:has-text("Burn severity")');
+  await expect(page.locator('summary:has-text("CO₂ emissions")')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('carbon: inventory sample, settings and a generic CSV', async ({ page }) => {
   const errors = await start(page);
   await openTool(page, 'Carbon & biomass');

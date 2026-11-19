@@ -30,19 +30,27 @@ from typing import Any
 #: Input slots and the main parameters of each tool, for ``terrax tools`` and the QGIS plugin. Every slot named here
 #: is read by the tool (tests/test_local.py checks the table against the tool sources).
 TOOLS: dict[str, dict[str, Any]] = {
-    "forest": {"summary": "Forest loss between two dates (NDVI change), Hansen loss by year, or burn severity (dNBR)",
-               "inputs": {"a": "earlier image (NDVI, or red/NIR bands; the Hansen treecover2000 or pre-fire NBR)", "b": "later image (the Hansen lossyear or post-fire NBR)"},
-               "params": {"mode": "ndvi | hansen | burn", "forestThreshold": "0.5", "lossThreshold": "-0.2", "canopyThreshold": "30 (Hansen, %)", "mmuHa": "0 (minimum mapping unit, ha)"}},
+    "forest": {"summary": "Forest loss between two dates (NDVI change), Hansen loss by year, or burn severity (dNBR); CO₂ emissions from the loss",
+               "inputs": {"a": "earlier image (NDVI, or red/NIR bands; the Hansen treecover2000 or pre-fire NBR)", "b": "later image (the Hansen lossyear or post-fire NBR)",
+                          "biomass": "optional above-ground biomass map (t/ha, e.g. the canopy tool's agb_mg_ha.tif) for CO₂ emissions"},
+               "params": {"mode": "ndvi | hansen | burn", "forestThreshold": "0.5", "lossThreshold": "-0.2", "canopyThreshold": "30 (Hansen, %)", "mmuHa": "0 (minimum mapping unit, ha)",
+                          "emissions.agb": "above-ground biomass of the lost forest, t/ha (or give a biomass map)", "emissions.agbCi": "its 95 % half-width, t/ha",
+                          "emissions.zone": "trop-rain | trop-moist | trop-dry | trop-shrub | trop-mountain | temp-broadleaf | temp-conifer (IPCC root-to-shoot ratio)",
+                          "emissions.biomassCiPct": "a biomass map's 95 % uncertainty, %", "emissions.afterBiomass": "0 (biomass left after clearing, t/ha)"}},
     "raster": {"summary": "Spectral index or band statistics of one GeoTIFF", "inputs": {"file": "GeoTIFF"},
                "params": {"view": '{"mode": "index", "index": "ndvi", "bands": {"red": 2, "nir": 3}}'}},
     "stack": {"summary": "Multi-date series: trend per image, and disturbances dated per pixel", "inputs": {"files": "several GeoTIFFs, the date in each file name"},
-              "params": {"index": "ndvi", "mapBreaks": "true", "minDrop": "0.15"}},
+              "params": {"index": "ndvi", "mapBreaks": "true", "minDrop": "0.15", "breakModel": "single | seasonal (any month, several disturbances, recovery)", "consecutive": "3 (seasonal)"}},
     "landcover": {"summary": "Land-cover classification: k-means clusters or a random forest from training shapes",
                   "inputs": {"file": "multispectral GeoTIFF", "training": "training polygons or points (random forest)", "radar": "optional Sentinel-1 VV/VH GeoTIFF"},
                   "params": {"method": "kmeans | rf", "k": "4", "bands": "[0, 1, 2, 3]", "labelField": "class", "trees": "100"}},
     "terrain": {"summary": "Slope, aspect, hillshade and elevation statistics of a DEM", "inputs": {"dem": "DEM GeoTIFF (metres)"}, "params": {}},
     "hydrology": {"summary": "Flow direction and accumulation (D8 or D∞), streams and wetness index", "inputs": {"dem": "DEM GeoTIFF"},
                   "params": {"method": "d8 | dinf", "thresholdKm2": "0.5"}},
+    "water": {"summary": "Surface water and floods: MNDWI/NDWI from optical images, or Sentinel-1 backscatter; one date or before/after",
+              "inputs": {"a": "image (or the date before)", "b": "optional image after, on the same grid"},
+              "params": {"mode": "optical | radar", "bands": '{"green": 1, "nir": 3, "swir1": 4} (optical; MNDWI with SWIR1, else NDWI)', "threshold": "auto (Otsu) or a number",
+                         "band": "0 (radar: the VV band)", "dropDb": "3 (radar: backscatter drop for new water)", "mmuHa": "0 (minimum patch, ha)"}},
     "contours": {"summary": "Contour lines of a DEM", "inputs": {"dem": "DEM GeoTIFF"}, "params": {"interval": "10 (m)"}},
     "canopy": {"summary": "Canopy height, cover and tree tops from LiDAR, DSM − DTM or a CHM; biomass from field plots",
                "inputs": {"cloud": "LAS/LAZ point cloud", "dsm": "surface model", "dtm": "terrain model", "chm": "canopy height model", "plots": "optional field plots (polygons with trees and/or agb)"},
@@ -58,7 +66,7 @@ TOOLS: dict[str, dict[str, Any]] = {
 
 #: Tools that run from the web app only: live satellite catalogues (they need the internet and STAC items), and the
 #: residential plot tool, whose images are listed with their dates inside its parameters.
-WEB_ONLY = ("sentinel", "sentinel1", "sentinel_composite", "residential")
+WEB_ONLY = ("sentinel", "sentinel1", "sentinel_composite", "landsat", "landsat_composite", "residential")
 
 
 class TerraxError(RuntimeError):
