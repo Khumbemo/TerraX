@@ -30,9 +30,13 @@ from typing import Any
 #: Input slots and the main parameters of each tool, for ``terrax tools`` and the QGIS plugin. Every slot named here
 #: is read by the tool (tests/test_local.py checks the table against the tool sources).
 TOOLS: dict[str, dict[str, Any]] = {
-    "forest": {"summary": "Forest loss between two dates (NDVI change), Hansen loss by year, or burn severity (dNBR)",
-               "inputs": {"a": "earlier image (NDVI, or red/NIR bands; the Hansen treecover2000 or pre-fire NBR)", "b": "later image (the Hansen lossyear or post-fire NBR)"},
-               "params": {"mode": "ndvi | hansen | burn", "forestThreshold": "0.5", "lossThreshold": "-0.2", "canopyThreshold": "30 (Hansen, %)", "mmuHa": "0 (minimum mapping unit, ha)"}},
+    "forest": {"summary": "Forest loss between two dates (NDVI change), Hansen loss by year, or burn severity (dNBR); CO₂ emissions from the loss",
+               "inputs": {"a": "earlier image (NDVI, or red/NIR bands; the Hansen treecover2000 or pre-fire NBR)", "b": "later image (the Hansen lossyear or post-fire NBR)",
+                          "biomass": "optional above-ground biomass map (t/ha, e.g. the canopy tool's agb_mg_ha.tif) for CO₂ emissions"},
+               "params": {"mode": "ndvi | hansen | burn", "forestThreshold": "0.5", "lossThreshold": "-0.2", "canopyThreshold": "30 (Hansen, %)", "mmuHa": "0 (minimum mapping unit, ha)",
+                          "emissions.agb": "above-ground biomass of the lost forest, t/ha (or give a biomass map)", "emissions.agbCi": "its 95 % half-width, t/ha",
+                          "emissions.zone": "trop-rain | trop-moist | trop-dry | trop-shrub | trop-mountain | temp-broadleaf | temp-conifer (IPCC root-to-shoot ratio)",
+                          "emissions.biomassCiPct": "a biomass map's 95 % uncertainty, %", "emissions.afterBiomass": "0 (biomass left after clearing, t/ha)"}},
     "raster": {"summary": "Spectral index or band statistics of one GeoTIFF", "inputs": {"file": "GeoTIFF"},
                "params": {"view": '{"mode": "index", "index": "ndvi", "bands": {"red": 2, "nir": 3}}'}},
     "stack": {"summary": "Multi-date series: trend per image, and disturbances dated per pixel", "inputs": {"files": "several GeoTIFFs, the date in each file name"},
