@@ -21,6 +21,7 @@ interface StackResult {
 }
 
 interface BreaksResult {
+  model: 'single' | 'seasonal';
   label: string;
   dates: string[];
   minDrop: number;
@@ -30,6 +31,10 @@ interface BreaksResult {
   byDate: { date: string; previous: string; pixels: number; ha: number | null }[];
   legend: { id: number; label: string; color: number[] }[];
   notes: string[];
+  // Seasonal model only.
+  repeatedHa?: number | null;
+  repeatedPixels?: number;
+  recoveryMedian?: number | null;
 }
 
 interface StackJob {
@@ -60,13 +65,18 @@ export default function StackPanel({ onOutput, boundary }: Props) {
   const [result, setResult] = useState<StackResult | null>(null);
   const [mapBreaks, setMapBreaks] = useState(false);
   const [minDrop, setMinDrop] = useState('0.15');
+  const [model, setModel] = useState<'single' | 'seasonal'>('single');
+  const [consecutive, setConsecutive] = useState('3');
   const [breaks, setBreaks] = useState<StackJob | null>(null);
   const fail = (m: string) => notify(m, 'error');
 
   const run = async (list: StoredFile<RasterMeta>[], idx: SpectralIndex = index) => {
     const drop = Number(minDrop);
     if (mapBreaks && !(drop > 0 && drop <= 2)) return fail('Set the smallest drop to map between 0 and 2 (for NDVI, 0.15 is common).');
-    const params = { index: idx, bands: list[0].meta.guessedBands, boundary, ...(mapBreaks ? { mapBreaks: true, minDrop: drop } : {}) };
+    const confirm = Number(consecutive);
+    if (mapBreaks && model === 'seasonal' && !(Number.isInteger(confirm) && confirm >= 2 && confirm <= 6)) return fail('Set the observations that confirm a disturbance between 2 and 6.');
+    const breakParams = model === 'seasonal' ? { breakModel: 'seasonal', consecutive: confirm } : {};
+    const params = { index: idx, bands: list[0].meta.guessedBands, boundary, ...(mapBreaks ? { mapBreaks: true, minDrop: drop, ...breakParams } : {}) };
     const r = await job.run('run', (signal, onProgress) => runJob<StackJob>('stack', { files: list.map(f => f.id) }, params, { signal, onProgress }), fail);
     if (!r) return;
     setFiles(list);
@@ -113,14 +123,29 @@ export default function StackPanel({ onOutput, boundary }: Props) {
         >
           Try synthetic 6-date series
         </button>
-        <label className="inline-check" title="Test every pixel for one abrupt drop on its trend and map when it happened. Needs at least 5 dates on one grid.">
+        <label className="inline-check" title="Test every pixel for disturbances (drops below its expected value) and map when they happened. The images must be on one grid.">
           <input id="stack-breaks" type="checkbox" checked={mapBreaks} onChange={e => setMapBreaks(e.target.checked)} /> Map disturbances per pixel
         </label>
         {mapBreaks && (
-          <label className="param">
-            <span>Smallest drop</span>
-            <input id="stack-min-drop" type="number" min="0.01" max="2" step="0.05" value={minDrop} onChange={e => setMinDrop(e.target.value)} />
-          </label>
+          <>
+            <label className="inline-select" title="One drop: one abrupt drop on a trend, for images from one season (at least 5 dates). Seasonal: a season-trend model per pixel (CCDC-style), for images from any month, with several disturbances and recovery (at least 11 dates over more than a year).">
+              <span>Model</span>
+              <select id="stack-break-model" value={model} onChange={e => setModel(e.target.value as 'single' | 'seasonal')}>
+                <option value="single">One drop (images from one season)</option>
+                <option value="seasonal">Seasonal, several (any month)</option>
+              </select>
+            </label>
+            <label className="param">
+              <span>Smallest drop</span>
+              <input id="stack-min-drop" type="number" min="0.01" max="2" step="0.05" value={minDrop} onChange={e => setMinDrop(e.target.value)} />
+            </label>
+            {model === 'seasonal' && (
+              <label className="param" title="Clear observations in a row below the model that confirm a disturbance">
+                <span>Confirm after</span>
+                <input id="stack-consecutive" type="number" min="2" max="6" step="1" value={consecutive} onChange={e => setConsecutive(e.target.value)} />
+              </label>
+            )}
+          </>
         )}
         {files.length > 1 && (
           <button type="button" className="btn btn-small" disabled={busy} onClick={() => run(files)}>
@@ -181,6 +206,14 @@ export default function StackPanel({ onOutput, boundary }: Props) {
                 Disturbed (drop of at least {fmt(breaks.breaks.minDrop)}): {breaks.breaks.disturbedHa !== null ? `${fmt(breaks.breaks.disturbedHa, 4)} ha` : `${breaks.breaks.disturbedPixels.toLocaleString()} pixels`} of{' '}
                 {breaks.breaks.analysedPixels.toLocaleString()} pixels with enough clear dates.
               </p>
+              {breaks.breaks.model === 'seasonal' && (
+                <p className="field-hint" id="stack-breaks-seasonal">
+                  Disturbed more than once:{' '}
+                  {breaks.breaks.repeatedHa !== null && breaks.breaks.repeatedHa !== undefined ? `${fmt(breaks.breaks.repeatedHa, 4)} ha` : `${(breaks.breaks.repeatedPixels ?? 0).toLocaleString()} pixels`}. Recovery after the last
+                  disturbance: {breaks.breaks.recoveryMedian === null || breaks.breaks.recoveryMedian === undefined ? '—' : `${(breaks.breaks.recoveryMedian * 100).toFixed(0)} % of the drop regained (median)`}.
+                  The table dates each pixel’s first disturbance; the downloads add the latest one, the number per pixel and recovery.
+                </p>
+              )}
               {breaks.breaks.byDate.length > 0 && (
                 <div className="tabular-view">
                   <table id="stack-breaks-table">

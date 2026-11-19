@@ -40,7 +40,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "raster": {"summary": "Spectral index or band statistics of one GeoTIFF", "inputs": {"file": "GeoTIFF"},
                "params": {"view": '{"mode": "index", "index": "ndvi", "bands": {"red": 2, "nir": 3}}'}},
     "stack": {"summary": "Multi-date series: trend per image, and disturbances dated per pixel", "inputs": {"files": "several GeoTIFFs, the date in each file name"},
-              "params": {"index": "ndvi", "mapBreaks": "true", "minDrop": "0.15"}},
+              "params": {"index": "ndvi", "mapBreaks": "true", "minDrop": "0.15", "breakModel": "single | seasonal (any month, several disturbances, recovery)", "consecutive": "3 (seasonal)"}},
     "landcover": {"summary": "Land-cover classification: k-means clusters or a random forest from training shapes",
                   "inputs": {"file": "multispectral GeoTIFF", "training": "training polygons or points (random forest)", "radar": "optional Sentinel-1 VV/VH GeoTIFF"},
                   "params": {"method": "kmeans | rf", "k": "4", "bands": "[0, 1, 2, 3]", "labelField": "class", "trees": "100"}},

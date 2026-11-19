@@ -210,16 +210,28 @@ def stack_markdown(r: dict) -> str:
     ])
 
 
-def analyze_breaks(rasters: list[Raster], index: str | None, bands: dict, qa: dict | None = None, boundary=None, min_drop: float = 0.15) -> dict:
-    """Per-pixel disturbance dating over a dated series on one grid (processing.breaks), read in strips."""
+def analyze_breaks(rasters: list[Raster], index: str | None, bands: dict, qa: dict | None = None, boundary=None, min_drop: float = 0.15,
+                   model: str = "single", consecutive: int = 3) -> dict:
+    """Per-pixel disturbance dating over a dated series on one grid, read in strips: one drop on a trend
+    (processing.breaks, `model` "single") or a seasonal model with several breaks and recovery (processing.seasonal)."""
     from .breaks import MIN_DATES, fit_breaks
+    from .seasonal import INIT, MAX_BREAKS, fit_seasonal
     from .tiles import class_totals
+
+    if model not in ("single", "seasonal"):
+        raise ValueError("The disturbance model is single (one drop, images from one season) or seasonal (several, any month).")
+    seasonal = model == "seasonal"
+    if seasonal and not 2 <= consecutive <= 6:
+        raise ValueError("Set the observations that confirm a disturbance between 2 and 6.")
 
     found = [(r, date_from_filename(r.meta.filename)) for r in rasters]
     undated = [r.meta.filename for r, d in found if d is None]
     if undated:
         raise ValueError(f"No date found in: {', '.join(undated)}. Put the acquisition date in each file name (for example S2_2024-03-15_ndvi.tif).")
     dated = sorted(((r, d) for r, d in found if d is not None), key=lambda x: x[1])
+    if seasonal and (len(dated) < INIT + consecutive or (dated[-1][1] - dated[0][1]).days < 365):
+        raise ValueError(f"The seasonal model needs at least {INIT + consecutive} dates over more than a year (a stable year to learn the season, then "
+                         f"{consecutive} dates to confirm a drop); add more images, from any month.")
     if len(dated) < MIN_DATES:
         raise ValueError(f"Mapping disturbances needs at least {MIN_DATES} dates (two before a drop, two after, and one to fit the trend); add more images.")
     if len({d for _, d in dated}) < len(dated):
@@ -241,11 +253,35 @@ def analyze_breaks(rasters: list[Raster], index: str | None, bands: dict, qa: di
     w, h = plan.width, plan.height
     classes = np.zeros((h, w), dtype=np.uint8)
     magnitude = np.full((h, w), np.nan, dtype=np.float32)
+    if seasonal:
+        latest = np.zeros((h, w), dtype=np.uint8)
+        count = np.full((h, w), 255, dtype=np.uint8)
+        recovery = np.full((h, w), np.nan, dtype=np.float32)
+        every = np.zeros(n, dtype=np.int64)  # disturbances (all, not only first) per date, in cells
+        every_area = np.zeros(n)
 
     def work(st: Strip) -> tuple[int, int]:
         y = np.stack([layer.rows(st.r0, st.r1)[0] for layer in layers]).reshape(n, -1)
         if st.inside is not None:
             y[:, ~st.inside.ravel()] = np.nan
+        if seasonal:
+            r = fit_seasonal(t, y, min_drop, consecutive=consecutive)
+            ok, nb, idx = r["valid"], r["count"], r["index"]
+            shape = (st.r1 - st.r0, w)
+            classes[st.rows] = np.where(ok, np.where(nb > 0, idx[:, 0], 1), 0).reshape(shape).astype(np.uint8)
+            last = idx[np.arange(idx.shape[0]), np.clip(np.minimum(nb, MAX_BREAKS) - 1, 0, None)]
+            latest[st.rows] = np.where(ok, np.where(nb > 0, last, 1), 0).reshape(shape).astype(np.uint8)
+            count[st.rows] = np.where(ok, np.minimum(nb, 254), 255).reshape(shape).astype(np.uint8)  # 255: never analysed (the GeoTIFF's no data)
+            magnitude[st.rows] = r["magnitude"][:, 0].reshape(shape).astype(np.float32)
+            recovery[st.rows] = r["recovery"].reshape(shape).astype(np.float32)
+            rows_area = np.repeat(plan.geo.cell_area[st.r0 : st.r1], w) if plan.geo else None
+            for b in range(MAX_BREAKS):
+                hit = idx[:, b] >= 0
+                if hit.any():
+                    np.add.at(every, idx[hit, b], 1)
+                    if rows_area is not None:
+                        np.add.at(every_area, idx[hit, b], rows_area[hit])
+            return int(ok.sum()), int(st.inside.sum()) if st.inside is not None else 0
         after, _, c, nv = fit_breaks(t, y, min_drop)
         cls = np.where(nv >= MIN_DATES, np.where(after >= 0, after, 1), 0).astype(np.uint8)  # 0 too few dates, 1 no disturbance, k drop first seen at date k
         classes[st.rows] = cls.reshape(st.r1 - st.r0, w)
@@ -257,11 +293,15 @@ def analyze_breaks(rasters: list[Raster], index: str | None, bands: dict, qa: di
     counts, areas = class_totals(classes, plan.geo.cell_area if plan.geo else None, n, plan.row_blocks())
     label = index_def(index).short if index else "Band 1"
     dates = [d.isoformat() for _, d in dated]
+    first_k = range(INIT, n) if seasonal else range(2, n - 1)  # where a first disturbance can be dated
     by_date = [{"date": dates[k], "previous": dates[k - 1], "pixels": int(counts[k]), "ha": float(areas[k]) / 1e4 if areas is not None else None}
-               for k in range(2, n - 1) if counts[k]]
+               for k in first_k if counts[k]]
     analysed = int(sum(p[0] for p in parts))
-    disturbed = int(counts[2 : n - 1].sum())
-    disturbed_ha = float(areas[2 : n - 1].sum()) / 1e4 if areas is not None else None
+    disturbed = int(sum(counts[k] for k in first_k))
+    disturbed_ha = float(sum(areas[k] for k in first_k)) / 1e4 if areas is not None else None
+    if seasonal:
+        return _seasonal_result(label, dates, min_drop, consecutive, w, h, analysed, disturbed, disturbed_ha, by_date, plan, classes, magnitude,
+                                latest, count, recovery, every, every_area)
     notes = [
         f"Each pixel's {label} series was tested for one abrupt drop on a linear trend (y = a + b·t + c·[t ≥ t_k], the single-break model of BFAST, Verbesselt et al. 2010) "
         f"against a trend alone, by the Bayesian information criterion with the break date counted as a parameter. Disturbed: the break model wins and the drop is at least {fmt(min_drop)}.",
@@ -272,9 +312,45 @@ def analyze_breaks(rasters: list[Raster], index: str | None, bands: dict, qa: di
     ]
     if plan.geo:
         notes.append(plan.geo.note)
-    return {"label": label, "dates": dates, "minDrop": min_drop, "width": w, "height": h, "analysedPixels": analysed, "disturbedPixels": disturbed,
+    return {"model": "single", "label": label, "dates": dates, "minDrop": min_drop, "width": w, "height": h, "analysedPixels": analysed, "disturbedPixels": disturbed,
             "disturbedHa": disturbed_ha, "byDate": by_date, "notes": notes,
             "classes": classes, "magnitude": magnitude, "_rowArea": plan.geo.cell_area if plan.geo else None}
+
+
+def _seasonal_result(label, dates, min_drop, consecutive, w, h, analysed, disturbed, disturbed_ha, by_date, plan, classes, magnitude, latest, count,
+                     recovery, every, every_area) -> dict:
+    from .seasonal import INIT
+
+    area = plan.geo.cell_area[:, None] if plan.geo else None
+
+    def ha(mask: np.ndarray) -> float | None:
+        return float((mask * area).sum()) / 1e4 if area is not None else None
+
+    rec = recovery[np.isfinite(recovery)]
+    repeated = (count >= 2) & (count != 255)
+    all_dates = [{"date": dates[k], "previous": dates[k - 1], "pixels": int(every[k]), "ha": float(every_area[k]) / 1e4 if area is not None else None}
+                 for k in range(len(dates)) if every[k]]
+    notes = [
+        f"Each pixel's {label} series was followed with a season-trend model (y = a + b·t + c·cos 2πt + d·sin 2πt), in the manner of CCDC (Zhu & Woodcock 2014): "
+        f"fitted on its first stable year of clear observations (at least {INIT}), then each later observation compared with the model's prediction. "
+        f"{consecutive} observations in a row that drop by at least max(3σ, {fmt(min_drop)}) below it (σ the model's error) confirm a disturbance, dated by the first of them; "
+        "a single low value followed by a normal one is treated as noise and left out. After a disturbance a new model starts, so a pixel can have several.",
+        "The annual cycle is part of the model, so images from any month can be used: a dry-season low is expected, not a disturbance. Only drops are mapped.",
+        "A disturbance is dated by the clear observations around it: after the last clear date before the drop and by the first one in it (the map shows that date).",
+        "A disturbance in a pixel's first year of clear data cannot be detected (there is no stable year before it to compare with), nor one in its last "
+        f"{consecutive - 1} clear dates (too few to confirm it).",
+        "Recovery is the share of the last drop regained by the end of the series, from the trend of the model fitted after it (1 = back to the level before the drop). "
+        "It is empty where the series after the drop is shorter than a year.",
+        f"{h * w - analysed:,} pixels never had a stable year of clear observations and are left empty.",
+        "TerraX's simplifications of CCDC: one harmonic, one index with a one-sided threshold, and outliers handled only by the consecutive-observation rule.",
+    ]
+    if plan.geo:
+        notes.append(plan.geo.note)
+    return {"model": "seasonal", "label": label, "dates": dates, "minDrop": min_drop, "consecutive": consecutive, "width": w, "height": h,
+            "analysedPixels": analysed, "disturbedPixels": disturbed, "disturbedHa": disturbed_ha, "byDate": by_date, "allByDate": all_dates,
+            "repeatedPixels": int(repeated.sum()), "repeatedHa": ha(repeated), "recoveryMedian": float(np.median(rec)) if rec.size else None,
+            "recoveryPixels": int(rec.size), "notes": notes, "classes": classes, "magnitude": magnitude, "latest": latest, "count": count,
+            "recovery": recovery, "_rowArea": plan.geo.cell_area if plan.geo else None}
 
 
 def breaks_markdown(r: dict) -> str:
@@ -285,5 +361,18 @@ def breaks_markdown(r: dict) -> str:
         "## Results", "", f"Disturbed (drop of at least {fmt(r['minDrop'])}): {total}.", "",
         f"| Drop first seen | Previous date | Area ({unit}) |", "|---|---|---|",
         *[f"| {x['date']} | {x['previous']} | {fmt(x['ha'], 4) if x['ha'] is not None else x['pixels']} |" for x in r["byDate"]],
+        *(_seasonal_markdown(r, unit) if r.get("model") == "seasonal" else []),
         "", "## Method and limits", "", *[f"- {n}" for n in r["notes"]],
     ])
+
+
+def _seasonal_markdown(r: dict, unit: str) -> list[str]:
+    def area(ha: float | None, px: int) -> str:
+        return f"{fmt(ha, 4)} ha" if ha is not None else f"{px:,} pixels"
+
+    rec = "—" if r["recoveryMedian"] is None else f"{r['recoveryMedian'] * 100:.0f} % of the drop regained (median of {r['recoveryPixels']:,} pixels)"
+    return ["", "The table above dates each pixel's first disturbance.", "",
+            f"- Disturbed more than once: {area(r['repeatedHa'], r['repeatedPixels'])}.", f"- Recovery after the last disturbance: {rec}.", "",
+            "All disturbances, by date (a pixel disturbed twice counts at both dates):", "",
+            f"| Drop first seen | Previous date | Area ({unit}) |", "|---|---|---|",
+            *[f"| {x['date']} | {x['previous']} | {fmt(x['ha'], 4) if x['ha'] is not None else x['pixels']} |" for x in r["allByDate"]]]
