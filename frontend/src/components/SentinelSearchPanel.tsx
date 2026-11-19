@@ -12,13 +12,23 @@ interface StacItem {
   epsg: number | null;
   assets: Record<string, { href: string; scale?: number | null; offset?: number | null }>;
   processingBaseline: string | null;
+  platform?: string | null;
 }
+
+export type Mission = 's2' | 'landsat';
+
+/** What differs between the two optical catalogues. */
+const MISSIONS = {
+  s2: { label: 'Sentinel-2', search: '/api/live/sentinel/search', scene: 'sentinel', composite: 'sentinel_composite', maxKm: 14, cloud: 'Cloud (tile)' },
+  landsat: { label: 'Landsat', search: '/api/live/landsat/search', scene: 'landsat', composite: 'landsat_composite', maxKm: 44, cloud: 'Cloud (scene)' },
+} as const;
 
 interface Props {
   target: { lat: number; lon: number; name: string };
   boundary: Boundary | null;
-  /** A scene window (5 bands: blue, green, red, NIR, SCL) or a median composite (band 5: clear observations), stored on the server. */
-  onRaster: (file: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite') => void;
+  /** A scene window or a median composite, stored on the server. Sentinel-2: blue, green, red, NIR, then SCL (scene) or the
+   *  clear-observation count (composite). Landsat: blue, green, red, NIR, SWIR1, SWIR2, then QA_PIXEL or the count. */
+  onRaster: (file: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite', mission: Mission) => void;
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -44,6 +54,8 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
   const [end, setEnd] = useState(iso(now));
   const [cloud, setCloud] = useState('20');
   const [km, setKm] = useState('3');
+  const [mission, setMission] = useState<Mission>('s2');
+  const m = MISSIONS[mission];
   const [items, setItems] = useState<StacItem[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const job = useJob();
@@ -51,7 +63,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
 
   const bbox = (): [number, number, number, number] => {
     if (boundary) return boundaryBbox(boundary);
-    const half = Math.max(0.1, Math.min(14, Number(km) || 3)) / 2;
+    const half = Math.max(0.1, Math.min(m.maxKm, Number(km) || 3)) / 2;
     const dLat = half / 111.32, dLon = half / (111.32 * Math.cos((target.lat * Math.PI) / 180));
     return [target.lon - dLon, target.lat - dLat, target.lon + dLon, target.lat + dLat];
   };
@@ -60,7 +72,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
   const search = async () => {
     const r = await job.run(
       'search',
-      signal => request<{ items: StacItem[] }>('/api/live/sentinel/search', { method: 'POST', json: { bbox: bbox(), start, end, maxCloud: Math.max(0, Math.min(100, Number(cloud) || 20)) }, signal }),
+      signal => request<{ items: StacItem[] }>(m.search, { method: 'POST', json: { bbox: bbox(), start, end, maxCloud: Math.max(0, Math.min(100, Number(cloud) || 20)) }, signal }),
       fail,
     );
     if (!r) return;
@@ -70,16 +82,22 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
   };
 
   const load = async (item: StacItem) => {
-    const r = await job.run(item.id, (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>('sentinel', {}, { item, bbox: bbox() }, { signal, onProgress }), fail);
-    if (r) onRaster(r.file, r.notes, 'scene');
+    const r = await job.run(item.id, (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>(m.scene, {}, { item, bbox: bbox() }, { signal, onProgress }), fail);
+    if (r) onRaster(r.file, r.notes, 'scene', mission);
   };
 
   const MAX_COMPOSITE = 12;
   const composite = async () => {
     const chosen = (items ?? []).filter(it => picked.has(it.id));
     if (chosen.length < 2 || chosen.length > MAX_COMPOSITE) return fail(`Tick between 2 and ${MAX_COMPOSITE} scenes to combine.`);
-    const r = await job.run('composite', (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>('sentinel_composite', {}, { items: chosen, bbox: bbox() }, { signal, onProgress }), fail);
-    if (r) onRaster(r.file, r.notes, 'composite');
+    const r = await job.run('composite', (signal, onProgress) => runJob<{ file: StoredFile<RasterMeta>; notes: string[] }>(m.composite, {}, { items: chosen, bbox: bbox() }, { signal, onProgress }), fail);
+    if (r) onRaster(r.file, r.notes, 'composite', mission);
+  };
+  const switchMission = (next: Mission) => {
+    job.cancel();
+    setMission(next);
+    setItems(null);
+    setPicked(new Set());
   };
   const toggle = (id: string) =>
     setPicked(prev => {
@@ -91,7 +109,14 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
 
   return (
     <details className="sub-panel live-panel">
-      <summary className="eyebrow">Search Sentinel-2 scenes (the server downloads them)</summary>
+      <summary className="eyebrow">Search Sentinel-2 or Landsat scenes (the server downloads them)</summary>
+      <div className="mode-switch" role="radiogroup" aria-label="Satellite">
+        {(Object.keys(MISSIONS) as Mission[]).map(k => (
+          <button key={k} type="button" id={`mission-${k}`} role="radio" aria-checked={mission === k} className={mission === k ? 'active' : ''} onClick={() => switchMission(k)}>
+            {k === 's2' ? 'Sentinel-2 (2015–, 10 m)' : 'Landsat 4–9 (1982–, 30 m)'}
+          </button>
+        ))}
+      </div>
       <div className="param-row">
         <span className="field-hint">
           Area: {boundary ? `analysis boundary “${boundary.name}”` : `${km} km square around ${target.name}`}.
@@ -99,12 +124,12 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
         {!boundary && (
           <label className="param">
             <span>Size (km)</span>
-            <input id="s2-km" type="number" min="0.1" max="14" step="0.5" value={km} onChange={e => setKm(e.target.value)} />
+            <input id="s2-km" type="number" min="0.1" max={m.maxKm} step="0.5" value={km} onChange={e => setKm(e.target.value)} />
           </label>
         )}
         <label className="param">
           <span>From</span>
-          <input id="s2-start" type="date" value={start} onChange={e => setStart(e.target.value)} />
+          <input id="s2-start" type="date" min={mission === 'landsat' ? '1982-07-16' : '2015-06-23'} value={start} onChange={e => setStart(e.target.value)} />
         </label>
         <label className="param">
           <span>To</span>
@@ -126,7 +151,8 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
               <tr>
                 <th>Date</th>
                 <th>Scene</th>
-                <th>Cloud (tile)</th>
+                {mission === 'landsat' && <th>Satellite</th>}
+                <th>{m.cloud}</th>
                 <th>Combine</th>
                 <th />
               </tr>
@@ -136,6 +162,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
                 <tr key={it.id}>
                   <td>{it.datetime.slice(0, 10)}</td>
                   <td>{it.id}</td>
+                  {mission === 'landsat' && <td>{(it.platform ?? '').replace('landsat-', 'Landsat ')}</td>}
                   <td className="num">{it.cloud === null ? '—' : `${it.cloud.toFixed(1)} %`}</td>
                   <td>
                     <input type="checkbox" className="s2-pick" aria-label={`Combine ${it.id}`} checked={picked.has(it.id)} onChange={() => toggle(it.id)} />
@@ -163,15 +190,23 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
             </button>
           </div>
           <p className="field-hint">
-            A composite takes, for each pixel, the median of the scenes’ cloud-free observations (each scene’s own cloud classification), so cloudy months still give a full
-            image. Band 5 of the result counts the clear observations per pixel.
+            A composite takes, for each pixel, the median of the scenes’ cloud-free observations (each scene’s own cloud {mission === 'landsat' ? 'flags, QA_PIXEL' : 'classification, SCL'}), so
+            cloudy months still give a full image. Band {mission === 'landsat' ? 7 : 5} of the result counts the clear observations per pixel.
           </p>
         </div>
       )}
-      <p className="field-hint">
-        Scenes come from the Earth Search catalogue of Sentinel-2 Level-2A surface reflectance on AWS (free, no account). The TerraX server reads only the window over your area:
-        B2, B3, B4, B8 at 10 m and the SCL cloud classes, which are applied as a mask.
-      </p>
+      {mission === 's2' ? (
+        <p className="field-hint">
+          Scenes come from the Earth Search catalogue of Sentinel-2 Level-2A surface reflectance on AWS (free, no account). The TerraX server reads only the window over your area:
+          B2, B3, B4, B8 at 10 m and the SCL cloud classes, which are applied as a mask.
+        </p>
+      ) : (
+        <p className="field-hint">
+          Scenes come from the Microsoft Planetary Computer’s copy of USGS Landsat Collection 2 Level-2 surface reflectance (Tier 1, free, no account): Landsat 4–5 TM, 7 ETM+ and 8–9 OLI.
+          The TerraX server reads only the window over your area: blue, green, red, NIR, SWIR1 and SWIR2 at 30 m and QA_PIXEL, whose cloud, shadow and snow flags are applied as a mask.
+          Landsat 7 scenes after May 2003 have missing stripes; TM/ETM+ and OLI reflectances differ slightly.
+        </p>
+      )}
     </details>
   );
 }

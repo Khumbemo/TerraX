@@ -12,6 +12,7 @@ import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
 import type { RasterDataset } from '../RasterPanel';
 import { useUpload } from '../ToolKit';
+import type { Mission } from '../SentinelSearchPanel';
 
 const CoreAnalysisDashboard = lazy(() => import('../CoreAnalysisDashboard'));
 const RasterPanel = lazy(() => import('../RasterPanel'));
@@ -120,10 +121,13 @@ export default function DataTool({ variant, onOutput, boundary, target }: Props)
     if (await openTable(f as StoredFile<TableMeta>, (f.meta as TableMeta).defaultMetric, note)) notify(`Loaded ${((f.meta as TableMeta).rowCount ?? 0).toLocaleString()} days of data.`, 'success');
   };
 
-  const loadLiveRaster = async (f: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite') => {
-    // A scene's band 5 is its SCL cloud classification (applied as a mask); a composite is already cloud-free and its band 5 counts clear observations.
-    const qa = kind === 'scene' ? ({ band: 4, kind: 'scl' } as const) : undefined;
-    if (await openRaster(f, { mode: 'index', index: 'ndvi', bands: { blue: 0, green: 1, red: 2, nir: 3 }, ...(qa ? { qa } : {}) }, notes)) notify(`Loaded ${f.name}.`, 'success');
+  const loadLiveRaster = async (f: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite', mission: Mission) => {
+    // A scene's last band is its cloud flags (Sentinel-2 SCL in band 5, Landsat QA_PIXEL in band 7), applied as a mask; a composite is
+    // already cloud-free and its last band counts clear observations.
+    const landsat = mission === 'landsat';
+    const qa = kind === 'scene' ? (landsat ? ({ band: 6, kind: 'landsat' } as const) : ({ band: 4, kind: 'scl' } as const)) : undefined;
+    const bands = landsat ? { blue: 0, green: 1, red: 2, nir: 3, swir1: 4, swir2: 5 } : { blue: 0, green: 1, red: 2, nir: 3 };
+    if (await openRaster(f, { mode: 'index', index: 'ndvi', bands, ...(qa ? { qa } : {}) }, notes)) notify(`Loaded ${f.name}.`, 'success');
   };
 
   const changeView = (mode: RasterMode, clearOnError = false) => {

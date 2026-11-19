@@ -1,6 +1,6 @@
 name: Live data
 
-# The Sentinel-1 (Planetary Computer) and Sentinel-2 (Earth Search) catalogues, for real. Separate from CI because it
+# The Sentinel-1 and Landsat (Planetary Computer) and Sentinel-2 (Earth Search) catalogues, for real. Separate from CI because it
 # depends on outside services: weekly, by hand, and when the code that talks to them changes.
 on:
   schedule:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   live:
-    name: Sentinel-1 and Sentinel-2, live
+    name: Sentinel-1, Sentinel-2 and Landsat, live
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:

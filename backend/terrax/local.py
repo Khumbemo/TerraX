@@ -62,7 +62,7 @@ TOOLS: dict[str, dict[str, Any]] = {
 
 #: Tools that run from the web app only: live satellite catalogues (they need the internet and STAC items), and the
 #: residential plot tool, whose images are listed with their dates inside its parameters.
-WEB_ONLY = ("sentinel", "sentinel1", "sentinel_composite", "residential")
+WEB_ONLY = ("sentinel", "sentinel1", "sentinel_composite", "landsat", "landsat_composite", "residential")
 
 
 class TerraxError(RuntimeError):

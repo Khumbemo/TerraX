@@ -1,4 +1,4 @@
-"""The live catalogues, for real: Sentinel-1 RTC from the Microsoft Planetary Computer and Sentinel-2 L2A from Earth Search.
+"""The live catalogues, for real: Sentinel-1 RTC and Landsat Collection 2 Level-2 from the Microsoft Planetary Computer, and Sentinel-2 L2A from Earth Search.
 
 These need the internet, so they run only with TERRAX_LIVE=1 (the "Live data" workflow runs them weekly and when the
 code that talks to these services changes). The rest of the suite tests the same code against recorded responses.
@@ -102,6 +102,67 @@ def test_sentinel2_median_composite_of_real_scenes(client):
     assert len(comp["scenes"]) >= 2 and comp["emptyShare"] < 0.2, comp
     with rasterio.open(storage.get_file(res["file"]["id"]).path) as d:
         red, nir, clear = d.read(3), d.read(4), d.read(5)
+    ok = np.isfinite(red) & np.isfinite(nir)
+    assert ok.mean() > 0.8 and 0 < float(np.median(red[ok])) < 0.2 and float(np.median(nir[ok])) > float(np.median(red[ok])) + 0.05
+    assert clear.max() <= len(comp["scenes"])
+
+
+def _landsat_report(item: dict) -> str:
+    """What the catalogue actually returned, for a failure message: asset keys, a link and the scale metadata."""
+    a = item.get("assets", {})
+    return (f"{item.get('id')} platform {item.get('platform')} epsg {item.get('epsg')} assets {sorted(a)} "
+            f"red href {a.get('red', {}).get('href', '')[:110]} red scale/offset {a.get('red', {}).get('scale')}/{a.get('red', {}).get('offset')}")
+
+
+@pytest.mark.parametrize(("start", "end", "sensor"), [("2023-11-01", "2024-03-31", "OLI"), ("1989-11-01", "1993-03-31", "TM")])
+def test_landsat_scene_is_physical(client, start, end, sensor):
+    """A recent Landsat 8/9 scene and one from 1989–93 (Landsat 5 TM): over clear vegetation (QA_PIXEL bit 6, NIR well
+    above red), red reflectance is small and positive and NIR is well above it. This also checks the catalogue's
+    asset names, Tier 1 filter, file links and scale metadata against what the code expects."""
+    import rasterio
+
+    from terrax import storage
+
+    r = client.post("/api/live/landsat/search", json={"bbox": BBOX, "start": start, "end": end, "maxCloud": 40, "limit": 10})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"]
+    assert items, f"no Tier 1 Landsat {sensor} scene under 40 % cloud between {start} and {end}"
+    report = [_landsat_report(i) for i in items[:3]]
+    assert all(i["id"].endswith("_T1") for i in items), "\n".join(report)
+    for item in items[:3]:
+        res = client.post("/api/jobs", json={"tool": "landsat", "inputs": {}, "params": {"item": item, "bbox": BBOX}}).json()
+        if res["state"] != "done":
+            report.append(f"  read failed: {res.get('message')}")
+            continue
+        with rasterio.open(storage.get_file(res["result"]["file"]["id"]).path) as d:
+            red, nir, qa = d.read(3), d.read(4), d.read(7)
+        clear = np.isfinite(red) & ((np.nan_to_num(qa).astype(np.int64) >> 6) & 1 == 1)
+        veg = clear & (nir > red + 0.1)
+        if veg.sum() < 100:
+            report.append(f"  only {int(veg.sum())} clear vegetation pixels")
+            continue
+        rv, nv = float(np.median(red[veg])), float(np.median(nir[veg]))
+        assert 0 < rv < 0.15 and nv > rv + 0.1, f"reflectance is not physical: red {rv:.4f} nir {nv:.4f}\n" + "\n".join(report)
+        assert any("Collection 2 Level-2" in n for n in res["result"]["notes"])
+        return
+    pytest.fail("no scene could be read with 100 clear vegetation pixels:\n" + "\n".join(report))
+
+
+def test_landsat_composite_of_real_scenes(client):
+    """Dry-season Landsat 8/9 scenes over the same area: a composite with QA-masked clouds, NIR above red."""
+    import rasterio
+
+    from terrax import storage
+
+    r = client.post("/api/live/landsat/search", json={"bbox": BBOX, "start": "2023-11-01", "end": "2024-03-31", "maxCloud": 60, "limit": 10})
+    assert r.status_code == 200, r.text
+    items = r.json()["items"][:4]
+    assert len(items) >= 2, "fewer than two Landsat scenes in five months: " + "; ".join(_landsat_report(i) for i in items)
+    res = run(client, "landsat_composite", {}, {"items": items, "bbox": BBOX})
+    comp = res["composite"]
+    assert len(comp["scenes"]) >= 2 and comp["emptyShare"] < 0.2, comp
+    with rasterio.open(storage.get_file(res["file"]["id"]).path) as d:
+        red, nir, clear = d.read(3), d.read(4), d.read(7)
     ok = np.isfinite(red) & np.isfinite(nir)
     assert ok.mean() > 0.8 and 0 < float(np.median(red[ok])) < 0.2 and float(np.median(nir[ok])) > float(np.median(red[ok])) + 0.05
     assert clear.max() <= len(comp["scenes"])

@@ -111,6 +111,18 @@ def sentinel_search(req: SearchRequest, request: Request, p: Principal = Depends
     return {"items": [i.public() for i in items]}
 
 
+@router.post("/landsat/search")
+def landsat_search(req: SearchRequest, request: Request, p: Principal = Depends(principal)) -> dict[str, Any]:
+    """Landsat 4–9 Collection 2 Level-2 (Tier 1) scenes from the Planetary Computer, newest first."""
+    ratelimit.check("live", p.owner, auth.client_ip(request))
+    try:
+        body = live.landsat_search_body(req.bbox, req.start, req.end, req.maxCloud, req.limit)
+        items = live.parse_stac_items(live.fetch_json(f"{live.PC_STAC}/search", method="POST", body=body))
+    except ValueError as err:
+        raise HTTPException(400, str(err)) from err
+    return {"items": [i.public() for i in items]}
+
+
 class S1SearchRequest(BaseModel):
     bbox: list[float] = Field(min_length=4, max_length=4)
     start: str
