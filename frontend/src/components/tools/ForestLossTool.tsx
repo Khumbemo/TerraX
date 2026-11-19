@@ -15,6 +15,7 @@ import JobStatus from '../JobStatus';
 import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
 import { EmissionSettings, EmissionsResult, NO_EMISSIONS, emissionRequest, type Emissions, type EmissionInputs } from './EmissionsPanel';
 import MapValidation, { type AccuracyResult } from './MapValidation';
+import MonitorPanel from './MonitorPanel';
 
 interface Props {
   onOutput: (out: ToolOutput | null) => void;
@@ -282,6 +283,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
         </div>
       </div>
       {mode !== 'burn' && <EmissionSettings value={emis} onChange={setEmis} onMapFile={loadBiomass} busy={busy === 'biomass'} />}
+      {mode !== 'burn' && <MonitorPanel boundary={boundary} />}
       <JobStatus job={job} onCancel={job.cancel} />
 
       {result && out && (

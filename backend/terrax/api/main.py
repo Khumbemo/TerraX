@@ -424,7 +424,7 @@ def include_routers() -> None:
     """Optional routers (agents, live data, maps) register here."""
     import importlib
 
-    for mod in ("agents", "live", "maps", "rasters", "landcover", "accounts", "admin"):
+    for mod in ("agents", "live", "maps", "rasters", "landcover", "accounts", "admin", "monitors"):
         try:
             m = importlib.import_module(f"{__package__}.{mod}")
         except ModuleNotFoundError as err:
