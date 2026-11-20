@@ -14,6 +14,7 @@ def build() -> Path:
         for f in sorted(SRC.rglob("*")):
             if f.is_file() and "__pycache__" not in f.parts:
                 z.write(f, f.relative_to(HERE).as_posix())
+        z.write(HERE.parent / "LICENSE", "terrax_processing/LICENSE")  # the QGIS plugin repository asks for one in the package
     return out
 
 
