@@ -118,7 +118,8 @@ export default function StackPanel({ onOutput, boundary }: Props) {
         <button
           type="button"
           className="btn btn-small"
-          disabled={busy}
+          disabled={busy || (mapBreaks && model === 'seasonal')}
+          title={mapBreaks && model === 'seasonal' ? 'The seasonal model needs at least 11 dates over more than a year; the sample has 6. Use the one-drop model, or upload your own series.' : undefined}
           onClick={() => add(SERIES_SAMPLES)}
         >
           Try synthetic 6-date series
