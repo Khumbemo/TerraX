@@ -27,7 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 && rm
 WORKDIR /app
 COPY backend/pyproject.toml ./
 COPY backend/terrax ./terrax
-RUN pip install '.[postgres,sentry,s3]'
+# The base image's pip can lag behind security fixes; it stays in the image, so update it first.
+RUN pip install --no-cache-dir --upgrade pip && pip install '.[postgres,sentry,s3]'
 COPY backend/data ./data
 COPY --from=web /web/dist ./web
 
