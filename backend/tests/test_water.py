@@ -39,7 +39,7 @@ def test_otsu_only_when_the_histogram_splits():
     assert thr == 0 and "not clearly bimodal" in note
 
 
-def test_optical_flood_from_two_dates_with_a_cloud_mask(client, tmp_path):
+def test_optical_flood_from_two_dates_with_a_cloud_mask(client, tmp_path, monkeypatch):
     """Landsat-like 7-band files at 30 m (QA_PIXEL in band 7). A river in columns 40–49 widens to 30–59; rows 0–9 are
     cloudy on the second date. MNDWI over water ≈ 0.71, over land ≈ −0.43."""
     def scene(water_cols, cloud_rows=None):
@@ -70,6 +70,13 @@ def test_optical_flood_from_two_dates_with_a_cloud_mask(client, tmp_path):
     poly = next(d for d in res["downloads"] if d["filename"].endswith("_new_water.geojson"))
     assert poly["features"] == 2  # the two banks of the flood
     assert "New water (flood)" in res["markdown"] and "Xu 2006" in res["markdown"]
+    # Read on a coarser grid (2 × 2 original pixels a cell), the report says so; the river's edges fall on cell edges, so
+    # the areas are unchanged.
+    monkeypatch.setenv("TERRAX_GRID_PIXELS", "2500")
+    coarse = run(client, "water", {"a": a, "b": b}, params)["result"]
+    monkeypatch.delenv("TERRAX_GRID_PIXELS")
+    assert any("resampled grid (each cell = 4 original pixels" in n for n in coarse["notes"]) and not any("resampled" in n for n in r["notes"])
+    assert {c["label"]: c["ha"] for c in coarse["summary"]["classes"]} == pytest.approx({c["label"]: c["ha"] for c in r["summary"]["classes"]})
     # One date: water only; NDWI when no SWIR band is named.
     one = run(client, "water", {"a": a}, {"mode": "optical", "bands": {"green": 1, "nir": 3}})["result"]
     assert one["index"] == "NDWI" and next(c for c in one["summary"]["classes"] if c["label"] == "Water")["ha"] == pytest.approx(90, rel=1e-6)
