@@ -352,3 +352,7 @@ On any machine or VM, `docker compose up --build` runs the web app (nginx), the 
 - **Classes.** Class thresholds are indicative and vary with sensor, season and region.
 - **Sun.** Solar geometry uses the NOAA Solar Calculator equations (equation of time, declination). Sun position and rise/set times use the formulas of aa.quae.nl (the same as SunCalc).
 - **Residential plot.** The screening is not proof of ownership or encroachment. Use a licensed surveyor for disputes.
+
+## Licence
+
+TerraX is released under the [MIT License](LICENSE). The built-in maps keep their own licences (see [Maps](#maps)), and the bundled Kohima CSV series have no documented source.

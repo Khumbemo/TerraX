@@ -2,6 +2,7 @@
 name = "terrax"
 version = "2.0.0"
 description = "TerraX earth-observation workbench: FastAPI API, Celery workers and Python processing."
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
@@ -44,7 +45,7 @@ sentry = ["sentry-sdk>=2.0"]
 terrax = "terrax.cli:main"
 
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]  # 77: the licence as an SPDX expression (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
