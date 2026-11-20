@@ -117,6 +117,9 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
                      "radar shadow, smooth tarmac and dry sand can look like water. Compare dates from the same orbit.")
     if geo:
         notes.append(geo.note)
+    if a.resample_factor > 1:
+        notes.append(f"Analysed on a resampled grid (each cell = {wp.fmt(a.resample_factor, 3)} original pixels; TERRAX_GRID_PIXELS sets the limit), so narrow "
+                     "channels and small ponds can be missed; areas use the true size of the resampled cells.")
     unobserved = int((cls == 0).sum() - (~inside).sum())
     if unobserved > 0:
         notes.append(f"{unobserved:,} pixels inside the area had no valid observation (cloud or no data) on {'a' if two else 'the'} date and are left out.")
