@@ -1,11 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { DEFAULT_MODEL } from '../lib/ai';
-import { getAiMode, getModel, getOwnKey, refreshAiStatus, setModel, setOwnKey, type AiMode } from '../lib/ai';
 import { useToast } from '../lib/toast';
 import { idbSet } from '../lib/idb';
 import { usePrefs, type Background, type PanelStyle, type Theme } from '../lib/prefs';
 import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
+import AiKeysSection from './AiKeysSection';
 import GEEGuidance from './GEEGuidance';
 import MapSettingsTab from './MapSettingsTab';
 
@@ -34,63 +33,19 @@ const TABS: [Tab, string][] = [
   ['about', 'About'],
 ];
 
-const MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
-
-const AI_MODE_TEXT: Record<AiMode, string> = {
-  'own-key': 'On — using your API key from this browser',
-  server: 'On — using the TerraX server',
-  off: 'Off — statistics only',
-};
-
 export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose, onStartTour }: Props) {
   const notify = useToast();
   const prefs = usePrefs();
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [mode, setMode] = useState<AiMode | null>(null);
-  const [keyInput, setKeyInput] = useState('');
-  const [hasKey, setHasKey] = useState(Boolean(getOwnKey()));
-  const [model, setModelInput] = useState(getModel());
   const [lat, setLat] = useState(String(target.lat));
   const [lon, setLon] = useState(String(target.lon));
   const [placeName, setPlaceName] = useState(target.name);
-
-  useEffect(() => {
-    getAiMode().then(setMode);
-  }, [hasKey]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-
-  const saveKey = (e: FormEvent) => {
-    e.preventDefault();
-    if (!keyInput.trim()) {
-      notify('Paste an API key first.', 'error');
-      return;
-    }
-    setOwnKey(keyInput);
-    setKeyInput('');
-    setHasKey(true);
-    refreshAiStatus();
-    onAiChange();
-    notify('API key saved in this browser.', 'success');
-  };
-
-  const removeKey = () => {
-    setOwnKey('');
-    setHasKey(false);
-    refreshAiStatus();
-    onAiChange();
-    notify('API key removed from this browser.');
-  };
-
-  const saveModel = () => {
-    setModel(model);
-    onAiChange();
-    notify(`Model set to ${model || DEFAULT_MODEL}.`, 'success');
-  };
 
   const saveTarget = (e: FormEvent) => {
     e.preventDefault();
@@ -204,51 +159,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                   <p className="field-hint">{prefs.t('prefs.unitsNote')}</p>
                   <p className="field-hint">{prefs.t('prefs.bgNote')}</p>
                 </section>
-                <section>
-                  <h3>AI interpretation (Gemini)</h3>
-                  <p className="status-line">
-                    Status: <strong>{mode ? AI_MODE_TEXT[mode] : 'Checking…'}</strong>
-                  </p>
-                  <form onSubmit={saveKey} className="field-row">
-                    <label htmlFor="api-key" className="visually-hidden">
-                      Gemini API key
-                    </label>
-                    <input
-                      id="api-key"
-                      type="password"
-                      autoComplete="off"
-                      value={keyInput}
-                      onChange={e => setKeyInput(e.target.value)}
-                      placeholder={hasKey ? 'A key is saved — paste a new one to replace it' : 'Paste your Gemini API key'}
-                    />
-                    <button type="submit" className="btn btn-primary">
-                      Save key
-                    </button>
-                    {hasKey && (
-                      <button type="button" className="btn" onClick={removeKey}>
-                        Remove
-                      </button>
-                    )}
-                  </form>
-                  <p className="field-hint">
-                    Your key is stored in this browser's local storage and sent with each AI request to the TerraX server, which passes it to Google and does not store it.
-                    Anyone with access to this browser profile can read it. To keep keys off user devices, set <code>GEMINI_API_KEY</code> on the server instead.
-                  </p>
-                  <div className="field-row">
-                    <label htmlFor="model" className="field-label">
-                      Model
-                    </label>
-                    <input id="model" list="model-options" value={model} onChange={e => setModelInput(e.target.value)} />
-                    <datalist id="model-options">
-                      {MODELS.map(m => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
-                    <button type="button" className="btn" onClick={saveModel}>
-                      Use model
-                    </button>
-                  </div>
-                </section>
+                <AiKeysSection onAiChange={onAiChange} />
 
                 <section>
                   <h3>Telemetry target</h3>
@@ -283,7 +194,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                   TerraX is a set of tools: Forest loss, Carbon &amp; biomass, Land survey, Residential plot, Weather &amp; climate, Satellite imagery, Land cover, Terrain,
                   and Space &amp; aerial photos. Files you add are uploaded to the TerraX server, which runs each analysis in Python (rasterio, GeoPandas, scikit-learn,
                   SciPy) as a background job. Only you (and the server's administrators) can see your uploads and results; a guest's are kept for 72 hours by default, an account's for 30 days. When AI is on and you ask for an interpretation or use an
-                  assistant, the server sends the computed results (and for tables a sample of up to 150 rows) to Google's Gemini API.
+                  assistant, the server sends the computed results (and for tables a sample of up to 150 rows) to the AI provider of the key in use.
                 </p>
                 <h4>Forest loss</h4>
                 <p>
@@ -341,7 +252,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                   <li>Planetary K-index: NOAA Space Weather Prediction Center.</li>
                   <li>Sun position and rise/set times: the formulas of aa.quae.nl (as in SunCalc); equation of time and declination: NOAA Solar Calculator equations (Meeus).</li>
                   <li>Live data (fetched by the server): Open-Meteo (ERA5), NASA POWER and Earth Search (Sentinel-2 L2A).</li>
-                  <li>AI: Google Gemini API (optional).</li>
+                  <li>AI: any provider's API (optional) — Gemini, Claude, OpenAI, Groq, Mistral and others, or a local model.</li>
                 </ul>
                 <h4>Sample data</h4>
                 <p>

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from .. import __version__, auth, db, objectstore, ratelimit, storage
+from ..agents.llm import server_configured
 from ..auth import Principal, principal
 from ..config import settings
 from ..monitoring import configure_logging, init_sentry, metrics, new_request_id, record_exception, render_metrics, request_id
@@ -155,7 +156,7 @@ def health() -> dict[str, Any]:
             redis_ok = False
     from ..tools import load_all
 
-    return {"ok": True, "version": __version__, "eager": s.eager, "jobs": job_mode(), "redis": redis_ok, "tools": sorted(load_all()), "ai": bool(s.gemini_api_key),
+    return {"ok": True, "version": __version__, "eager": s.eager, "jobs": job_mode(), "redis": redis_ok, "tools": sorted(load_all()), "ai": server_configured(),
             "auth": s.auth_mode, "signup": s.signup, "objectStore": bool(s.s3_bucket)}
 
 

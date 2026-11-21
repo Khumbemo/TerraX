@@ -15,7 +15,8 @@ def _env():
     os.environ["TERRAX_STORAGE"] = tmp
     os.environ["TERRAX_EAGER"] = "true"
     os.environ["TERRAX_RATE_LIMITS"] = "false"  # tests run many jobs a minute; test_accounts checks the limits on their own
-    os.environ.setdefault("GEMINI_API_KEY", "")
+    for name in ("GEMINI_API_KEY", "GEMINI_MODEL", "TERRAX_AI_KEY", "TERRAX_AI_PROVIDER", "TERRAX_AI_MODEL", "TERRAX_AI_BASE_URL", "TERRAX_AI_ALLOW_PRIVATE", "TERRAX_AI_PER_KEY_PER_MINUTE", "TERRAX_AI_SERVER_PER_MINUTE"):
+        os.environ.pop(name, None)  # a developer's own AI settings must not change the tests
     yield
     shutil.rmtree(tmp, ignore_errors=True)
 

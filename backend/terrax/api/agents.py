@@ -1,51 +1,85 @@
-"""Assistant endpoints: the built-in assistant and the Gemini agents.
+"""Assistant endpoints: the built-in assistant and AI from any provider's key (agents/llm.py).
 
-``POST /api/agents/chat`` answers with Gemini when a key is available (the
-server's GEMINI_API_KEY, or the user's own key in the ``X-Gemini-Key``
-header) and falls back to the built-in assistant otherwise, or when Gemini
-fails. The server keeps no chat history: the client sends recent turns and
-the assistant's small state object back with each question.
+Keys come from the user's browser in ``X-AI-Credentials`` (up to three, in order; ``X-Gemini-Key`` from older
+clients is still read) and from the server (TERRAX_AI_KEY, or GEMINI_API_KEY). ``POST /api/agents/chat`` asks them in
+that order, skipping a key that is over its limit or fails, and falls back to the built-in assistant, so a question
+is always answered. Each key has its own limit per minute (TERRAX_AI_PER_KEY_PER_MINUTE), on top of 20 a minute per
+client, and a key the provider has rate-limited rests for the provider's Retry-After. ``POST /api/agents/detect``
+recognises a key's provider and lists its models. The server keeps no chat history and never stores keys.
 """
 
 from __future__ import annotations
 
-import time
-from collections import defaultdict, deque
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import auth
-from ..agents import assistant, gemini
+from .. import auth, ratelimit
+from ..agents import assistant, gemini, llm
 from ..agents.prompts import DATA_SYSTEM_PROMPT, GUIDE_SYSTEM_PROMPT, REPORT_PROMPT
 from ..auth import Principal
 from ..config import settings
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
-RATE_LIMIT = 20  # Gemini requests per minute per client
-_hits: dict[str, deque[float]] = defaultdict(deque)
+
+def _client_ip(request: Request) -> str:
+    return auth.client_ip(request)
 
 
-def _rate_limited(client: str) -> bool:
-    now = time.monotonic()
-    q = _hits[client]
-    while q and now - q[0] > 60:
-        q.popleft()
-    q.append(now)
-    return len(q) > RATE_LIMIT
+def _chain(x_ai_credentials: str | None, x_gemini_key: str | None, model: str | None) -> tuple[list[llm.Credential], str]:
+    """The keys to try, in order: the browser's, then the server's (unless it is the same key). A browser key that
+    cannot be read is left out, and the second value says why, so the server's key or the built-in assistant still answer."""
+    problem = ""
+    creds: list[llm.Credential] = []
+    try:
+        creds = llm.parse_credentials(x_ai_credentials)
+        if not creds and (x_gemini_key or "").strip():  # clients from before any-provider keys
+            creds = [llm.make_credential(x_gemini_key, "gemini", gemini.pick_model(model, settings().gemini_model))]
+    except llm.LLMError as err:
+        problem = f"Your AI key could not be used: {err}"
+    server = llm.server_credential()
+    if server and all(c.fingerprint != server.fingerprint for c in creds):
+        if server.provider == "gemini" and model and not x_ai_credentials:  # older clients chose the server's Gemini model
+            server = replace(server, model=gemini.pick_model(model, server.model))
+        creds.append(server)
+    return creds, problem
 
 
-def _key(header_key: str | None) -> str:
-    return (header_key or "").strip() or settings().gemini_api_key
+def _per_key(cred: llm.Credential) -> tuple[bool, int]:
+    """Each key's own budget. The server's key is shared by every user, so it has its own setting (no cap by default)."""
+    if cred.source == "server":
+        return ratelimit.allow("ai_server", cred.fingerprint) if settings().ai_server_per_minute else (True, 0)
+    return ratelimit.allow("ai_key", cred.fingerprint)
 
 
 @router.get("/status")
 def status() -> dict[str, Any]:
-    s = settings()
-    return {"configured": bool(s.gemini_api_key), "defaultModel": s.gemini_model}
+    return llm.server_status()
+
+
+class DetectRequest(BaseModel):
+    provider: str = Field("auto", max_length=40)
+    baseUrl: str | None = Field(None, max_length=300)
+    model: str | None = Field(None, max_length=128)
+
+
+_DETECT_STATUS = {"bad": 400, "config": 400, "auth": 422, "model": 422, "rate": 429, "network": 502, "server": 502}
+
+
+@router.post("/detect")
+def detect(body: DetectRequest, request: Request, x_ai_key: str | None = Header(default=None)) -> dict[str, Any]:
+    """Recognises the key's provider (or checks the one chosen) by listing its models: free, no tokens spent."""
+    ok, retry = ratelimit.allow("ai_detect", _client_ip(request))
+    if not ok:
+        raise HTTPException(429, f"Too many key checks. Try again in {retry} s.", headers={"Retry-After": str(retry)})
+    try:
+        return llm.detect(x_ai_key, body.provider, body.baseUrl, body.model).public()
+    except llm.LLMError as err:
+        raise HTTPException(_DETECT_STATUS.get(err.kind, 502), str(err)) from err
 
 
 class Target(BaseModel):
@@ -107,12 +141,17 @@ def _offline(req: ChatRequest, note: str = "", p: Principal | None = None) -> di
 
 
 @router.post("/chat")
-def chat(req: ChatRequest, request: Request, x_gemini_key: str | None = Header(default=None)) -> dict[str, Any]:
-    key = _key(x_gemini_key)
-    if not req.useAi or not key:
-        return _offline(req, p=request.state.principal)
-    if _rate_limited(request.client.host if request.client else "unknown"):
-        return _offline(req, "_Too many AI requests in the last minute, so this is the built-in answer._\n\n", p=request.state.principal)
+def chat(req: ChatRequest, request: Request, x_ai_credentials: str | None = Header(default=None),
+         x_gemini_key: str | None = Header(default=None)) -> dict[str, Any]:
+    p = request.state.principal
+    if not req.useAi:
+        return _offline(req, p=p)
+    chain, problem = _chain(x_ai_credentials, x_gemini_key, req.model)
+    if not chain:
+        return _offline(req, f"_{problem} This is the built-in answer._\n\n" if problem else "", p=p)
+    ok, _ = ratelimit.allow("ai", _client_ip(request))
+    if not ok:
+        return _offline(req, "_Too many AI requests in the last minute, so this is the built-in answer._\n\n", p=p)
     if req.agent == "results":
         r = req.results
         context = f"Tool: {r.toolName}\n\n{r.extraContext or r.markdown}" if r else "No results yet."
@@ -123,11 +162,16 @@ def chat(req: ChatRequest, request: Request, x_gemini_key: str | None = Header(d
         turns = gemini.sanitize_turns([*req.history[-8:], {"role": "user", "text": req.question}], system)
     except gemini.RequestValidationError as err:
         raise HTTPException(400, str(err)) from err
+    ask = gemini.GenerateRequest(turns=turns, system_instruction=system, use_search=True, model="", temperature=0.4)
     try:
-        res = gemini.generate(key, gemini.GenerateRequest(turns=turns, system_instruction=system, use_search=True, model=gemini.pick_model(req.model, settings().gemini_model), temperature=0.4))
-    except gemini.GeminiError as err:
-        return _offline(req, f"_The AI request failed ({err}), so this is the built-in answer._\n\n", p=request.state.principal)
-    return {"text": res.text or "No answer was returned.", "sources": res.sources, "suggestions": [], "state": req.state, "engine": "gemini", "model": res.model}
+        res, cred, notes = llm.ask(chain, ask, _per_key)
+    except llm.LLMError as err:
+        first = f"{problem} " if problem else ""
+        return _offline(req, f"_{first}The AI request failed ({err}), so this is the built-in answer._\n\n", p=p)
+    skipped = ([problem] if problem else []) + notes
+    note = f"_{skipped[0]} Answered with {cred.spec.name}._\n\n" if skipped else ""
+    return {"text": note + (res.text or "No answer was returned."), "sources": res.sources, "suggestions": [], "state": req.state,
+            "engine": cred.provider, "providerName": cred.spec.name, "model": res.model}
 
 
 class InterpretRequest(BaseModel):
@@ -138,19 +182,28 @@ class InterpretRequest(BaseModel):
 
 
 @router.post("/interpret")
-def interpret(req: InterpretRequest, request: Request, x_gemini_key: str | None = Header(default=None)) -> dict[str, Any]:
-    key = _key(x_gemini_key)
-    if not key:
-        raise HTTPException(503, "AI is not set up. Add your Gemini API key in Settings, or set GEMINI_API_KEY on the TerraX server.")
-    if _rate_limited(request.client.host if request.client else "unknown"):
-        raise HTTPException(429, "Too many AI requests. Wait a minute and try again.")
+def interpret(req: InterpretRequest, request: Request, x_ai_credentials: str | None = Header(default=None),
+              x_gemini_key: str | None = Header(default=None)) -> dict[str, Any]:
+    chain, problem = _chain(x_ai_credentials, x_gemini_key, req.model)
+    if problem and not chain:
+        raise HTTPException(400, problem)
+    if not chain:
+        raise HTTPException(503, "AI is not set up. Add an API key from any AI provider in Settings, or set TERRAX_AI_KEY on the TerraX server.")
+    ok, retry = ratelimit.allow("ai", _client_ip(request))
+    if not ok:
+        raise HTTPException(429, f"Too many AI requests. Try again in {retry} s.", headers={"Retry-After": str(retry)})
     text = f"{REPORT_PROMPT}\n\nTool: {req.toolName}\n\n{req.extraContext or req.markdown}"
     try:
-        res = gemini.generate(key, gemini.GenerateRequest(turns=gemini.sanitize_turns([{"role": "user", "text": text}]), model=gemini.pick_model(req.model, settings().gemini_model), temperature=0.3))
+        turns = gemini.sanitize_turns([{"role": "user", "text": text}])
     except gemini.RequestValidationError as err:
         raise HTTPException(400, str(err)) from err
-    except gemini.GeminiError as err:
+    try:
+        res, cred, _ = llm.ask(chain, gemini.GenerateRequest(turns=turns, model="", temperature=0.3), _per_key)
+    except llm.LLMError as err:
+        if err.kind == "rate":
+            wait = str(int(err.retry_after or 60))
+            raise HTTPException(429, str(err), headers={"Retry-After": wait}) from err
         raise HTTPException(502, str(err)) from err
     if not res.text.strip():
-        raise HTTPException(502, "Gemini returned an empty answer. Try again.")
-    return res.public()
+        raise HTTPException(502, f"{cred.spec.name} returned an empty answer. Try again.")
+    return {**res.public(), "provider": cred.provider, "providerName": cred.spec.name}

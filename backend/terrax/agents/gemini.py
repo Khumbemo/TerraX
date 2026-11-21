@@ -15,7 +15,9 @@ from urllib.parse import urlparse
 DEFAULT_MODEL = "gemini-2.5-flash"
 MAX_TURNS = 30
 MAX_CHARS = 150_000
-MODEL_PATTERN = re.compile(r"^gemini-[a-z0-9.\-]+$", re.I)
+# Any model the Gemini API serves (gemini-…, gemma-…, learnlm-…): the name goes into the request path, so letters,
+# digits, dots and hyphens only.
+MODEL_PATTERN = re.compile(r"^[a-z][a-z0-9.\-]{0,99}$", re.I)
 
 
 class RequestValidationError(ValueError):
@@ -42,6 +44,8 @@ class GenerateResult:
 
 
 def pick_model(value: Any, default: str = DEFAULT_MODEL) -> str:
+    if isinstance(value, str) and value.startswith("models/"):
+        value = value[len("models/"):]
     return value if isinstance(value, str) and MODEL_PATTERN.match(value) else default
 
 
@@ -60,6 +64,18 @@ def sanitize_turns(turns: Any, system_instruction: str | None = None) -> list[di
     if total > MAX_CHARS:
         raise RequestValidationError(f"Request is too large ({total} characters, limit {MAX_CHARS}).")
     return out
+
+
+def classify(err: BaseException | str) -> str:
+    """auth, rate, model or other: what kind of failure an SDK/API error is."""
+    raw = str(err)
+    if re.search(r"429|RESOURCE_EXHAUSTED|quota", raw, re.I):
+        return "rate"
+    if re.search(r"API key not valid|API_KEY_INVALID|401|403|PERMISSION_DENIED", raw, re.I):
+        return "auth"
+    if re.search(r"404|NOT_FOUND|is not found", raw, re.I):
+        return "model"
+    return "other"
 
 
 def describe_error(err: BaseException | str) -> str:
@@ -81,7 +97,9 @@ def describe_error(err: BaseException | str) -> str:
 
 
 class GeminiError(RuntimeError):
-    pass
+    def __init__(self, message: str, kind: str = "other"):
+        super().__init__(message)
+        self.kind = kind
 
 
 def generate(api_key: str, req: GenerateRequest) -> GenerateResult:
@@ -98,7 +116,7 @@ def generate(api_key: str, req: GenerateRequest) -> GenerateResult:
     try:
         response = client.models.generate_content(model=req.model, contents=contents, config=config)
     except Exception as err:  # every SDK failure becomes a readable message
-        raise GeminiError(describe_error(err)) from err
+        raise GeminiError(describe_error(err), classify(err)) from err
 
     sources: list[dict[str, str]] = []
     seen: set[str] = set()

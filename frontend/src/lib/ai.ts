@@ -1,15 +1,16 @@
-// AI through the TerraX server (Python agents, google-genai):
-//  1. "own-key": the user saved their own Gemini key in Settings (kept in this
-//     browser); it is sent with each AI request and the server passes it to
-//     Google without storing it.
-//  2. "server": the TerraX server has GEMINI_API_KEY set.
+// AI through the TerraX server (backend: terrax/agents/llm.py), with a key from any provider:
+//  1. "own-key": the user added up to three keys in Settings (kept in this browser). The server recognises each key's
+//     provider (Gemini, Claude, OpenAI, Groq, …, a local Ollama or any OpenAI-compatible server) and lists its models.
+//     The keys go with each AI request, in order, and the server passes them on without storing them.
+//  2. "server": the TerraX server has its own key (TERRAX_AI_KEY or GEMINI_API_KEY).
 //  3. "off": neither; the built-in assistant (no AI model) answers.
+// A request tries the user's keys in order, then the server's, then the built-in assistant; each key has its own limit.
 import { request } from './api';
 import { getItem, removeItem, setItem } from './storage';
 
 export type AiMode = 'own-key' | 'server' | 'off';
 
-export const DEFAULT_MODEL = 'gemini-2.5-flash';
+export const MAX_KEYS = 3;
 
 export interface ChatTurn {
   role: 'user' | 'model';
@@ -21,44 +22,128 @@ export interface Source {
   uri: string;
 }
 
-export function getOwnKey(): string {
-  return getItem('api_key') ?? '';
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  needsKey: boolean;
+  userUrl: boolean;
+  search: boolean;
+  baseUrl: string;
 }
 
-export function setOwnKey(key: string): void {
-  if (key.trim()) setItem('api_key', key.trim());
-  else removeItem('api_key');
+export interface AiStatus {
+  configured: boolean;
+  provider: string | null;
+  providerName: string | null;
+  defaultModel: string;
+  allowPrivate: boolean;
+  providers: ProviderInfo[];
 }
 
-export function getModel(): string {
-  return getItem('model') || DEFAULT_MODEL;
+/** A key saved in this browser, with what the server found out about it. */
+export interface AiKey {
+  key: string;
+  provider: string;
+  providerName: string;
+  model: string;
+  models: string[];
+  baseUrl?: string;
 }
 
-export function setModel(model: string): void {
-  if (model.trim()) setItem('model', model.trim());
-  else removeItem('model');
+const STORE = 'ai_keys';
+
+function readKeys(): AiKey[] {
+  try {
+    const raw = getItem(STORE);
+    if (raw) {
+      const list = JSON.parse(raw) as AiKey[];
+      if (Array.isArray(list)) return list.filter(k => k && typeof k.provider === 'string').slice(0, MAX_KEYS);
+    }
+  } catch {
+    // unreadable: start again below
+  }
+  // A Gemini key saved by an earlier version of TerraX.
+  const legacy = getItem('api_key');
+  if (legacy) {
+    const migrated: AiKey[] = [{ key: legacy, provider: 'gemini', providerName: 'Google Gemini', model: getItem('model') || 'gemini-2.5-flash', models: [] }];
+    writeKeys(migrated);
+    removeItem('api_key');
+    removeItem('model');
+    return migrated;
+  }
+  return [];
 }
 
-let serverStatus: Promise<boolean> | null = null;
+function writeKeys(keys: AiKey[]): void {
+  if (keys.length) setItem(STORE, JSON.stringify(keys.slice(0, MAX_KEYS)));
+  else removeItem(STORE);
+}
 
-async function serverConfigured(): Promise<boolean> {
-  serverStatus ??= request<{ configured: boolean }>('/api/agents/status')
-    .then(j => j.configured === true)
-    .catch(() => false);
-  return serverStatus;
+export function getKeys(): AiKey[] {
+  return readKeys();
+}
+
+export function saveKeys(keys: AiKey[]): void {
+  writeKeys(keys);
+  refreshAiStatus();
+}
+
+/** Masks a key for display: its first six characters (the provider prefix) and last four, if it is long enough
+ *  that this shows well under half of it; real keys are 30 or more characters. */
+export function maskKey(key: string): string {
+  if (!key) return 'no key';
+  return key.length < 24 ? `••••${key.slice(-2)}` : `${key.slice(0, 6)}…${key.slice(-4)}`;
+}
+
+let statusPromise: Promise<AiStatus | null> | null = null;
+
+export function getAiStatus(): Promise<AiStatus | null> {
+  statusPromise ??= request<AiStatus>('/api/agents/status').catch(() => null);
+  return statusPromise;
 }
 
 export async function getAiMode(): Promise<AiMode> {
-  if (getOwnKey()) return 'own-key';
-  return (await serverConfigured()) ? 'server' : 'off';
+  if (readKeys().length) return 'own-key';
+  return (await getAiStatus())?.configured ? 'server' : 'off';
 }
 
 /** Forget the cached server status (e.g. after the user changes settings). */
 export function refreshAiStatus(): void {
-  serverStatus = null;
+  statusPromise = null;
 }
 
-const keyHeader = (): Record<string, string> => (getOwnKey() ? { 'X-Gemini-Key': getOwnKey() } : {});
+export interface Detected {
+  provider: string;
+  name: string;
+  kind: string;
+  search: boolean;
+  models: string[];
+  model: string;
+  baseUrl: string;
+}
+
+/** Asks the server which provider a key belongs to (or checks the chosen one) and which models it can use. */
+export function detectKey(key: string, provider = 'auto', baseUrl = '', model = ''): Promise<Detected> {
+  return request<Detected>('/api/agents/detect', {
+    method: 'POST',
+    headers: key.trim() ? { 'X-AI-Key': key.trim() } : {},
+    json: { provider, baseUrl: baseUrl.trim() || null, model: model.trim() || null },
+  });
+}
+
+function base64url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  bytes.forEach(b => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function keyHeaders(): Record<string, string> {
+  const keys = readKeys();
+  if (!keys.length) return {};
+  const list = keys.map(k => ({ key: k.key, provider: k.provider, model: k.model, ...(k.baseUrl ? { baseUrl: k.baseUrl } : {}) }));
+  return { 'X-AI-Credentials': base64url(JSON.stringify(list)) };
+}
 
 export interface ChatRequest {
   agent: 'guide' | 'results';
@@ -76,20 +161,22 @@ export interface ChatResponse {
   sources: Source[];
   suggestions: string[];
   state: Record<string, unknown>;
-  engine: 'gemini' | 'built-in';
+  /** The provider that answered (gemini, anthropic, groq, …) or built-in. */
+  engine: string;
+  providerName?: string;
   model?: string;
 }
 
-/** One assistant turn: Gemini when available, otherwise (or when it fails) the built-in assistant. */
+/** One assistant turn: the first key that answers, otherwise the built-in assistant. */
 export function chat(req: ChatRequest): Promise<ChatResponse> {
   return request<ChatResponse>('/api/agents/chat', {
     method: 'POST',
-    headers: keyHeader(),
-    json: { ...req, history: req.history.slice(-8), tzOffsetMinutes: -new Date().getTimezoneOffset(), model: getModel() },
+    headers: keyHeaders(),
+    json: { ...req, history: req.history.slice(-8), tzOffsetMinutes: -new Date().getTimezoneOffset() },
   });
 }
 
 /** A short AI interpretation of a report. */
-export function interpret(toolName: string, markdown: string, extraContext?: string): Promise<{ text: string; model: string; sources: Source[] }> {
-  return request('/api/agents/interpret', { method: 'POST', headers: keyHeader(), json: { toolName, markdown, extraContext, model: getModel() } });
+export function interpret(toolName: string, markdown: string, extraContext?: string): Promise<{ text: string; model: string; providerName?: string; sources: Source[] }> {
+  return request('/api/agents/interpret', { method: 'POST', headers: keyHeaders(), json: { toolName, markdown, extraContext } });
 }

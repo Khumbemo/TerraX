@@ -1,4 +1,4 @@
-"""Instructions for the Gemini-backed agents (the built-in assistant lives in assistant.py)."""
+"""Instructions for the AI-backed agents, whatever the provider (the built-in assistant lives in assistant.py)."""
 
 APP_GUIDE = """TerraX is an Earth-observation workbench organised as tools. Each tool takes GIS files, which are uploaded to the TerraX server; the server computes the results (Python: rasterio, GeoPandas, scikit-learn, SciPy) as background jobs and the app shows the report and map layers.
 Tools:
@@ -16,8 +16,8 @@ Tools:
 - Terrain: DEM GeoTIFF → slope and aspect (Horn 1981), slope classes, hillshade, relief and hypsometric integral; Priority-Flood depression filling, D8 flow (optionally D∞, Tarboton 1997, with the topographic wetness index ln(a/tan β)), contributing area, streams above an area threshold with Strahler order and drainage density; click-to-delineate watersheds (usable as the analysis boundary); contours; GeoJSON export of streams, watersheds and contours.
 - Space & aerial photos: JPG/PNG/WebP images → vegetation cover from Excess Green with an Otsu threshold, VARI and colour statistics (no georeferencing); EXIF camera, capture time and GPS position shown on the map; comparison of green cover with a second photo.
 Every tool has sample data (the forest, terrain, satellite, survey and photo samples are synthetic). Reports can be saved in the Reports view and downloaded as Markdown or PDF. The dataset assistant answers questions about the current results; OS Guide answers questions about TerraX.
-Settings: Gemini API key (stored in this browser and sent with each AI request through the TerraX server to Google) and model; target location for the telemetry panel (default Kohima, 25.674° N, 94.108° E). The Guide tab has an Earth Engine export manual.
-Privacy: uploads and results are visible only to the person who made them (and the server's administrators); a guest's are kept for 72 hours by default, an account's for 30 days, then deleted (job history and server-side projects stay for accounts). With TERRAX_AUTH=required the server needs a sign-in. Only when AI is used are the computed results (and for tables a sample of up to 150 rows) sent to Google's Gemini API."""
+Settings: up to three API keys from any AI provider (Gemini, Claude, OpenAI, DeepSeek, Groq, OpenRouter, xAI, Mistral, Together, a local Ollama or any OpenAI-compatible server; each stored in this browser and sent with each AI request through the TerraX server to its provider), each with its model; target location for the telemetry panel (default Kohima, 25.674° N, 94.108° E). The Guide tab has an Earth Engine export manual.
+Privacy: uploads and results are visible only to the person who made them (and the server's administrators); a guest's are kept for 72 hours by default, an account's for 30 days, then deleted (job history and server-side projects stay for accounts). With TERRAX_AUTH=required the server needs a sign-in. Only when AI is used are the computed results (and for tables a sample of up to 150 rows) sent to the AI provider of the key in use."""
 
 GUIDE_SYSTEM_PROMPT = f"""You are the TerraX OS Guide. Help users use the TerraX app and plan geospatial work.
 Use this description of the app as the source of truth about its features; do not invent features it does not have:

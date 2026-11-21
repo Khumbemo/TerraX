@@ -313,6 +313,7 @@ code {
 
 input[type='text'],
 input[type='password'],
+input[type='url'],
 input:not([type]),
 select {
   background: var(--bg);
@@ -1904,6 +1905,28 @@ select {
 }
 .field-row input {
   flex: 1 1 240px;
+}
+.ai-keys {
+  list-style: decimal;
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+.ai-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.ai-key-name {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ai-key-row select,
+.ai-key-row input {
+  max-width: 260px;
 }
 .field-label {
   font-family: var(--mono);

@@ -40,7 +40,10 @@ def _limits() -> dict[str, Limit]:
         "signup": Limit("signup", 5, 3600, "new accounts"),
         "mail": Limit("mail", 5, 3600, "e-mails"),  # reset and confirmation links: no mail bombing
         "live": Limit("live", 60, 60, "live-data requests"),  # outside services (Open-Meteo, NASA, STAC) have their own limits
-        "ai": Limit("ai", 20, 60, "assistant questions"),  # Gemini costs money per call
+        "ai": Limit("ai", 20, 60, "assistant questions"),  # AI providers charge per call
+        "ai_key": Limit("ai_key", s.ai_per_key_per_minute, 60, "AI requests with this key"),  # each key's own budget
+        "ai_server": Limit("ai_server", max(1, s.ai_server_per_minute), 60, "AI requests with the server's key"),
+        "ai_detect": Limit("ai_detect", 10, 60, "key checks"),  # the server must not become a key-guessing oracle
         "client_errors": Limit("client_errors", 30, 60, "error reports"),
         "interactive": Limit("interactive", 600, 60, "requests"),  # watershed clicks, pixel inspection, samples
     }
@@ -179,6 +182,20 @@ def check(name: str, *keys: str) -> None:
             metrics.count("rate_limited")
             period = "minute" if lim.seconds == 60 else "hour" if lim.seconds == 3600 else f"{lim.seconds // 60} minutes"
             raise HTTPException(429, f"Too many {lim.what}: at most {lim.count} per {period}. Try again in {retry} s.", headers={"Retry-After": str(retry)})
+
+
+def allow(name: str, key: str) -> tuple[bool, int]:
+    """Counts one request against limit `name` for `key`, without raising: (allowed, seconds until the window ends)."""
+    if not settings().rate_limits or not key:
+        return True, 0
+    lim = _limits()[name]
+    n, retry = _hit(f"{name}:{key}", lim.seconds)
+    if n > lim.count:
+        from .monitoring import metrics
+
+        metrics.count("rate_limited")
+        return False, retry
+    return True, 0
 
 
 def reset() -> None:

@@ -358,7 +358,7 @@ def reply(question: str, ctx: Context, mode: str = "guide", state: dict[str, Any
             _reply(
                 "I’m **TerraX’s built-in assistant**. I run on the TerraX server without any AI model: I recognise questions about the tools, "
                 "remote-sensing and GIS terms, area units, sun times and your current results. I’m not a general AI model; for open-ended "
-                "questions, turn on Gemini AI (a key in Settings, or GEMINI_API_KEY on the server).",
+                "questions, turn on AI (an API key from any AI provider in Settings, or TERRAX_AI_KEY on the server).",
                 ["What can you do?", "How do I set up AI?"],
             )
         )
@@ -384,7 +384,7 @@ def reply(question: str, ctx: Context, mode: str = "guide", state: dict[str, Any
         return done(
             _reply(
                 "Sorry about that. I’m a built-in assistant without an AI model, so I work best with specific questions, such as “how do I measure a plot?”, "
-                "“what is NDVI?” or “summarise the results”. For free-form conversation, turn on AI in Settings with a Gemini API key.",
+                "“what is NDVI?” or “summarise the results”. For free-form conversation, turn on AI in Settings with an API key from any AI provider.",
                 ["What can you do?", "How do I set up AI?"],
             )
         )
