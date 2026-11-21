@@ -51,7 +51,7 @@ _SYN_GROUPS = {
     "upload": "upload load import open add drop attach",
     "file": "file files format formats data dataset",
     "report": "report reports pdf markdown export download save",
-    "ai": "ai gemini key apikey llm chatgpt",
+    "ai": "ai gemini key apikey llm chatgpt openai claude anthropic groq mistral deepseek openrouter ollama",
     "trend": "trend trends increasing decreasing mann kendall sen slope_trend",
     "sunrise": "sunrise dawn",
     "sunset": "sunset dusk",

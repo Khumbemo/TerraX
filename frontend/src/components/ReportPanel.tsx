@@ -62,7 +62,7 @@ export default function ReportPanel({ output, aiMode, operator, onSave, onOpenSe
     setError(null);
     try {
       const result = await aiInterpret(toolInfo(output.tool).name, output.markdown, output.extraContext);
-      if (!result.text.trim()) throw new Error('Gemini returned an empty answer. Try again.');
+      if (!result.text.trim()) throw new Error(`${result.providerName ?? 'The AI'} returned an empty answer. Try again.`);
       setAi({ text: result.text, model: result.model });
       setSaved(false);
     } catch (err) {

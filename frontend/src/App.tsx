@@ -44,8 +44,8 @@ const AccountDialog = lazy(() => import('./components/AccountDialog'));
 import SpaceBackground from './components/SpaceBackground';
 
 const AI_MODE_TEXT: Record<AiMode, string> = {
-  'own-key': 'AI on: using your API key from this browser',
-  server: 'AI on: using the TerraX server',
+  'own-key': 'AI on: using your API key(s) from this browser',
+  server: 'AI on: using the TerraX server’s key',
   off: 'AI off: built-in assistant only',
 };
 
@@ -430,7 +430,7 @@ export default function App() {
             id="guide-chat"
             variant="guide"
             title="OS Guide"
-            greeting={`Hi${session.operator ? ` ${session.operator.split(/\s+/)[0]}` : ''}! I’m the TerraX assistant. Ask me about the tools, remote-sensing terms, area units or sun times${aiMode === 'off' ? '; for open-ended questions add a Gemini key in Settings' : ''}.`}
+            greeting={`Hi${session.operator ? ` ${session.operator.split(/\s+/)[0]}` : ''}! I’m the TerraX assistant. Ask me about the tools, remote-sensing terms, area units or sun times${aiMode === 'off' ? '; for open-ended questions add an API key from any AI provider in Settings' : ''}.`}
             placeholder="Ask about TerraX"
             onAsk={askGuide}
             starters={STARTER_SUGGESTIONS}

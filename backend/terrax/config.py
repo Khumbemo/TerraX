@@ -29,6 +29,22 @@ class Settings:
     static_dir: Path | None = field(default_factory=lambda: Path(p) if (p := os.environ.get("TERRAX_STATIC")) else None)
     gemini_api_key: str = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY", ""))
     gemini_model: str = field(default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+    #: The server's own AI key, for any provider (terrax/agents/llm.py); GEMINI_API_KEY is still read when this is unset.
+    ai_key: str = field(default_factory=lambda: os.environ.get("TERRAX_AI_KEY", "").strip())
+    #: Its provider (gemini, openai, anthropic, groq, …, ollama or custom); empty = recognised from the key.
+    ai_provider: str = field(default_factory=lambda: os.environ.get("TERRAX_AI_PROVIDER", "").strip().lower())
+    #: Its model; empty = the provider's default, chosen from the models the key can use.
+    ai_model: str = field(default_factory=lambda: os.environ.get("TERRAX_AI_MODEL", "").strip())
+    #: Base URL for an OpenAI-compatible server (provider custom or ollama).
+    ai_base_url: str = field(default_factory=lambda: os.environ.get("TERRAX_AI_BASE_URL", "").strip())
+    #: Let custom AI endpoints use private, local or link-local addresses (a local Ollama). Off by default: otherwise anyone
+    #: could make the server send requests into its own network (server-side request forgery).
+    ai_allow_private: bool = field(default_factory=lambda: _bool("TERRAX_AI_ALLOW_PRIVATE", False))
+    #: AI requests per minute for each key a user adds, on top of 20 per minute per client.
+    ai_per_key_per_minute: int = field(default_factory=lambda: max(1, int(os.environ.get("TERRAX_AI_PER_KEY_PER_MINUTE", "20"))))
+    #: AI requests per minute with the server's own key, across all users; 0 = no cap beyond 20 per minute per client
+    #: (the provider's own limit and its Retry-After still apply).
+    ai_server_per_minute: int = field(default_factory=lambda: max(0, int(os.environ.get("TERRAX_AI_SERVER_PER_MINUTE", "0"))))
     #: Comma-separated origins allowed to call the API from a browser.
     cors_origins: tuple[str, ...] = field(
         default_factory=lambda: tuple(o.strip() for o in os.environ.get("TERRAX_CORS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip())

@@ -153,7 +153,7 @@ def test_chat_api_gemini_failure_falls_back(client, monkeypatch):
         raise gemini.GeminiError("The Gemini API rejected the API key.")
 
     monkeypatch.setattr(gemini, "generate", boom)
-    j = client.post("/api/agents/chat", json={"question": "what is ndvi"}, headers={"X-Gemini-Key": "bad"}).json()
+    j = client.post("/api/agents/chat", json={"question": "what is ndvi"}, headers={"X-Gemini-Key": "AIzaRejectedKey0000"}).json()
     assert j["engine"] == "built-in" and "AI request failed" in j["text"] and "NDVI" in j["text"]
 
     seen = {}
@@ -163,6 +163,6 @@ def test_chat_api_gemini_failure_falls_back(client, monkeypatch):
         return gemini.GenerateResult(text="Gemini says hi", model=req.model, sources=[{"uri": "https://example.org", "title": "example.org"}])
 
     monkeypatch.setattr(gemini, "generate", ok)
-    j = client.post("/api/agents/chat", json={"question": "hello", "history": [{"role": "user", "text": "a"}, {"role": "model", "text": "b"}]}, headers={"X-Gemini-Key": "k"}).json()
-    assert j["engine"] == "gemini" and j["text"] == "Gemini says hi" and seen["key"] == "k"
+    j = client.post("/api/agents/chat", json={"question": "hello", "history": [{"role": "user", "text": "a"}, {"role": "model", "text": "b"}]}, headers={"X-Gemini-Key": "AIzaGoodKey00000"}).json()
+    assert j["engine"] == "gemini" and j["text"] == "Gemini says hi" and seen["key"] == "AIzaGoodKey00000"
     assert "TerraX OS Guide" in seen["system"] and len(seen["turns"]) == 3

@@ -1,6 +1,6 @@
 # TerraX
 
-TerraX is an Earth-observation workbench for forest, land, climate and imagery analysis. You upload GeoTIFF rasters, vector boundaries, time-series tables or photos. A Python server runs the analysis with stated scientific methods and returns a report, charts and map layers. An optional Gemini interpretation can be added.
+TerraX is an Earth-observation workbench for forest, land, climate and imagery analysis. You upload GeoTIFF rasters, vector boundaries, time-series tables or photos. A Python server runs the analysis with stated scientific methods and returns a report, charts and map layers. An optional AI interpretation can be added, with an API key from any AI provider.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ TerraX is an Earth-observation workbench for forest, land, climate and imagery a
 | API | **FastAPI** (uploads, jobs, results, built-in map tiles, assistants, live data) | `backend/terrax/api/` |
 | Jobs | **Celery** workers with **Redis** as broker; Celery beat deletes old files | `backend/terrax/tasks.py` |
 | Processing | Python: **rasterio**, **GeoPandas**, **scikit-learn**, SciPy, pyproj, Shapely, NumPy, numba, Pillow | `backend/terrax/processing/` |
-| Agents | Built-in assistant (no AI model) and Gemini agents (google-genai) | `backend/terrax/agents/` |
+| Agents | Built-in assistant (no AI model) and AI agents for any provider's key (Gemini via google-genai; Claude; OpenAI-compatible APIs) | `backend/terrax/agents/` |
 | Accounts and data | **SQLAlchemy**: SQLite by default, **PostgreSQL** with `DATABASE_URL` (users, sessions, upload and job index, history, projects, recorded errors) | `backend/terrax/db.py`, `auth.py` |
 | Monitoring | Request IDs, JSON logs, Prometheus metrics, error records and optional Sentry | `backend/terrax/monitoring.py` |
 
@@ -58,7 +58,7 @@ To rebuild the map files, run `python backend/scripts/make_world_maps.py <source
 ## Run with Docker (recommended)
 
 ```bash
-cp .env.example .env        # optional: GEMINI_API_KEY, retention, upload limit
+cp .env.example .env        # optional: TERRAX_AI_KEY, retention, upload limit
 docker compose up --build
 # open http://localhost:8080
 ```
@@ -105,7 +105,7 @@ Settings are environment variables (see `backend/.env.example`):
 - `TERRAX_STATIC`: folder with the built web app, so the API serves it itself
 - `TERRAX_MAX_PIXELS`, `TERRAX_DEM_PIXELS`, `TERRAX_TILE_THREADS`, `TERRAX_GRID_PIXELS` and `TERRAX_TILES_MIN_SIDE`: resolution, parallelism and map tiles for large rasters (see **Large rasters**)
 - `TERRAX_WORKER_CONCURRENCY`, `TERRAX_JOB_MINUTES` and `TERRAX_WORKER_MAX_MEMORY_MB`: Celery workers
-- `GEMINI_API_KEY` and `GEMINI_MODEL`
+- `TERRAX_AI_KEY`, `TERRAX_AI_PROVIDER`, `TERRAX_AI_MODEL`, `TERRAX_AI_BASE_URL`, `TERRAX_AI_ALLOW_PRIVATE`, `TERRAX_AI_PER_KEY_PER_MINUTE` and `TERRAX_AI_SERVER_PER_MINUTE` (see **AI**); `GEMINI_API_KEY` and `GEMINI_MODEL` are still read
 - `TERRAX_CORS`
 - `TERRAX_MAX_UPLOAD_MB`
 - `TERRAX_RETENTION_HOURS`
@@ -283,18 +283,45 @@ A signed-in user can watch an area (the analysis boundary, up to 14 km across) f
 
 ## AI
 
-The assistants and "Add AI interpretation" use Gemini through the server (`/api/agents`). The key can come from two places:
+The assistants and "Add AI interpretation" work with an API key from almost any AI provider, through the server (`/api/agents`, `backend/terrax/agents/llm.py`).
 
-- **The server's `GEMINI_API_KEY`.** The key never reaches the browser.
-- **A user's own key, entered in Settings.** It is kept in that browser and sent with each AI request. The server passes it to Google and does not store it.
+**Providers.** Three adapters cover them:
 
-Without a key, the built-in assistant answers. It has no AI model. It handles questions about the tools, terms and units, sun times, and the current results.
+| Adapter | Providers |
+|---|---|
+| Gemini (google-genai SDK, answers grounded in Google Search with sources) | Google Gemini |
+| Anthropic Messages API | Anthropic Claude |
+| OpenAI-compatible (`/chat/completions`, `/models`) | OpenAI, DeepSeek, Groq, OpenRouter, xAI, Mistral, Together; a local Ollama; any other OpenAI-compatible server by its base URL ("custom") |
+
+**Recognising a key.** Many keys start with a fixed prefix (`AIza` Gemini, `sk-ant-` Anthropic, `sk-or-` OpenRouter, `gsk_` Groq, `xai-` xAI). The longest matching prefix narrows a key to one provider, or a few: a plain `sk-` may be OpenAI or DeepSeek, and a key with no known prefix may be Mistral or Together. Each candidate is then asked to list its models, most likely first, until one accepts the key. Listing models is free, so checking a key spends no tokens.
+
+- With priors p₁ ≥ p₂ ≥ …, the expected number of checks is Σ i·pᵢ: one for a prefixed key, about 1.2 for a plain `sk-` key.
+- The provider can also be chosen by hand.
+- The model defaults to the provider's preferred model when the key lists it, otherwise to a fast chat model from the list. It can be changed in Settings.
+- The Google and Anthropic endpoints were checked against the live services during development. The others follow the providers' published OpenAI-compatible endpoints.
+
+**Where keys come from, in order:**
+
+1. **Up to three keys entered in Settings**, kept in that browser. They are sent with each AI request in a header and passed to the provider. The server never stores or logs them, and removes them from providers' error messages.
+2. **The server's key:** `TERRAX_AI_KEY`, with optional `TERRAX_AI_PROVIDER`, `TERRAX_AI_MODEL` and `TERRAX_AI_BASE_URL`. An unset provider is recognised from the key once and remembered. `GEMINI_API_KEY` (and `GEMINI_MODEL`) are still read when `TERRAX_AI_KEY` is unset.
+3. **The built-in assistant.** It has no AI model, and it answers questions about the tools, terms and units, sun times and the current results.
+
+A key that fails or is over its limit is skipped, and the answer says which key answered and why an earlier one was skipped. The chat therefore always answers.
+
+**Limits.** Each key a user adds has its own budget: `TERRAX_AI_PER_KEY_PER_MINUTE` (20) per key, counted by a hash of the key in the shared rate-limit store, on top of 20 a minute per client. The server's key is shared by every user, so it has no cap of its own unless `TERRAX_AI_SERVER_PER_MINUTE` sets one. When a provider answers 429, that key rests for the provider's `Retry-After` before it is asked again.
+
+**Custom servers and Ollama.** A base URL typed by a user must resolve only to public addresses. Otherwise TerraX could be made to call into its own network (server-side request forgery), including cloud metadata at 169.254.169.254.
+
+- Set `TERRAX_AI_ALLOW_PRIVATE=true` to allow private and local addresses, for example a local Ollama at `http://localhost:11434/v1`.
+- The request goes to the address that was checked, with the hostname kept for TLS, so a DNS answer that changes in between cannot redirect it.
+- Plain `http://` is accepted only for allowed private addresses, so a key never crosses the internet unencrypted.
+- Redirects are not followed, and answers are capped at 4 MB.
 
 ## Tests
 
 | Command | What it checks |
 |---|---|
-| `cd backend && pytest` | 292 tests (6 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: the command line and Python API on local files (GeoTIFF georeferencing, colour tables and values checked), notebook maps (overlays aligned with their polygons) and the quickstart notebook run end to end, object storage against an in-process S3 (moto; with `TERRAX_TEST_S3_ENDPOINT`, a real server, which CI runs with SeaweedFS), database backup and restore, interrupted jobs, accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, emissions (hand-computed totals, Monte Carlo against the normal interval, a biomass map resampled from another resolution and projection, the validated estimate), encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 and Landsat window reading and composites (mocked catalogue, local files with known reflectance), forest-loss monitors (reference, cloud-masked candidates, two-observation confirmation, minimum patch, e-mailed alerts, ownership), water and floods (bimodality test, exact optical areas with a cloud mask, a speckled radar flood that leaves permanently dark ground out), maps, assistant, every API tool, one-container hosting and strip processing equal to whole-grid results |
+| `cd backend && pytest` | 308 tests (6 of them live, run with `TERRAX_LIVE=1`), on SQLite or (with `DATABASE_URL`) PostgreSQL: the command line and Python API on local files (GeoTIFF georeferencing, colour tables and values checked), notebook maps (overlays aligned with their polygons) and the quickstart notebook run end to end, object storage against an in-process S3 (moto; with `TERRAX_TEST_S3_ENDPOINT`, a real server, which CI runs with SeaweedFS), database backup and restore, interrupted jobs, accounts, sessions, two-factor sign-in (RFC 6238 test vectors), password reset and confirmation over a real SMTP exchange, single sign-on against a stand-in provider, signed links, the audit log, migrations, body limits, guest isolation, projects and sharing, admin rights, rate limits, quotas, retention, metrics and error records; statistics, dates, metrics, climate (Seasonal Kendall, SPI), hydrology, patches, carbon allometry, emissions (hand-computed totals, Monte Carlo against the normal interval, a biomass map resampled from another resolution and projection, the validated estimate), encroachment, forest/terrain/index results with known answers, boundary clipping, survey geodesy, EXIF, solar and Kp, live-data parsers, Sentinel-2 and Landsat window reading and composites (mocked catalogue, local files with known reflectance), forest-loss monitors (reference, cloud-masked candidates, two-observation confirmation, minimum patch, e-mailed alerts, ownership), water and floods (bimodality test, exact optical areas with a cloud mask, a speckled radar flood that leaves permanently dark ground out), maps, assistant, AI keys from any provider (recognition by prefix and model listing, the Gemini, Anthropic and OpenAI-compatible protocols against stand-in providers, errors that never show the key, each key's own limit and the provider's Retry-After, falling back along the keys, private-address and redirect protection), every API tool, one-container hosting and strip processing equal to whole-grid results |
 | `cd frontend && npm run lint && npm test` | Type-check and unit tests for maps, projects, units, theme and vector export |
 | `cd frontend && npm run test:e2e` | Playwright on desktop and mobile against the real API (it starts uvicorn and `vite preview`); set `TERRAX_URL=http://localhost:8080` to test the Docker stack instead |
 | `Rscript clients/R/terrax/tests/run_tests.R` and `julia --project=clients/julia/TerraX -e 'using Pkg; Pkg.test()'` | The R and Julia clients on the samples. They check the web app's answers and that TerraX's error messages arrive as R and Julia errors. In R, `terra` also reads the class map. |

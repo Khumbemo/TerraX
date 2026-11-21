@@ -852,7 +852,7 @@
   },
   {
    "id": "ai",
-   "title": "Set up AI (Gemini)",
+   "title": "Set up AI (any provider)",
    "keywords": {
     "ai": 4,
     "apikey": 3,
@@ -863,10 +863,10 @@
     "chatbot": 1
    },
    "phrases": [
-    "api ?key|gemini|set ?up ai|enable ai|turn on ai|smarter|offline"
+    "api ?key|gemini|claude|openai|chatgpt|groq|ollama|set ?up ai|enable ai|turn on ai|smarter|offline"
    ],
-   "answer": "I’m the **built-in guide**: I understand common questions about TerraX and Earth observation without any AI model. For open-ended questions, turn on AI: open **Settings**, paste a Gemini API key (from Google AI Studio) and save; the key stays in this browser and is sent with each AI request to the TerraX server, which passes it to Google. Alternatively, run the TerraX server with `GEMINI_API_KEY` set so users never handle a key.",
-   "more": "With AI on, the assistants send your question plus the computed results (and for tables a sample of up to 150 rows) to Google’s Gemini API. Without AI, everything is still computed locally; only these chat answers are simpler.",
+   "answer": "I’m the **built-in guide**: I understand common questions about TerraX and Earth observation without any AI model. For open-ended questions, turn on AI: open **Settings**, paste an API key from any AI provider (Google Gemini, Anthropic Claude, OpenAI, DeepSeek, Groq, OpenRouter, xAI, Mistral, Together) and choose **Add key**: TerraX recognises the provider and lists the models the key can use. Other services work as a custom OpenAI-compatible server. Up to three keys are tried in order, each within its own limit. Keys stay in this browser and go with each AI request to the TerraX server, which passes them to the provider without storing them. Alternatively, run the TerraX server with `TERRAX_AI_KEY` set so users never handle a key.",
+   "more": "With AI on, the assistants send your question plus the computed results (and for tables a sample of up to 150 rows) to the provider of the key in use. Without AI, everything is still computed locally; only these chat answers are simpler.",
    "suggestions": [
     "Is my data private?",
     "What can you do?"
@@ -889,7 +889,7 @@
     "privacy|private|is my data|where .* stored|\\bsafe\\b|who can see"
    ],
    "phraseBoost": 5,
-   "answer": "Files you add are uploaded to **the TerraX server you are using**, which runs the analysis; only you (and the server’s administrators) can see your uploads and results. As a guest they are kept for 72 hours by default (`TERRAX_RETENTION_HOURS`); signed in, for 30 days (`TERRAX_USER_RETENTION_DAYS`), and your history and projects stay on the server. Saved reports and settings also live in this browser’s local storage. Only when AI is turned on and you use an assistant or “Add AI interpretation” are the computed results (and for tables a sample of up to 150 rows) sent to Google’s Gemini API.",
+   "answer": "Files you add are uploaded to **the TerraX server you are using**, which runs the analysis; only you (and the server’s administrators) can see your uploads and results. As a guest they are kept for 72 hours by default (`TERRAX_RETENTION_HOURS`); signed in, for 30 days (`TERRAX_USER_RETENTION_DAYS`), and your history and projects stay on the server. Saved reports and settings also live in this browser’s local storage. Only when AI is turned on and you use an assistant or “Add AI interpretation” are the computed results (and for tables a sample of up to 150 rows) sent to the AI provider of the key in use.",
    "suggestions": [
     "How do I set up AI?"
    ]

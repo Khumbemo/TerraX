@@ -26,8 +26,8 @@ services:
         value: "100"
       - key: TERRAX_RETENTION_HOURS
         value: "24"
-      # Optional: server-side Gemini key for the AI assistants (entered in the Render dashboard, never stored here).
-      - key: GEMINI_API_KEY
+      # Optional: the server's AI key from any provider (entered in the Render dashboard, never stored here).
+      - key: TERRAX_AI_KEY
         sync: false
       # A public URL: everyone signs in (accounts are free to create; TERRAX_SIGNUP=closed for invitation only).
       - key: TERRAX_AUTH
