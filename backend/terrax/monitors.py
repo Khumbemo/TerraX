@@ -14,6 +14,16 @@ cloudy ones do not count), the two-observation rule of the GLAD and RADD forest 
 false alarms from undetected cloud, haze and shadow. Confirmed pixels form patches; a patch of at least `minAreaHa`
 (0.5 ha) becomes an alert, stored with its polygons and e-mailed to the owner.
 
+With `radar` on (the default), Sentinel-1 RTC scenes are used too, since cloud can hide the ground from Sentinel-2 for
+weeks in the monsoon. A radar reference, ``radar_reference.tif``, is the median VH backscatter (dB) of the scenes of the
+same 120 days, each read onto the reference grid and speckle-filtered (Lee 1980); a forest pixel whose VH in a new
+scene is at least `vhDrop` (3 dB) below it is a radar candidate. Clearing removes the canopy's volume scattering, so
+VH usually falls. Each sensor keeps its own pending state, and a radar drop is confirmed only by the next radar
+observation (an optical one only by the next clear optical one), so speckle cannot confirm or cancel an optical
+detection, nor the reverse. Confirmed loss from either sensor becomes an alert. This is a simple threshold on a
+reference, not RADD's probabilistic method (Reiche et al. 2021); `vhDrop` is a setting, not a calibrated value, and
+wet or dry canopies, flooding and different orbits also move VH.
+
 What the method cannot tell apart: harvest, fire, storm and clearing alike are loss; a strong seasonal drop (leaf-off,
 drought) beyond the threshold is not excluded, so the reference should come from the season being monitored and be
 rebuilt when it no longer matches (the API can rebuild it).
@@ -40,8 +50,10 @@ from . import db, mailer, objectstore, storage
 
 log = logging.getLogger("terrax.monitors")
 
-DEFAULTS: dict[str, float] = {"forestNdvi": 0.5, "drop": 0.2, "minAreaHa": 0.5, "maxCloud": 40, "checkHours": 24}
-LIMITS: dict[str, tuple[float, float]] = {"forestNdvi": (0.1, 0.95), "drop": (0.05, 1.0), "minAreaHa": (0.01, 1000), "maxCloud": (1, 100), "checkHours": (6, 24 * 30)}
+DEFAULTS: dict[str, float] = {"forestNdvi": 0.5, "drop": 0.2, "minAreaHa": 0.5, "maxCloud": 40, "checkHours": 24, "radar": 1, "vhDrop": 3.0}
+LIMITS: dict[str, tuple[float, float]] = {"forestNdvi": (0.1, 0.95), "drop": (0.05, 1.0), "minAreaHa": (0.01, 1000), "maxCloud": (1, 100), "checkHours": (6, 24 * 30),
+                                          "radar": (0, 1), "vhDrop": (0.5, 15)}
+RADAR_REFERENCE_SCENES = 10  # the most recent Sentinel-1 scenes of the reference period, for the median VH
 REFERENCE_DAYS = 120  # the reference composite uses scenes from this many days before the monitor is created
 REFERENCE_SCENES = 6
 SCENES_PER_CHECK = 8
@@ -194,17 +206,20 @@ def _saved(path: Path) -> None:
 
 
 def _load_state(mid: str, shape: tuple[int, int]) -> dict[str, np.ndarray]:
+    fresh = {"pending": np.zeros(shape, dtype=bool), "since": np.zeros(shape, dtype=np.int32), "confirmed": np.zeros(shape, dtype=bool),
+             "reported": np.zeros(shape, dtype=bool), "r_pending": np.zeros(shape, dtype=bool), "r_since": np.zeros(shape, dtype=np.int32),
+             "by_radar": np.zeros(shape, dtype=bool)}
     p = _local(mid, "state.npz")
     if p is not None:
         with np.load(p) as z:
-            return {k: z[k] for k in z.files}
-    return {"pending": np.zeros(shape, dtype=bool), "since": np.zeros(shape, dtype=np.int32), "confirmed": np.zeros(shape, dtype=bool),
-            "reported": np.zeros(shape, dtype=bool)}
+            fresh.update({k: z[k] for k in z.files})
+    return fresh
 
 
 def _save_state(mid: str, state: dict[str, np.ndarray]) -> None:
     p = _folder(mid) / "state.npz"
-    np.savez_compressed(p, pending=state["pending"], since=state["since"], confirmed=state["confirmed"], reported=state["reported"])
+    np.savez_compressed(p, pending=state["pending"], since=state["since"], confirmed=state["confirmed"], reported=state["reported"],
+                        r_pending=state["r_pending"], r_since=state["r_since"], by_radar=state["by_radar"])
     _saved(p)
 
 
@@ -228,6 +243,74 @@ def composite(items: list[Any], bbox: list[float], out: Path, workdir: Path) -> 
     from .services import live
 
     return live.composite_s2(items, bbox, out, workdir, read=read_scene)
+
+
+def search_radar(bbox: list[float], start: str, end: str) -> list[Any]:
+    from .services import live
+
+    body = live.s1_search_body(bbox, start, end, limit=50)
+    return live.parse_s1_items(live.fetch_json(f"{live.PC_STAC}/search", method="POST", body=body))
+
+
+def read_radar(item: Any, bbox: list[float], out: Path, match: Path) -> list[str]:
+    """VV and VH (linear power) of a Sentinel-1 RTC scene, read onto the reference grid."""
+    from .services import live
+
+    return live.read_s1_window(item, bbox, out, live.sas_token(), match=match)
+
+
+def _vh_db(path: Path) -> np.ndarray:
+    """VH of a scene file (band 2, linear power) speckle-filtered (Lee 1980, 5 × 5) and in dB."""
+    import rasterio
+
+    from .processing.radar import lee_filter
+
+    with rasterio.open(path) as ds:
+        vh = ds.read(2).astype(np.float64)
+    vh[~np.isfinite(vh) | (vh <= 0)] = np.nan
+    with np.errstate(divide="ignore", invalid="ignore"):
+        db = 10 * np.log10(lee_filter(vh))
+    return np.where(np.isfinite(db), db, np.nan).astype(np.float32)
+
+
+def build_radar_reference(m: dict[str, Any], start: str, end: str) -> str:
+    """The median VH (dB) of the most recent Sentinel-1 scenes of the reference period, on the reference grid."""
+    import tempfile
+
+    import rasterio
+
+    folder = _folder(m["id"])
+    ref = folder / "reference.tif"
+    try:
+        items = sorted(search_radar(m["bbox"], start, end), key=lambda i: i.datetime, reverse=True)[:RADAR_REFERENCE_SCENES]
+    except (ValueError, OSError) as err:
+        return f" Radar: the Sentinel-1 catalogue could not be searched ({err}); optical scenes only for now."
+    stack, dates = [], []
+    with tempfile.TemporaryDirectory(dir=storage.root()) as tmp:
+        for item in items:
+            path = Path(tmp) / f"{storage.safe_name(item.id)}.tif"
+            try:
+                read_radar(item, m["bbox"], path, ref)
+            except ValueError:
+                continue
+            stack.append(_vh_db(path))
+            dates.append(item.datetime)
+    if len(stack) < 2:
+        return " Radar: fewer than two Sentinel-1 scenes in the reference period, so radar is not used."
+    with np.errstate(all="ignore"):
+        median = np.nanmedian(np.stack(stack), axis=0).astype(np.float32)
+    with rasterio.open(ref) as src:
+        profile = src.profile | {"count": 1, "dtype": "float32", "nodata": np.nan}
+    out = folder / "radar_reference.tif"
+    with rasterio.open(out, "w", **profile) as dst:
+        dst.write(median, 1)
+        dst.set_band_description(1, "reference VH (dB)")
+    _saved(out)
+    dates.sort()
+    reference = dict(m["reference"] or {}) | {"radar": {"scenes": len(stack), "dates": [d[:10] for d in dates], "last": dates[-1]}}
+    change(m["id"], reference=reference)
+    m["reference"] = reference
+    return f" Radar reference from {len(stack)} Sentinel-1 scenes ({dates[0][:10]} to {dates[-1][:10]})."
 
 
 # ── Checking ─────────────────────────────────────────────────────────────────
@@ -271,9 +354,12 @@ def build_reference(m: dict[str, Any], now: float) -> str:
     _saved(ref)
     (folder / "state.npz").unlink(missing_ok=True)
     newest = max(i.datetime for i in items)  # later scenes are the ones to watch
-    change(m["id"], reference={"scenes": info["scenes"], "dates": info["dates"], "built": now}, last_scene=newest)
-    m.update(last_scene=newest)
-    return f"Reference built from {len(info['scenes'])} scenes ({info['dates'][0]} to {info['dates'][-1]}). Watching for new scenes."
+    reference = {"scenes": info["scenes"], "dates": info["dates"], "built": now}
+    change(m["id"], reference=reference, last_scene=newest)
+    m.update(last_scene=newest, reference=reference)
+    (folder / "radar_reference.tif").unlink(missing_ok=True)
+    radar = build_radar_reference(m, start.isoformat(), end.isoformat()) if m["settings"].get("radar", 0) else ""
+    return f"Reference built from {len(info['scenes'])} scenes ({info['dates'][0]} to {info['dates'][-1]}).{radar} Watching for new scenes."
 
 
 def _on_grid(path: Path, ref, band: int, nearest: bool) -> np.ndarray:
@@ -321,40 +407,77 @@ def _check_scenes(m: dict[str, Any], now: float) -> tuple[str, list[dict[str, An
     start = since[:10] or datetime.fromtimestamp(now - 30 * 86400, UTC).date().isoformat()
     end = datetime.fromtimestamp(now, UTC).date().isoformat()
     items = sorted((i for i in search_scenes(m["bbox"], start, end, s["maxCloud"]) if i.datetime > since), key=lambda i: i.datetime)[:SCENES_PER_CHECK]
-    if not items:
-        return f"No new scenes under {s['maxCloud']:g} % cloud since {since[:10] or start}.", []
+    # Radar, when on and its reference exists: the Sentinel-1 scenes since the last one looked at.
+    radar_info = (m["reference"] or {}).get("radar") or {}
+    radar_ref_path = _local(m["id"], "radar_reference.tif") if s.get("radar", 0) and radar_info else None
+    radar_since = radar_info.get("last", "")
+    radar_items: list[Any] = []
+    radar_note = ""
+    if radar_ref_path is not None:
+        try:
+            radar_items = sorted((i for i in search_radar(m["bbox"], radar_since[:10] or start, end) if i.datetime > radar_since), key=lambda i: i.datetime)[:SCENES_PER_CHECK]
+        except (ValueError, OSError) as err:
+            radar_note = f" Radar not checked: the Sentinel-1 catalogue could not be searched ({err})."
+    if not items and not radar_items:
+        return f"No new scenes under {s['maxCloud']:g} % cloud since {since[:10] or start}.{radar_note}", []
+    scenes = sorted([("optical", i) for i in items] + [("radar", i) for i in radar_items], key=lambda t: t[1].datetime)
     ref_path = _local(m["id"], "reference.tif")
     assert ref_path is not None
     ref_r = Raster(ref_path, "reference.tif", max_pixels=10**9)
     with rasterio.open(ref_path) as ref:
         ref_ndvi = ref.read(1)
         grid = ref
+        ref_vh = None
+        if radar_ref_path is not None:
+            with rasterio.open(radar_ref_path) as rr:
+                ref_vh = rr.read(1)
         inside = rows_mask(ref_r, boundary_in_crs(ref_r, {"geojson": m["geojson"]}), 0, ref.height)
         geo = ground_geometry(ref_r.meta, ref.width, ref.height)
         state = _load_state(m["id"], ref_ndvi.shape)
         forest = inside & np.isfinite(ref_ndvi) & (ref_ndvi >= s["forestNdvi"])
         cell_rows = geo.cell_area if geo else np.ones(ref.height)
         new_alerts: list[dict[str, Any]] = []
-        read, skipped = 0, []
+        read = {"optical": 0, "radar": 0}
+        skipped: list[str] = []
         with tempfile.TemporaryDirectory(dir=storage.root()) as tmp:
-            for item in items:
+            for kind, item in scenes:
                 path = Path(tmp) / f"{storage.safe_name(item.id)}.tif"
                 try:
-                    read_scene(item, m["bbox"], path)
+                    if kind == "optical":
+                        read_scene(item, m["bbox"], path)
+                    else:
+                        read_radar(item, m["bbox"], path, ref_path)
                 except ValueError as err:
                     skipped.append(f"{item.id} ({err})")
-                    since = max(since, item.datetime)
+                    if kind == "optical":
+                        since = max(since, item.datetime)
+                    else:
+                        radar_since = max(radar_since, item.datetime)
                     continue
-                read += 1
-                red, nir = _on_grid(path, grid, 3, False), _on_grid(path, grid, 4, False)
-                clear = forest & ~qa_masked("scl", _on_grid(path, grid, 5, True)) & np.isfinite(red) & np.isfinite(nir)
-                drop = clear & (_ndvi(red, nir) - ref_ndvi <= -s["drop"]) & ~state["reported"]
-                confirm = drop & state["pending"]
+                read[kind] += 1
                 today = _day(item.datetime)
-                state["since"] = np.where(drop & ~state["pending"], today, state["since"])
-                state["pending"] = (state["pending"] & ~clear) | drop  # cloudy keeps it; clear and not low resets it
+                if kind == "optical":
+                    red, nir = _on_grid(path, grid, 3, False), _on_grid(path, grid, 4, False)
+                    clear = forest & ~qa_masked("scl", _on_grid(path, grid, 5, True)) & np.isfinite(red) & np.isfinite(nir)
+                    drop = clear & (_ndvi(red, nir) - ref_ndvi <= -s["drop"]) & ~state["reported"]
+                    pend, when = "pending", "since"
+                else:
+                    assert ref_vh is not None
+                    vh = _vh_db(path)
+                    clear = forest & np.isfinite(vh) & np.isfinite(ref_vh)  # radar sees through cloud
+                    with np.errstate(invalid="ignore"):
+                        drop = clear & (vh - ref_vh <= -s["vhDrop"]) & ~state["reported"]
+                    pend, when = "r_pending", "r_since"
+                # Two observations in a row from the same sensor: a clear one that is not low resets that sensor's
+                # candidate; cloudy (optical) observations keep it.
+                confirm = drop & state[pend]
+                state[when] = np.where(drop & ~state[pend], today, state[when])
+                state[pend] = (state[pend] & ~clear) | drop
+                if kind == "radar":
+                    state["by_radar"] |= confirm & ~state["confirmed"]
                 state["confirmed"] |= confirm
                 state["pending"] &= ~state["confirmed"]
+                state["r_pending"] &= ~state["confirmed"]
                 # Patches of confirmed, unreported loss; those of at least minAreaHa become an alert.
                 labels, n = label_patches(state["confirmed"] & ~state["reported"])
                 if n:
@@ -365,25 +488,44 @@ def _check_scenes(m: dict[str, Any], now: float) -> tuple[str, list[dict[str, An
                         keep = np.zeros(n + 1, dtype=bool)
                         keep[big] = True
                         hit = keep[labels]
-                        first = date.fromordinal(int(state["since"][hit & (state["since"] > 0)].min())).isoformat() if (hit & (state["since"] > 0)).any() else item.datetime[:10]
+                        starts = np.where(state["since"] > 0, state["since"], np.iinfo(np.int32).max)
+                        starts = np.minimum(starts, np.where(state["r_since"] > 0, state["r_since"], np.iinfo(np.int32).max))
+                        first_day = int(starts[hit].min()) if hit.any() else np.iinfo(np.int32).max
+                        first = date.fromordinal(first_day).isoformat() if first_day < np.iinfo(np.int32).max else item.datetime[:10]
+                        radar_share = float(state["by_radar"][hit].mean()) if hit.any() else 0.0
+                        sensors = "Sentinel-1 radar" if radar_share > 0.5 else "Sentinel-2" if radar_share == 0 else "Sentinel-2 and Sentinel-1"
                         lab = np.where(hit, labels, 0)
                         fc = patches_to_geojson(lab, n, area, ref_r, lambda i, a: {"patch": i, "area_ha": round(a, 4)})
-                        new_alerts.append(_alert(m, first, item.datetime[:10], float(area[big].sum()), int(big.size), fc["fc"] if fc else {"type": "FeatureCollection", "features": []}, now))
+                        feats: dict[str, Any] = fc["fc"] if fc else {"type": "FeatureCollection", "features": []}
+                        for f in feats.get("features", []):
+                            if isinstance(f, dict):
+                                f.setdefault("properties", {})["sensors"] = sensors
+                        new_alerts.append(_alert(m, first, item.datetime[:10], float(area[big].sum()), int(big.size), feats, now, sensors))
                         state["reported"] |= hit
-                since = max(since, item.datetime)
-                change(m["id"], last_scene=since)
+                if kind == "optical":
+                    since = max(since, item.datetime)
+                    change(m["id"], last_scene=since)
+                else:
+                    radar_since = max(radar_since, item.datetime)
+                    reference = dict(m["reference"] or {})
+                    reference["radar"] = dict(reference.get("radar") or {}) | {"last": radar_since}
+                    change(m["id"], reference=reference)
+                    m["reference"] = reference
                 _save_state(m["id"], state)
-    pending_ha = float((state["pending"] * cell_rows[:, None]).sum()) / 1e4
-    msg = f"Checked {read} new scene{'s' if read != 1 else ''} up to {since[:10]}: "
+    pending_ha = float(((state["pending"] | state["r_pending"]) * cell_rows[:, None]).sum()) / 1e4
+    looked = [f"{read['optical']} new scene{'s' if read['optical'] != 1 else ''} up to {since[:10]}"]
+    if radar_items:
+        looked.append(f"{read['radar']} radar scene{'s' if read['radar'] != 1 else ''} up to {radar_since[:10]}")
+    msg = f"Checked {' and '.join(looked)}: "
     msg += (f"{len(new_alerts)} new alert{'s' if len(new_alerts) != 1 else ''} ({sum(a['areaHa'] for a in new_alerts):.2f} ha)." if new_alerts else "no new confirmed loss.")
     if pending_ha:
         msg += f" {pending_ha:.2f} ha awaits confirmation by the next clear scene."
     if skipped:
         msg += f" Could not read: {'; '.join(skipped)[:150]}."
-    return msg, new_alerts
+    return msg + radar_note, new_alerts
 
 
-def _alert(m: dict[str, Any], first: str, confirmed: str, area_ha: float, patches: int, fc: dict, now: float) -> dict[str, Any]:
+def _alert(m: dict[str, Any], first: str, confirmed: str, area_ha: float, patches: int, fc: dict, now: float, sensors: str = "Sentinel-2") -> dict[str, Any]:
     row = {"id": uuid.uuid4().hex, "monitor_id": m["id"], "created": now, "first_seen": first, "confirmed": confirmed, "area_ha": area_ha, "patches": patches,
            "geojson": fc, "emailed": False}
     with db.connect() as c:
@@ -395,8 +537,9 @@ def _alert(m: dict[str, Any], first: str, confirmed: str, area_ha: float, patche
         try:
             mailer.send(str(user.get("email") or ""), f"TerraX: new forest loss in {m['name']}",
                         f"TerraX found new forest loss in “{m['name']}”: {area_ha:.2f} ha in {patches} patch{'es' if patches != 1 else ''}.\n\n"
-                        f"First seen in the Sentinel-2 scene of {first}, confirmed by the clear scene of {confirmed}: NDVI at least "
-                        f"{m['settings']['drop']:g} below the reference in two clear observations in a row.\n\n"
+                        f"Found by {sensors}: first seen on {first}, confirmed on {confirmed} by two observations in a row from the same satellite "
+                        f"(Sentinel-2: NDVI at least {m['settings']['drop']:g} below the reference; Sentinel-1: VH backscatter at least "
+                        f"{m['settings'].get('vhDrop', DEFAULTS['vhDrop']):g} dB below it).\n\n"
                         f"Open TerraX to see the patches on the map and download them: {mailer.link('/')}\n\n"
                         "Alerts come from satellite images and should be checked on finer imagery or in the field before action is taken.")
             row["emailed"] = True

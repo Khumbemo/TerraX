@@ -250,6 +250,11 @@ A signed-in user can watch an area (the analysis boundary, up to 14 km across) f
 - **Reference.** TerraX builds a cloud-free median composite from up to six of the clearest Sentinel-2 scenes of the last 120 days. Forest is NDVI ≥ 0.5 on it.
 - **Checks.** Every day by default (6 hours to 30 days), and at once with "Check now", TerraX reads the scenes published since the last check onto the reference grid with their own cloud mask (SCL).
 - **Confirmation.** A forest pixel whose NDVI is at least 0.2 below the reference is a candidate. It is confirmed when its next clear observation is low too, the two-observation rule of the GLAD (Hansen et al. 2016) and RADD (Reiche et al. 2021) alerts, which removes most false alarms from undetected cloud, haze and shadow.
+- **Radar (on by default).** Cloud can hide the ground from Sentinel-2 for weeks in the monsoon, so Sentinel-1 RTC scenes (Planetary Computer) are checked too.
+  - The radar reference is the median VH backscatter (dB) of the last 120 days' scenes, each read onto the reference grid and Lee-filtered.
+  - A forest pixel whose VH falls at least `vhDrop` (3 dB) below it is a radar candidate. Clearing removes the canopy's volume scattering, so VH usually falls.
+  - Each sensor keeps its own pending state: a radar drop is confirmed only by the next radar scene, so speckle cannot confirm or cancel an optical detection, nor the reverse. Alerts say which satellite found them.
+  - This is a threshold on a reference, not RADD's probabilistic method. `vhDrop` is a setting, not a calibrated value. Wet or dry canopies, flooding and mixing orbits also move VH.
 - **Alerts.** Patches of confirmed loss of at least 0.5 ha become an alert, with the date the drop was first seen, the date it was confirmed, the area and the polygons (GeoJSON). The owner is e-mailed when the server can send mail (`TERRAX_SMTP_*`).
 - **Limits.** Harvest, fire, storm and clearing all count as loss. A strong seasonal drop beyond the threshold (leaf-off, drought) is not excluded, so rebuild the reference when the season has changed. An account may keep `TERRAX_MONITORS` monitors (10).
 - **Running.** Celery beat (`docker compose`) or, in one-container hosting, the hourly background thread checks the monitors that are due.
