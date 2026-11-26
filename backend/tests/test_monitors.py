@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
+from terrax.services.live import StacItem
 from tests.test_accounts import new_client, signup, uniq
 
 E0, N0 = 600000.0, 2850000.0  # 100 × 100 px of 10 m in EPSG:32646
@@ -69,6 +70,7 @@ def catalogue(tmp_path, monkeypatch):
 
     monkeypatch.setattr(monitors, "search_scenes", search)
     monkeypatch.setattr(monitors, "read_scene", read)
+    monkeypatch.setattr(monitors, "search_radar", lambda bbox, start, end: [])  # radar has its own test below
     sent = []
     monkeypatch.setattr(monitors.mailer, "can_send", lambda: True)
     monkeypatch.setattr(monitors.mailer, "send", lambda to, subject, text: sent.append((to, subject, text)))
@@ -160,3 +162,62 @@ def test_waiting_for_a_reference(app, catalogue, monkeypatch):
     m = c.post("/api/monitors", json={"geojson": catalogue["poly"]}).json()
     assert m["status"].startswith("Waiting for scenes") and m["reference"] is None
     assert monitors.check(m["id"], now=NOW + DAY)["status"].startswith("Waiting for scenes")  # tried again at each check
+
+
+def test_radar_confirms_loss_that_optical_scenes_miss(app, catalogue, monkeypatch):
+    """Sentinel-1 alongside Sentinel-2. Forest VH is −13 dB; cleared, −19 dB. Patch E (rows 5–14, columns 60–69, 1 ha)
+    is cleared, but the optical scenes still show it green (as under persistent haze): radar finds it in two scenes in
+    a row, and the clear optical scenes between them do not cancel it. Patch F drops in one radar scene only (speckle,
+    a wet canopy) and is not confirmed. Block A is still found by Sentinel-2 alone."""
+    import rasterio
+
+    from terrax import monitors
+
+    E = (slice(5, 15), slice(60, 70))
+    F = (slice(5, 15), slice(80, 90))
+    radar = {"r1": (-50, ()), "r2": (-20, ()), "r3": (7, (E, F)), "r4": (12, (E,))}
+    items = {k: StacItem(id=f"S1A_IW_{k}", datetime=_date(d), cloud=None, epsg=32646) for k, (d, _) in radar.items()}
+
+    def search_radar(bbox, start, end):
+        return [it for it in items.values() if start <= it.datetime[:10] <= end]
+
+    def read_radar(item, bbox, out, match):
+        low = next(v[1] for k, v in radar.items() if items[k].id == item.id)
+        with rasterio.open(match) as ref:
+            prof = ref.profile | {"count": 2, "dtype": "float32", "nodata": np.nan}
+        vh = np.full((prof["height"], prof["width"]), 10 ** (-13 / 10), dtype=np.float32)
+        for rows, cols in low:
+            vh[rows, cols] = 10 ** (-19 / 10)
+        with rasterio.open(out, "w", **prof) as d:
+            d.write(vh * 4, 1)
+            d.write(vh, 2)
+        return []
+
+    monkeypatch.setattr(monitors, "search_radar", search_radar)
+    monkeypatch.setattr(monitors, "read_radar", read_radar)
+    c = new_client(app)
+    signup(c, uniq("radar"))
+    m = c.post("/api/monitors", json={"name": "Cloudy block", "geojson": catalogue["poly"]}).json()
+    assert "Radar reference from 2 Sentinel-1 scenes" in m["status"] and m["reference"]["radar"]["scenes"] == 2
+    out = monitors.check(m["id"], now=NOW + 13 * DAY)
+    assert len(out["alerts"]) == 2, out["status"]
+    radar_alert = next(a for a in out["alerts"] if a["confirmed"] == items["r4"].datetime[:10])
+    optical_alert = next(a for a in out["alerts"] if a["confirmed"] == catalogue["items"]["s4"].datetime[:10])
+    assert radar_alert["firstSeen"] == items["r3"].datetime[:10] and radar_alert["areaHa"] == pytest.approx(1, abs=0.15)
+    assert optical_alert["areaHa"] == pytest.approx(6)
+    gj = c.get(f"/api/monitors/{m['id']}/alerts/{radar_alert['id']}.geojson").json()
+    assert {f["properties"]["sensors"] for f in gj["features"]} == {"Sentinel-1 radar"}
+    mail = [x for x in catalogue["sent"] if "new forest loss" in x[1] and "Found by Sentinel-1 radar" in x[2]]
+    assert mail and "VH backscatter at least 3 dB" in mail[0][2]
+    assert "2 radar scenes" in out["status"]
+    # F was low in one radar scene only: never confirmed. The next check finds only D, the optical clearing (2 ha).
+    later = monitors.check(m["id"], now=NOW + 17 * DAY)["alerts"]
+    assert [a["areaHa"] for a in later] == [pytest.approx(2)] and later[0]["confirmed"] == catalogue["items"]["s5"].datetime[:10]
+    d_alert = c.get(f"/api/monitors/{m['id']}/alerts/{later[0]['id']}.geojson").json()
+    assert {f["properties"]["sensors"] for f in d_alert["features"]} == {"Sentinel-2"}
+    # With radar off, the radar scenes are not used.
+    c2 = new_client(app)
+    signup(c2, uniq("noradar"))
+    m2 = c2.post("/api/monitors", json={"geojson": catalogue["poly"], "settings": {"radar": 0}}).json()
+    assert "Radar" not in m2["status"]
+    assert all(a["confirmed"] != items["r4"].datetime[:10] for a in monitors.check(m2["id"], now=NOW + 13 * DAY)["alerts"])

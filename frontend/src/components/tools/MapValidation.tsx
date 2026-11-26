@@ -1,12 +1,16 @@
 // Accuracy and area of a classified map from a stratified random sample (Olofsson et al. 2014): draw the sample,
 // label it in the field or from finer imagery, upload it. Used by land cover and forest change.
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { request, type Download } from '../../lib/api';
+import { getItem, removeItem, setItem } from '../../lib/storage';
 import { fmt } from '../../lib/stats';
 import { useToast } from '../../lib/toast';
 import { useJob } from '../../lib/useJob';
 import FileDrop from '../FileDrop';
 import { Downloads, Notes, Stat, useUpload } from '../ToolKit';
+import type { SampleLocation } from './ReferenceLabeller';
+
+const ReferenceLabeller = lazy(() => import('./ReferenceLabeller'));
 
 interface SampleResult {
   points: number;
@@ -14,6 +18,9 @@ interface SampleResult {
   allocation: { label: string; mapped: number; share: number; n: number }[];
   downloads: Download[];
   note: string;
+  /** Each point with its pixel outline, without its map class, in a shuffled order (for labelling here). */
+  locations: SampleLocation[];
+  labels: string[];
 }
 
 interface AccuracyClass {
@@ -36,6 +43,8 @@ export interface AccuracyResult {
   overallCi: number | null;
   classes: AccuracyClass[];
   markdown: string;
+  /** Forest loss with emissions: the emissions summary (activity data, emission factor, emissions, uncertainty). */
+  reddSummary?: { markdown: string; download: Download };
 }
 
 interface Props {
@@ -51,12 +60,25 @@ interface Props {
   intro: string;
   /** Called with the assessment, or null when a new sample makes the last one stale. */
   onAccuracy: (a: AccuracyResult | null) => void;
+  /** Ask for the years between the two images (forest loss with emissions: a yearly mean in the summary). */
+  askPeriod?: boolean;
+}
+
+const labelsKey = (jobId: string) => `validation_labels_${jobId}`;
+
+function savedLabels(jobId: string): Record<string, string> {
+  try {
+    const v = JSON.parse(getItem(labelsKey(jobId)) ?? '{}') as Record<string, string>;
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
 }
 
 const pct = (v: number | null, ci: number | null) => (v === null ? '—' : `${(v * 100).toFixed(1)} %${ci === null ? '' : ` ± ${(ci * 100).toFixed(1)}`}`);
 const area = (v: number, unit: 'ha' | 'px') => (unit === 'ha' ? `${fmt(v, 4)} ha` : `${Math.round(v).toLocaleString()} px`);
 
-export default function MapValidation({ jobId, idPrefix, labels, classes, intro, onAccuracy }: Props) {
+export default function MapValidation({ jobId, idPrefix, labels, classes, intro, onAccuracy, askPeriod }: Props) {
   const notify = useToast();
   const job = useJob();
   const busy = Boolean(job.busy);
@@ -65,7 +87,38 @@ export default function MapValidation({ jobId, idPrefix, labels, classes, intro,
   const [minPerClass, setMinPerClass] = useState('50');
   const [validation, setValidation] = useState<SampleResult | null>(null);
   const [accuracy, setAccuracy] = useState<AccuracyResult | null>(null);
+  const [refLabels, setRefLabels] = useState<Record<string, string>>(() => savedLabels(jobId));
+  const [labelling, setLabelling] = useState(false);
+  const [years, setYears] = useState('');
   const fail = (m: string) => notify(m, 'error');
+
+  const period = (): number | null | false => {
+    if (!askPeriod || !years.trim()) return null;
+    const y = Number(years);
+    return y > 0 && y <= 200 ? y : false;
+  };
+
+  const setLabel = (id: string, value: string) => {
+    setRefLabels(cur => {
+      const next = { ...cur };
+      if (value) next[id] = value;
+      else delete next[id];
+      setItem(labelsKey(jobId), JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const assessLabels = async () => {
+    const y = period();
+    if (y === false) return fail('Set the years between the two images as a positive number, or leave it empty.');
+    const ids = new Set((validation?.locations ?? []).map(l => l.id));
+    const sent = Object.fromEntries(Object.entries(refLabels).filter(([k]) => ids.has(k)));
+    if (!Object.keys(sent).length) return fail('Label at least one point first.');
+    const a = await job.run('assess', signal => request<AccuracyResult>(`/api/jobs/${jobId}/validation/accuracy`, { method: 'POST', json: { labels: sent, periodYears: y }, signal }), fail);
+    if (!a) return;
+    setAccuracy(a);
+    onAccuracy(a);
+  };
 
   const makeSample = async () => {
     const total = sampleTotal.trim() ? Number(sampleTotal) : undefined;
@@ -77,12 +130,17 @@ export default function MapValidation({ jobId, idPrefix, labels, classes, intro,
     setValidation(s);
     setAccuracy(null);
     onAccuracy(null);
+    // A new sample has new points: labels for the old one no longer apply.
+    removeItem(labelsKey(jobId));
+    setRefLabels({});
   };
 
   const assessFile = async (picked: File) => {
     const f = await job.run('reference', signal => refFiles.upload(picked, signal), fail);
     if (!f) return;
-    const a = await job.run('assess', signal => request<AccuracyResult>(`/api/jobs/${jobId}/validation/accuracy`, { method: 'POST', json: { file: f.id }, signal }), fail);
+    const y = period();
+    if (y === false) return fail('Set the years between the two images as a positive number, or leave it empty.');
+    const a = await job.run('assess', signal => request<AccuracyResult>(`/api/jobs/${jobId}/validation/accuracy`, { method: 'POST', json: { file: f.id, periodYears: y }, signal }), fail);
     if (!a) return;
     setAccuracy(a);
     onAccuracy(a);
@@ -133,6 +191,33 @@ export default function MapValidation({ jobId, idPrefix, labels, classes, intro,
             <Downloads idPrefix={`${idPrefix}-sample`} items={validation.downloads} />
           </div>
           <Notes items={[validation.note]} />
+          {askPeriod && (
+            <div className="param-row">
+              <label className="param" title="For the yearly mean in the emissions summary; leave empty to omit it">
+                <span>Years between the images</span>
+                <input id={`${idPrefix}-period`} type="number" min="0.1" max="200" step="0.5" value={years} onChange={e => setYears(e.target.value)} placeholder="optional" />
+              </label>
+            </div>
+          )}
+          {validation.locations.length > 0 && (
+            <div className="param-row">
+              <button type="button" id={`${idPrefix}-label-open`} className="btn" onClick={() => setLabelling(!labelling)}>
+                {labelling ? 'Hide the labelling' : 'Label the points here, over imagery'}
+              </button>
+              <span className="field-hint">
+                {Object.keys(refLabels).filter(id => validation.locations.some(l => l.id === id)).length} of {validation.locations.length} labelled
+              </span>
+              <button type="button" id={`${idPrefix}-label-assess`} className="btn btn-primary push-right" disabled={busy} onClick={assessLabels}>
+                {job.busy === 'assess' ? 'Computing…' : 'Compute accuracy from these labels'}
+              </button>
+            </div>
+          )}
+          {labelling && (
+            <Suspense fallback={<div className="loading-block">Loading the map…</div>}>
+              <ReferenceLabeller idPrefix={idPrefix} locations={validation.locations} classes={validation.labels} labels={refLabels} onLabel={setLabel} />
+            </Suspense>
+          )}
+          <p className="field-hint">Or label the downloaded file elsewhere (in the field, or in GIS software) and upload it:</p>
           <FileDrop
             id={`${idPrefix}-reference`}
             label="Labelled sample"
@@ -149,6 +234,16 @@ export default function MapValidation({ jobId, idPrefix, labels, classes, intro,
             <Stat label="Overall accuracy" value={pct(accuracy.overallAccuracy, accuracy.overallCi)} />
             <Stat label="Reference points" value={`${accuracy.samples}${accuracy.unlabelled ? ` (${accuracy.unlabelled} unlabelled)` : ''}`} />
           </div>
+          {accuracy.reddSummary && (
+            <div className="button-row">
+              <span className="field-hint">
+                Emissions summary: activity data with its confidence interval, emission factor, emissions and uncertainty, laid out for REDD+ and IPCC reporting.
+              </span>
+              <span className="push-right">
+                <Downloads idPrefix={`${idPrefix}-summary`} items={[accuracy.reddSummary.download]} />
+              </span>
+            </div>
+          )}
           <div className="tabular-view">
             <table id={`${idPrefix}-accuracy`}>
               <thead>

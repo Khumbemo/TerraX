@@ -28,7 +28,17 @@ interface WaterJob {
   name: string;
   markdown: string;
   map: { bounds: LatLngBounds | null; image: ResultImage | null };
-  result: { mode: Mode; index: string; threshold: number; unit: string; width: number; height: number; summary: { observedPixels: number; classes: WaterClass[] }; notes: string[] };
+  result: {
+    mode: Mode;
+    index: string;
+    threshold: number;
+    unit: string;
+    width: number;
+    height: number;
+    summary: { observedPixels: number; classes: WaterClass[] };
+    notes: string[];
+    hand: { pixels: number; ha: number | null; handMax: number } | null;
+  };
   legend: { id: number; label: string; color: number[] }[];
   downloads: Download[];
 }
@@ -50,6 +60,9 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
   const [mode, setMode] = useState<Mode>('optical');
   const [a, setA] = useState<StoredFile<RasterMeta> | null>(null);
   const [b, setB] = useState<StoredFile<RasterMeta> | null>(null);
+  const [dem, setDem] = useState<StoredFile<RasterMeta> | null>(null);
+  const [handMax, setHandMax] = useState('15');
+  const [streamKm2, setStreamKm2] = useState('0.5');
   const [roles, setRoles] = useState<Partial<Record<Role, number>>>({});
   const [vv, setVv] = useState('1');
   const [dropDb, setDropDb] = useState('3');
@@ -66,10 +79,10 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
     onOutput(null);
   };
 
-  const load = async (file: File, which: 'a' | 'b') => {
+  const load = async (file: File, which: 'a' | 'b' | 'dem') => {
     const f = await job.run(which, signal => files.upload(file, signal), fail);
     if (!f) return;
-    (which === 'a' ? setA : setB)(f);
+    (which === 'a' ? setA : which === 'b' ? setB : setDem)(f);
     if (which === 'a') {
       const g = f.meta.guessedBands;
       setRoles({ green: g.green, nir: g.nir, swir1: g.swir1 });
@@ -82,6 +95,14 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
     const thr = threshold.trim() === '' ? 'auto' : Number(threshold);
     if (thr !== 'auto' && !Number.isFinite(thr)) return fail('Set the threshold as a number, or leave it empty for automatic.');
     const params: Record<string, unknown> = { mode, threshold: thr, boundary };
+    if (dem) {
+      const hm = Number(handMax);
+      const sk = Number(streamKm2);
+      if (!(hm >= 0.5 && hm <= 500)) return fail('Set the HAND limit between 0.5 and 500 m.');
+      if (!(sk > 0 && sk <= 100000)) return fail('Set the channel threshold as a positive area in km².');
+      params.handMax = hm;
+      params.streamKm2 = sk;
+    }
     if (mode === 'optical') {
       params.bands = Object.fromEntries(Object.entries(roles).filter(([, v]) => v !== undefined));
       const qa = qaOf(a.meta);
@@ -90,7 +111,7 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
       params.band = Math.max(0, Number(vv) - 1);
       params.dropDb = Number(dropDb);
     }
-    const r = await job.run('run', (signal, onProgress) => runJob<WaterJob>('water', { a: a.id, b: b?.id }, params, { signal, onProgress }), m => {
+    const r = await job.run('run', (signal, onProgress) => runJob<WaterJob>('water', { a: a.id, b: b?.id, dem: dem?.id }, params, { signal, onProgress }), m => {
       fail(m);
       setOut(null);
       onOutput(null);
@@ -101,7 +122,7 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
   };
 
   const cls = (label: string) => out?.result.summary.classes.find(c => c.label === label);
-  const area = (c: WaterClass | undefined) => (!c ? '—' : c.ha === null ? `${c.pixels.toLocaleString()} px` : areaHa(c.ha, units));
+  const area = (c: Pick<WaterClass, 'pixels' | 'ha'> | null | undefined) => (!c ? '—' : c.ha === null ? `${c.pixels.toLocaleString()} px` : areaHa(c.ha, units));
   const bandOptions = a ? Array.from({ length: a.meta.bands }, (_, i) => i) : [];
 
   return (
@@ -122,6 +143,16 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
       <div className="drop-pair">
         <FileDrop id="water-a" compact label="Before (or the only image)" accept=".tif,.tiff" hint="GeoTIFF" busy={busy === 'a'} loaded={a?.name} onFile={f => load(f, 'a')} />
         <FileDrop id="water-b" compact label="After (optional)" accept=".tif,.tiff" hint="GeoTIFF · same grid" busy={busy === 'b'} loaded={b?.name} onFile={f => load(f, 'b')} />
+        <FileDrop
+          id="water-dem"
+          compact
+          label="Elevation (optional)"
+          accept=".tif,.tiff"
+          hint="DEM · removes water high above streams (HAND)"
+          busy={busy === 'dem'}
+          loaded={dem?.name}
+          onFile={f => load(f, 'dem')}
+        />
       </div>
       <div className="param-row">
         {mode === 'optical' && a && a.meta.bands > 1 && (
@@ -153,6 +184,18 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
             </label>
           </>
         )}
+        {dem && (
+          <>
+            <label className="param" title="Water standing more than this above its nearest channel is removed (terrain shadow, steep slopes). Set it from the flood heights expected locally.">
+              <span>HAND max (m)</span>
+              <input id="water-hand" type="number" min="0.5" max="500" step="1" value={handMax} onChange={e => setHandMax(e.target.value)} />
+            </label>
+            <label className="param" title="A channel starts where at least this area drains to a cell. Smaller values make more, smaller channels.">
+              <span>Channel from (km²)</span>
+              <input id="water-stream" type="number" min="0.0001" step="0.1" value={streamKm2} onChange={e => setStreamKm2(e.target.value)} />
+            </label>
+          </>
+        )}
         <label className="param" title={mode === 'optical' ? 'Water if the index is at least this; empty = automatic (Otsu)' : 'Water if VV (dB) is at most this; empty = automatic (Otsu)'}>
           <span>Threshold</span>
           <input id="water-threshold" type="number" step={mode === 'optical' ? '0.05' : '0.5'} placeholder="auto" value={threshold} onChange={e => setThreshold(e.target.value)} />
@@ -175,6 +218,7 @@ export default function WaterTool({ onOutput, boundary }: { onOutput: (out: Tool
             ) : (
               <Stat label="Water" value={area(cls('Water'))} />
             )}
+            {out.result.hand && <Stat label={`Removed by HAND (> ${fmt(out.result.hand.handMax, 3)} m)`} value={area(out.result.hand)} />}
             <Stat label="Threshold" value={`${out.result.index} ${out.result.mode === 'optical' ? '≥' : '≤'} ${fmt(out.result.threshold, 3)}${out.result.unit ? ` ${out.result.unit}` : ''}`} />
           </div>
           {out.map.image && (

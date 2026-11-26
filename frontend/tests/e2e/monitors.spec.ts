@@ -27,7 +27,7 @@ test('forest loss: watch the analysis boundary for new loss', async ({ page }) =
     id: 'm'.repeat(32), name: 'Sample plot A', active: true, email: true, status: 'Checked 2 new scenes up to 2026-10-07: 1 new alert (6.04 ha).',
     lastChecked: 1_790_000_000, nextCheck: 1_790_086_400, settings: { forestNdvi: 0.5, drop: 0.25, minAreaHa: 1, maxCloud: 40, checkHours: 24 },
   };
-  let created: { name: string; geojson: { features: unknown[] }; settings: { drop: number; minAreaHa: number } } | null = null;
+  let created: { name: string; geojson: { features: unknown[] }; settings: { drop: number; minAreaHa: number; radar?: number; vhDrop?: number } } | null = null;
   await page.route('**/api/monitors**', async route => {
     const req = route.request();
     const url = new URL(req.url());
@@ -47,12 +47,14 @@ test('forest loss: watch the analysis boundary for new loss', async ({ page }) =
   await page.click('summary:has-text("Watch an area for new loss")');
   await expect(page.locator('#monitor-panel')).toContainText('analysis boundary “Sample plot A (fictional)”');
   await page.fill('#monitor-drop', '0.25');
+  await expect(page.locator('#monitor-radar')).toBeChecked();
+  await page.fill('#monitor-vh-drop', '4');
   await page.fill('#monitor-min-area', '1');
   await page.click('#monitor-create');
   await expect(page.locator('.toast', { hasText: 'Watching “Sample plot A”' })).toBeVisible();
   expect(created!.name).toBe('Sample plot A (fictional)');
   expect(created!.geojson.features.length).toBeGreaterThan(0);
-  expect(created!.settings).toEqual({ drop: 0.25, minAreaHa: 1 });
+  expect(created!.settings).toEqual({ drop: 0.25, minAreaHa: 1, radar: 1, vhDrop: 4 });
   await expect(page.locator('#monitor-list')).toContainText('1 new alert (6.04 ha)');
   await expect(page.locator('#monitor-alerts')).toContainText('2026-10-07');
   await expect(page.locator('#monitor-alerts')).toContainText('6.04');

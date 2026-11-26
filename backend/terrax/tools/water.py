@@ -16,6 +16,9 @@ from . import tool
 from .common import boundary, class_geotiff, class_overlay, clean, number, raster
 from .context import ToolContext, ToolError
 
+HAND_MAX_DEFAULT = 15.0  # m; TerraX's default, to be set from the terrain and the flood heights expected there
+STREAM_KM2_DEFAULT = 0.5  # km² draining to a cell for it to start a channel: the hydrology tool's default
+
 
 def _optical(r: Raster, params: dict, notes: list[str]) -> tuple[np.ndarray, str]:
     """The water index of one image (NaN where cloudy or no data)."""
@@ -50,6 +53,34 @@ def _radar_db(r: Raster, band: int, notes: list[str]) -> np.ndarray:
     return np.where(bad | ~np.isfinite(db), np.nan, db)
 
 
+def _hand_on_grid(ctx: ToolContext, inputs: dict, a: Raster, stream_km2: float, notes: list[str]) -> np.ndarray:
+    """Height above the nearest drainage, computed on the DEM's own grid and warped onto the image's analysis grid
+    (bilinear); NaN outside the DEM or where no channel is reached."""
+    from rasterio.crs import CRS
+    from rasterio.warp import Resampling, reproject
+
+    from ..config import settings
+    from ..processing.terrain import height_above_drainage
+
+    dem = raster(ctx, inputs, "dem", pixels=settings().dem_pixels)
+    if not dem.meta.crs_wkt or not a.meta.crs_wkt or dem.transform is None or a.transform is None:
+        raise ToolError("The DEM and the image both need a known coordinate reference system to be combined.")
+    geo = ground_geometry(dem.meta, dem.gw, dem.gh)
+    if geo is None:
+        raise ToolError("The DEM's pixel size could not be measured in metres; HAND needs ground units.")
+    (z,) = dem.read_bands([0])
+    ctx.progress(0.3, "Height above the nearest drainage")
+    hand, _ = height_above_drainage(z.data.astype(np.float64), geo, stream_km2 * 1e6)
+    out = np.full((a.gh, a.gw), np.nan, dtype=np.float32)
+    reproject(hand, out, src_transform=dem.transform, src_crs=CRS.from_wkt(dem.meta.crs_wkt), dst_transform=a.transform,
+              dst_crs=CRS.from_wkt(a.meta.crs_wkt), src_nodata=np.nan, dst_nodata=np.nan, resampling=Resampling.bilinear)
+    covered = float(np.isfinite(out).mean() * 100)
+    notes.append(f"Height above the nearest drainage (HAND; Rennó et al. 2008, Nobre et al. 2011) from {dem.meta.filename}: D8 flow on the "
+                 f"depression-filled DEM, channels where at least {wp.fmt(stream_km2, 3)} km² drains; "
+                 f"known for {wp.fmt(covered, 3)} % of the image (elsewhere the DEM is missing or no channel is reached, and nothing is removed).")
+    return out
+
+
 @tool("water")
 def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     mode = params.get("mode", "optical")
@@ -79,6 +110,10 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
             inside, _ = boundary_mask(a, Grid(width=a.gw, height=a.gh, data=va.astype(np.float32), resample_factor=a.resample_factor), bnd)
         except ValueError as e:
             raise ToolError(str(e)) from None
+    hand = None
+    if inputs.get("dem"):
+        stream_km2 = number(params, "streamKm2", STREAM_KM2_DEFAULT, 0.0001, 100000, "Set the channel threshold as a positive area in km².")
+        hand = _hand_on_grid(ctx, inputs, a, stream_km2, notes)
     ctx.progress(0.6, "Finding water")
     # One threshold for both dates (from the later image, or the only one), so the dates are judged alike.
     ref = vb if vb is not None else va
@@ -89,9 +124,19 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
     else:
         thr, note = wp.auto_threshold(ref[inside], plausible, default, unit)
         notes.append(note)
-    def is_water(v: np.ndarray) -> np.ndarray:  # above the index threshold, or below the backscatter threshold; never where unobserved
+    def raw_water(v: np.ndarray) -> np.ndarray:  # above the index threshold, or below the backscatter threshold; never where unobserved
         with np.errstate(invalid="ignore"):
             return np.isfinite(v) & ((v >= thr) if mode == "optical" else (v <= thr))
+
+    too_high = np.zeros(va.shape, dtype=bool)
+    hand_max = 0.0
+    if hand is not None:
+        hand_max = number(params, "handMax", HAND_MAX_DEFAULT, 0.5, 500, "Set the HAND limit between 0.5 and 500 m.")
+        with np.errstate(invalid="ignore"):
+            too_high = hand > hand_max  # NaN (unknown) is not too high
+
+    def is_water(v: np.ndarray) -> np.ndarray:
+        return raw_water(v) & ~too_high
 
     valid_a = np.isfinite(va) & inside
     extra = None
@@ -117,6 +162,15 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
                      "radar shadow, smooth tarmac and dry sand can look like water. Compare dates from the same orbit.")
     if geo:
         notes.append(geo.note)
+    hand_removed = None
+    if hand is not None:
+        removed = (raw_water(vb if vb is not None else va) & too_high & inside)
+        cells = int(removed.sum())
+        hand_removed = {"pixels": cells, "ha": float((removed * geo.cell_area[:, None]).sum()) / 1e4 if geo else None, "handMax": hand_max}
+        amount = f"{wp.fmt(hand_removed['ha'], 4)} ha" if hand_removed["ha"] is not None else f"{cells:,} pixels"
+        notes.append(f"Water more than {wp.fmt(hand_max, 3)} m above its nearest channel was removed ({amount}{' on the later date' if vb is not None else ''}): "
+                     "dark terrain shadow and steep slopes that look like water. The limit is a setting, not a calibrated value: set it from "
+                     "the flood heights expected locally; it also removes real water on hilltops and terraces, such as ponds and reservoirs.")
     if a.resample_factor > 1:
         notes.append(f"Analysed on a resampled grid (each cell = {wp.fmt(a.resample_factor, 3)} original pixels; TERRAX_GRID_PIXELS sets the limit), so narrow "
                      "channels and small ponds can be missed; areas use the true size of the resampled cells.")
@@ -147,7 +201,7 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         downloads.append(tif)
     dates = [f"{'Before' if two else 'Image'}: {a.meta.filename}"] + ([f"After: {b.meta.filename}"] if b is not None else [])
     res = {"mode": mode, "index": name, "threshold": thr, "unit": unit.strip(), "summary": summary, "dates": dates, "notes": notes, "mmuHa": mmu,
-           "width": a.gw, "height": a.gh}
+           "width": a.gw, "height": a.gh, "hand": hand_removed}
     return clean({"tool": "water", "name": f"{label}: {a.meta.filename}", "markdown": wp.water_markdown(res), "map": {"bounds": a.meta.latlng_bounds, "image": image},
                   "result": res, "legend": legend, "downloads": downloads})
 

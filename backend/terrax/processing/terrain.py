@@ -464,7 +464,46 @@ def flow_routing(dem: np.ndarray, geo: Ground, threshold_m2: float, dinf: bool =
         lengths.pop()
         max_order -= 1
     return {"width": dem.shape[1], "height": dem.shape[0], "dir": direction, "acc": acc, "order": order, "thresholdM2": threshold_m2,
-            "maxOrder": int(max_order), "lengthByOrder": lengths, "raisedCells": int(raised), "maxRaise": float(max_raise), "dinf": extra}
+            "maxOrder": int(max_order), "lengthByOrder": lengths, "raisedCells": int(raised), "maxRaise": float(max_raise), "dinf": extra,
+            "filled": filled}
+
+
+@njit(cache=True)
+def _hand(filled, direction, stream, order):
+    """Height of each cell above the channel cell its D8 path reaches first. Cells in ascending filled elevation: after
+    Priority-Flood+ε every cell drains to a strictly lower one, so its downstream cell is already done. NaN where the
+    path leaves the grid or ends in a pit before reaching a channel (no drainage within the DEM)."""
+    h, w = filled.shape
+    base = np.full((h, w), np.nan)
+    for i in range(order.size):
+        k = order[i]
+        r, c = k // w, k % w
+        z = filled[r, c]
+        if np.isnan(z):
+            continue
+        if stream[r, c]:
+            base[r, c] = z
+            continue
+        d = direction[r, c]
+        if d < 0:
+            continue
+        rr, cc = r + DR[d], c + DC[d]
+        if rr < 0 or cc < 0 or rr >= h or cc >= w:
+            continue
+        base[r, c] = base[rr, cc]
+    return filled - base
+
+
+def height_above_drainage(dem: np.ndarray, geo: Ground, threshold_m2: float) -> tuple[np.ndarray, dict]:
+    """HAND (Rennó et al. 2008; Nobre et al. 2011): each cell's height above the nearest drainage, following D8 flow
+    on the depression-filled DEM. Channels are cells draining at least `threshold_m2`. Returns HAND (m, NaN where the
+    flow path reaches no channel inside the DEM) and the flow-routing summary."""
+    f = flow_routing(dem, geo, threshold_m2)
+    filled = f["filled"]
+    flat = np.where(np.isnan(filled), np.inf, filled).ravel()
+    order = np.argsort(flat, kind="stable")
+    hand = _hand(filled, f["dir"], f["acc"] >= threshold_m2, order)
+    return hand.astype(np.float32), f
 
 
 def snap_outlet(acc: np.ndarray, col: int, row: int, radius: int = 3) -> tuple[int, int]:

@@ -106,3 +106,48 @@ def test_radar_flood_excludes_permanently_dark_ground(client, tmp_path):
     c = _tif(tmp_path, client, "other.tif", [np.full((50, 50), 0.1)], 10)
     assert "same grid" in run_err(client, "water", {"a": a, "b": c}, {"mode": "radar"})
     assert "optical" in run_err(client, "water", {"a": a}, {"mode": "lidar"})
+
+
+def _valley(res, cols, rows):
+    """A straight valley along easting E0 + 1500 m (column 50 at 30 m), sides rising 1 m every 6 m across, the floor
+    falling 0.5 m every 30 m southwards: water drains straight across to the river, so HAND is exactly |dx| / 6."""
+    x = E0 + (np.arange(cols) + 0.5) * res
+    y = N0 - (np.arange(rows) + 0.5) * res
+    return np.abs(x[None, :] - (E0 + 1515)) / 6 + (y[:, None] - (N0 - rows * res)) * 0.5 / 30
+
+
+def test_hand_is_the_height_above_the_channel():
+    from terrax.processing.rio import Ground
+    from terrax.processing.terrain import height_above_drainage
+
+    z = _valley(30, 101, 100)
+    geo = Ground(np.full(100, 900.0), np.full(100, 30.0), np.full(100, 30.0), "")
+    hand, flow = height_above_drainage(z, geo, 0.05e6)
+    assert flow["acc"][99, 50] > 0.05e6
+    np.testing.assert_allclose(hand[:, 47:54], np.tile([15, 10, 5, 0, 5, 10, 15], (100, 1)), atol=1e-6)
+    np.testing.assert_allclose(hand[50, 80], 150, atol=1e-6)
+
+
+def test_hand_removes_water_on_hillsides(client, tmp_path):
+    """A river (columns 48–52, at most 10 m above the channel) and a dark, water-like patch on the hillside (columns
+    70–75, 100–125 m up). With the DEM, only the patch is removed, also with a coarser DEM on its own grid. Channels
+    start at 0.1 km²: a whole hillside drains less (0.045 km² at 30 m, 0.09 km² at 60 m), so only the river is a channel;
+    a smaller threshold would turn the long planar hillsides into channels themselves (HAND 0)."""
+    land = {"green": 0.08, "nir": 0.3, "swir1": 0.2}
+    wet = {"green": 0.06, "nir": 0.02, "swir1": 0.01}
+    b = {k: np.full((100, 100), v) for k, v in land.items()}
+    for k in b:
+        b[k][:, 48:53] = wet[k]
+        b[k][10:20, 70:76] = wet[k]
+    img = _tif(tmp_path, client, "valley.tif", [b["green"], b["nir"], b["swir1"]], 30)
+    params = {"mode": "optical", "bands": {"green": 0, "nir": 1, "swir1": 2}, "threshold": 0}
+    plain = run(client, "water", {"a": img}, params)["result"]
+    assert plain["summary"]["classes"][1]["ha"] == pytest.approx(45 + 5.4, rel=1e-6) and plain["hand"] is None
+    for res, size in ((30, 100), (60, 50)):
+        dem = _tif(tmp_path, client, f"dem{res}.tif", [_valley(res, size, size)], res)
+        r = run(client, "water", {"a": img, "dem": dem}, {**params, "streamKm2": 0.1})["result"]
+        assert r["summary"]["classes"][1]["ha"] == pytest.approx(45, rel=1e-6), res
+        assert r["hand"]["ha"] == pytest.approx(5.4, rel=1e-6) and r["hand"]["handMax"] == 15
+        assert any("above its nearest channel was removed (5.4 ha)" in n for n in r["notes"]) and any("HAND" in n and "known for 100 %" in n for n in r["notes"])
+    # A higher limit keeps the patch.
+    assert run(client, "water", {"a": img, "dem": dem}, {**params, "streamKm2": 0.1, "handMax": 200})["result"]["summary"]["classes"][1]["ha"] == pytest.approx(50.4, rel=1e-6)

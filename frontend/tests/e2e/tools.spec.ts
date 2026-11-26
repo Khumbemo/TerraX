@@ -18,10 +18,15 @@ test('forest loss: synthetic sample gives areas and a report', async ({ page }) 
   await expect(stats).toContainText('Forest loss');
   await expect(stats).toContainText('ha');
   await expect(page.locator('.report-card')).toContainText('Method and limits');
-  // Zoomed in past the picture's detail, the map loads full-resolution tiles of the class grid.
-  const tiles = await mapState<{ min: number; max: number } | null>(page, `m => { const s = m.getSource('tx-image-tiles'); return s ? { min: s.minzoom, max: s.maxzoom } : null; }`);
-  test.skip(tiles === null && Boolean(process.env.TERRAX_URL), 'the deployment under test makes tiles only for large grids');
-  expect(tiles).not.toBeNull();
+  // Zoomed in past the picture's detail, the map loads full-resolution tiles of the class grid. The map adds the tile
+  // source on its next render, after the report appears, so wait for it rather than reading the map once.
+  const readTiles = () => mapState<{ min: number; max: number } | null>(page, `m => { const s = m.getSource('tx-image-tiles'); return s ? { min: s.minzoom, max: s.maxzoom } : null; }`);
+  if (process.env.TERRAX_URL) {
+    await page.waitForTimeout(2000);
+    test.skip((await readTiles()) === null, 'the deployment under test makes tiles only for large grids');
+  }
+  await expect.poll(readTiles).not.toBeNull();
+  const tiles = await readTiles();
   // Signed (?t=…), so tiles also load where cookies are not sent.
   const tile = page.waitForResponse(r => /\/tiles\/change\/\d+\/\d+\/\d+\.png\?t=\d+\.[\w-]+$/.test(r.url()) && r.status() === 200);
   await mapState(page, `m => { const [w, s, e, n] = m.getSource('tx-image-tiles').serialize().bounds; m.jumpTo({ center: [(w + e) / 2, (s + n) / 2], zoom: ${tiles!.max} }); return true; }`);

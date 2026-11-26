@@ -24,7 +24,7 @@ interface Monitor {
   status: string;
   lastChecked: number | null;
   nextCheck: number;
-  settings: { forestNdvi: number; drop: number; minAreaHa: number; maxCloud: number; checkHours: number };
+  settings: { forestNdvi: number; drop: number; minAreaHa: number; maxCloud: number; checkHours: number; radar?: number; vhDrop?: number };
   alertCount?: number;
   alerts?: Alert[];
 }
@@ -40,6 +40,8 @@ export default function MonitorPanel({ boundary }: { boundary: Boundary | null }
   const [busy, setBusy] = useState(false);
   const [drop, setDrop] = useState('0.2');
   const [minArea, setMinArea] = useState('0.5');
+  const [radar, setRadar] = useState(true);
+  const [vhDrop, setVhDrop] = useState('3');
   const fail = (e: unknown) => notify(e instanceof Error ? e.message : String(e), 'error');
 
   const load = useCallback(async () => {
@@ -75,7 +77,7 @@ export default function MonitorPanel({ boundary }: { boundary: Boundary | null }
       if (!boundary) throw new Error('Draw or upload the area to watch as the analysis boundary first.');
       const m = await request<Monitor>('/api/monitors', {
         method: 'POST',
-        json: { name: boundary.name, geojson: boundary.geojson, settings: { drop: Number(drop), minAreaHa: Number(minArea) } },
+        json: { name: boundary.name, geojson: boundary.geojson, settings: { drop: Number(drop), minAreaHa: Number(minArea), radar: radar ? 1 : 0, vhDrop: Number(vhDrop) } },
       });
       setOpen(m);
       notify(`Watching “${m.name}”.`, 'success');
@@ -102,7 +104,8 @@ export default function MonitorPanel({ boundary }: { boundary: Boundary | null }
       <p className="field-hint">
         TerraX builds a cloud-free reference from recent Sentinel-2 scenes, then checks every new scene (daily by default). A forest pixel (reference NDVI ≥ 0.5) whose
         NDVI falls by the set drop is confirmed when the next clear scene shows it too, as in the GLAD and RADD alerts; patches of at least the set area are
-        reported{canEmail ? ' and e-mailed to you' : ' (this server cannot send e-mail, so check here)'}. Areas up to 14 km across.
+        reported{canEmail ? ' and e-mailed to you' : ' (this server cannot send e-mail, so check here)'}. Areas up to 14 km across. With radar, Sentinel-1 scenes,
+        which see through cloud, are checked too: a fall in VH backscatter below its reference median, confirmed by the next radar scene.
       </p>
       <div className="param-row">
         <span className="field-hint">Area: {boundary ? `analysis boundary “${boundary.name}”` : 'draw or upload a boundary first'}.</span>
@@ -110,6 +113,15 @@ export default function MonitorPanel({ boundary }: { boundary: Boundary | null }
           <span>NDVI drop ≥</span>
           <input id="monitor-drop" type="number" min="0.05" max="1" step="0.05" value={drop} onChange={e => setDrop(e.target.value)} />
         </label>
+        <label className="check" title="Sentinel-1 radar sees through the cloud that can hide the ground from Sentinel-2 for weeks">
+          <input id="monitor-radar" type="checkbox" checked={radar} onChange={e => setRadar(e.target.checked)} /> Radar too
+        </label>
+        {radar && (
+          <label className="param" title="Fall in VH backscatter below its reference median that marks a radar candidate; a setting, not a calibrated value">
+            <span>VH drop ≥ (dB)</span>
+            <input id="monitor-vh-drop" type="number" min="0.5" max="15" step="0.5" value={vhDrop} onChange={e => setVhDrop(e.target.value)} />
+          </label>
+        )}
         <label className="param">
           <span>Min. patch (ha)</span>
           <input id="monitor-min-area" type="number" min="0.01" step="0.1" value={minArea} onChange={e => setMinArea(e.target.value)} />
@@ -151,7 +163,7 @@ export default function MonitorPanel({ boundary }: { boundary: Boundary | null }
           <div className="eyebrow">{open.name}</div>
           <p className="field-hint">
             {open.status} Last checked {when(open.lastChecked)}; next {open.active ? when(open.nextCheck) : 'when resumed'}. Drop ≥ {fmt(open.settings.drop)}, patches ≥ {fmt(open.settings.minAreaHa)} ha,
-            scenes under {fmt(open.settings.maxCloud)} % cloud.
+            scenes under {fmt(open.settings.maxCloud)} % cloud{open.settings.radar ? `; radar on, VH drop ≥ ${fmt(open.settings.vhDrop ?? 3)} dB` : ''}.
           </p>
           <div className="button-row">
             <button type="button" className="btn btn-small" disabled={busy} onClick={() => act(async () => setOpen(await request<Monitor>(`/api/monitors/${open.id}/check`, { method: 'POST', json: {} })))}>

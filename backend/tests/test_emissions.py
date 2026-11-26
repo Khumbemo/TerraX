@@ -134,3 +134,44 @@ def test_validated_emissions_use_the_estimated_area(client, tmp_path):
     assert (e["co2High"] - e["co2Low"]) / 2 / e["co2"] > 0.2
     assert e["uncertaintyPct"]["approach1"] == pytest.approx(math.hypot(loss["areaCi"] / loss["area"] * 100, 20))
     assert "CO₂ emissions from the estimated loss area" in acc["markdown"] and "map's own count" not in acc["markdown"]
+
+    # The emissions summary: activity data with its interval, emission factor, emissions, yearly mean, status.
+    acc8 = client.post(f"/api/jobs/{jid}/validation/accuracy", json={"file": fid, "periodYears": 8}).json()
+    md = acc8["reddSummary"]["markdown"]
+    for part in ("## 1. Activity data", "## 2. Emission factor", "## 3. Emissions", "## 4. Uncertainty", "## 5. What is counted", "## 6. Status"):
+        assert part in md
+    from terrax.processing.stats import fmt
+
+    assert f"**{fmt(loss['area'], 4)} ± {fmt(loss['areaCi'], 4)} ha**" in md and f"{fmt(e['co2'] / 8, 4)} t CO₂/yr" in md
+    assert "NDVI ≥ 0.5" in md and "not the FAO definition" in md and "not a verified submission" in md
+    assert f"From the mapped area instead (not for reporting) | {fmt(res['emissions']['co2'], 4)} t CO₂" in md
+    got = client.get(acc8["reddSummary"]["download"]["url"])
+    assert got.status_code == 200 and got.text == md
+    assert "Mean per year" not in acc["reddSummary"]["markdown"]  # no period given
+    assert client.post(f"/api/jobs/{jid}/validation/accuracy", json={"file": fid, "periodYears": -1}).status_code == 422
+
+
+def test_labelling_in_the_app_is_blind_to_the_map(client):
+    """The sample gives each point's location and pixel outline but not its map class, in an order that does not follow
+    the classes; labels sent directly give the same accuracy as the labelled file."""
+    a, b = sample(client, "forest_ndvi_2016_synthetic.tif"), sample(client, "forest_ndvi_2024_synthetic.tif")
+    res = run(client, "forest", {"a": a, "b": b}, {"mode": "ndvi", "emissions": {"agb": 250, "agbCi": 50, "zone": "trop-moist"}})
+    jid = res["map"]["image"]["url"].split("/")[3]
+    s = client.post(f"/api/jobs/{jid}/validation/sample", json={"total": 120, "minPerClass": 20}).json()
+    locs = s["locations"]
+    assert len(locs) == s["points"] == 120 and set(locs[0]) == {"id", "lon", "lat", "cell"}
+    assert len(locs[0]["cell"]) == 5 and locs[0]["cell"][0] == locs[0]["cell"][-1]
+    lons = [c[0] for c in locs[0]["cell"][:4]]
+    lats = [c[1] for c in locs[0]["cell"][:4]]
+    assert min(lons) < locs[0]["lon"] < max(lons) and min(lats) < locs[0]["lat"] < max(lats)  # the point is inside its pixel
+    assert [x["id"] for x in locs] != sorted(x["id"] for x in locs)  # shuffled: ids run class by class
+    assert s["labels"] == res["labels"]
+    rows = {r["id"]: r for r in csv.DictReader(io.StringIO(client.get(s["downloads"][-1]["url"]).text))}
+    truth = {i: r["map_class"] for i, r in rows.items()}
+    by_labels = client.post(f"/api/jobs/{jid}/validation/accuracy", json={"labels": truth}).json()
+    assert by_labels["overallAccuracy"] == pytest.approx(1.0) and by_labels["samples"] == 120 and "reddSummary" in by_labels
+    half = {i: (v if n % 2 else "") for n, (i, v) in enumerate(truth.items())}  # unlabelled points are left out
+    assert client.post(f"/api/jobs/{jid}/validation/accuracy", json={"labels": half}).json()["unlabelled"] == 60
+    assert client.post(f"/api/jobs/{jid}/validation/accuracy", json={}).status_code == 400
+    bad = client.post(f"/api/jobs/{jid}/validation/accuracy", json={"labels": {"S0001": "Palm oil"}})
+    assert bad.status_code == 400 and "must be one of" in bad.json()["detail"]

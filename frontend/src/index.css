@@ -1906,6 +1906,15 @@ select {
 .field-row input {
   flex: 1 1 240px;
 }
+.labeller-map {
+  height: 380px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.labeller-classes .btn {
+  min-width: 0;
+}
 .ai-keys {
   list-style: decimal;
   margin: 0 0 10px;
