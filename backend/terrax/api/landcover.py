@@ -4,6 +4,7 @@ the accuracy and area estimates from its reference labels (Olofsson et al. 2014)
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import math
@@ -33,7 +34,12 @@ class SampleRequest(BaseModel):
 
 
 class AccuracyRequest(BaseModel):
-    file: str
+    #: The labelled sample file (CSV or GeoJSON with a "reference" column), or…
+    file: str | None = None
+    #: …the reference labels themselves, by point id (labelled in the web app); an empty label leaves the point out.
+    labels: dict[str, str] | None = Field(None, max_length=20_000)
+    #: Years between the two images, for the yearly mean in the forest emissions summary.
+    periodYears: float | None = Field(None, gt=0, le=200)
 
 
 class _Map(BaseModel):
@@ -123,11 +129,21 @@ def sample(job_id: str, req: SampleRequest, p: Principal = Depends(principal)) -
         saved.append(f"{base}_validation_sample.geojson")
         downloads.insert(0, download("Validation sample (GeoJSON)", f"{base}_validation_sample.geojson", "application/geo+json"))
     storage.save_artifacts(job_id, *saved)
+    # For labelling in the web app: each point and its pixel's outline, without its map class (labels must be made
+    # blind to the map), in a shuffled order, since the ids run class by class.
+    locations: list[dict] = []
+    if ll and pts and lon is not None and lat is not None:
+        n = len(pts)
+        clon, clat = ll(np.concatenate([cols, cols + 1, cols + 1, cols]), np.concatenate([rows, rows, rows + 1, rows + 1]))
+        shuffle = np.random.default_rng(int(hashlib.sha256(f"{job_id}:{req.seed}".encode()).hexdigest()[:8], 16)).permutation(n)
+        for i in shuffle:
+            ring = [[round(float(clon[i + j * n]), 7), round(float(clat[i + j * n]), 7)] for j in (0, 1, 2, 3, 0)]
+            locations.append({"id": ids[i], "lon": round(float(lon[i]), 7), "lat": round(float(lat[i]), 7), "cell": ring})
     weights = areas / areas.sum() if areas.sum() else areas
     unit = "ha" if np.any(row_area != 1) else "px"
     scale = 1e-4 if unit == "ha" else 1.0
     return {
-        "points": len(pts), "downloads": downloads,
+        "points": len(pts), "downloads": downloads, "locations": locations, "labels": labels,
         "allocation": [{"label": labels[i], "mapped": float(areas[i] * scale), "share": float(weights[i]), "n": int(sizes[i])} for i in range(k)], "unit": unit,
         "note": (f"Points are drawn at random within each mapped class: at least {req.minPerClass} per class, the rest in proportion to area (Olofsson et al. 2014). "
                  f"For ±2 % (95 %) on overall accuracy about {cochran_n(weights):,} points are needed if user’s accuracies are near 80 %. "
@@ -165,12 +181,17 @@ def accuracy(job_id: str, req: AccuracyRequest, who: Principal = Depends(princip
         s = json.loads(storage.artifact_path(job_id, "sample.json").read_text())
     except KeyError:
         raise HTTPException(400, "Create the validation sample first, then label it.") from None
-    try:
-        auth.own_file(who, req.file)
-        f = storage.get_file(req.file)
-    except KeyError:
-        raise HTTPException(404, "The labelled file is no longer on the server. Upload it again.") from None
-    refs = _read_labels(f.path, f.name)
+    if req.labels is not None:
+        refs = {str(k).strip(): str(v).strip() for k, v in req.labels.items()}
+    elif req.file:
+        try:
+            auth.own_file(who, req.file)
+            f = storage.get_file(req.file)
+        except KeyError:
+            raise HTTPException(404, "The labelled file is no longer on the server. Upload it again.") from None
+        refs = _read_labels(f.path, f.name)
+    else:
+        raise HTTPException(400, "Send the labelled sample file or the labels.")
     labels: list[str] = s["labels"]
     k = len(labels)
     by_name = {lab.strip().lower(): i for i, lab in enumerate(labels)}
@@ -201,7 +222,28 @@ def accuracy(job_id: str, req: AccuracyRequest, who: Principal = Depends(princip
     if validated:
         out["emissions"] = validated
         out["markdown"] += "\n\n" + em.emissions_markdown(validated, "CO₂ emissions from the estimated loss area")
+        out["reddSummary"] = _redd_summary(job_id, out, validated, req.periodYears)
     return out
+
+
+def _redd_summary(job_id: str, acc: dict, validated: dict, period_years: float | None) -> dict:
+    """The forest-loss emissions summary (processing/redd.py), saved with the job for download."""
+    from ..processing import redd
+
+    res = storage.job_result(job_id) or {}
+    r = res.get("result") or {}
+    rule = None
+    if r.get("mode") == "ndvi" and r.get("forestThreshold") is not None:
+        rule = (f"NDVI ≥ {r['forestThreshold']:g} on the earlier image, loss a drop of at least {abs(r.get('lossThreshold', 0)):g} "
+                "(a spectral proxy, not the FAO definition of ≥ 10 % canopy cover of trees ≥ 5 m on ≥ 0.5 ha).")
+    md = redd.summary(res.get("name") or "Forest loss", acc, validated, res.get("emissions"), period_years, rule)
+    name = "forest_emissions_summary.md"
+    art = storage.job_dir(job_id) / "artifacts"
+    art.mkdir(parents=True, exist_ok=True)
+    (art / name).write_text(md, encoding="utf-8")
+    storage.save_artifacts(job_id, name)
+    return {"markdown": md, "download": {"label": "Emissions summary (Markdown)", "filename": name,
+                                         "url": sign_urls(f"/api/jobs/{job_id}/artifacts/{name}", job_id), "mediaType": "text/markdown"}}
 
 
 def _validated_emissions(job_id: str, acc: dict, unit: str) -> dict | None:

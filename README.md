@@ -20,7 +20,7 @@ The browser uploads a file once and gets an id. To analyse it, the browser start
 
 | Tool | Upload | What it computes |
 |---|---|---|
-| **Forest loss** | Two NDVI (or red/NIR) GeoTIFFs on the same grid; Hansen GFC `lossyear` (+ `treecover2000`); pre/post NBR | Forest area, loss and gain in hectares; Hansen loss by year; dNBR burn severity (USGS classes); minimum mapping unit; loss polygons; a stratified validation sample and loss (or burned) area with a 95 % CI from its reference labels (Olofsson et al. 2014), as IPCC and REDD+ reporting expect; CO₂ emissions from the loss (IPCC 2006 stock-difference terms) from a biomass value or a biomass map, with a 95 % Monte Carlo interval, recomputed from the estimated area once the map is validated; monitoring of an area for new loss in new Sentinel-2 scenes, with e-mailed alerts (see [Forest-loss alerts](#forest-loss-alerts)) |
+| **Forest loss** | Two NDVI (or red/NIR) GeoTIFFs on the same grid; Hansen GFC `lossyear` (+ `treecover2000`); pre/post NBR | Forest area, loss and gain in hectares; Hansen loss by year; dNBR burn severity (USGS classes); minimum mapping unit; loss polygons; a stratified validation sample, labelled in the app over high-resolution imagery (blind to the map's class) or in a downloaded file, and loss (or burned) area with a 95 % CI from its reference labels (Olofsson et al. 2014), as IPCC and REDD+ reporting expect; an emissions summary laid out as activity data, emission factor, emissions and uncertainty, with a yearly mean; CO₂ emissions from the loss (IPCC 2006 stock-difference terms) from a biomass value or a biomass map, with a 95 % Monte Carlo interval, recomputed from the estimated area once the map is validated; monitoring of an area for new loss in new Sentinel-2 scenes, with e-mailed alerts (see [Forest-loss alerts](#forest-loss-alerts)) |
 | **Carbon & biomass** | Forest-Capture CSV or any CSV with species, DBH/GBH, height, plot size | AGB by Chave et al. 2014/2005, IPCC root:shoot, carbon and CO₂e per hectare with a Student-t 95 % CI |
 | **Land survey** | GeoJSON, KML, GPX, CSV (lat/lon), zipped Shapefile, or drawn on the map | Geodesic area and perimeter (Karney 2013), legs and bearings, UTM/DMS, elevation profile; becomes the analysis boundary |
 | **Residential plot** | Dated GeoTIFFs plus a boundary, or same-view photos | Radiometric normalisation, robust change detection, changes crossing the boundary (area and depth) |
@@ -368,6 +368,18 @@ On any machine or VM, `docker compose up --build` runs the web app (nginx), the 
   - The 95 % interval comes from 20,000 Monte Carlo draws of independent normal inputs (IPCC Approach 2). Approach 1 error propagation is shown for comparison.
   - Until the map is validated, the area is the mapped loss, which has no interval. Report the emissions from the estimated area.
   - TerraX has no built-in IPCC default biomass values: give a biomass value from field plots or a published estimate for the area, or a biomass map.
+- **Reference labelling.** The app shows each sample point over Esri World Imagery or Sentinel-2 cloudless (2016, 2020), with its pixel outlined and without its map class. The points are shuffled, because their ids run class by class.
+  - Labels are kept in the browser until the accuracy is computed. "Can't tell" leaves a point out of the estimates.
+  - Leaving many points out, especially in one class, can bias the estimates, because the estimators assume the missing points are like the labelled ones.
+  - Imagery dates vary by place. For change, compare imagery from before and after the map's two dates.
+- **Emissions summary.** After validation, the forest-loss emissions are summarised under REDD+ and IPCC headings:
+  - activity data: the estimated loss area with its 95 % CI, and the loss class's accuracies;
+  - emission factor;
+  - emissions, with the Approach 2 interval and an optional yearly mean;
+  - the uncertainty sources included and left out;
+  - what is counted: gross committed emissions in above- and below-ground biomass.
+  
+  It states that it is an automatic summary, not a verified submission.
 - **Seasonal disturbances.** Each pixel's model, y = a + b·t + c·cos 2πt + d·sin 2πt, is fitted on its first stable year of clear observations (at least 8). The window is stable when the trend across it and its first and last residuals are all below the threshold; otherwise it moves one observation later.
   - **Detection:** 3 (adjustable 2–6) clear observations in a row below the prediction by at least max(3σ, the smallest drop) confirm a disturbance. A single low value is treated as noise. A new model then starts.
   - **Limits:** a disturbance in the first year of clear data cannot be detected. Only drops are mapped. TerraX uses one harmonic and one index, where CCDC uses more harmonics and several bands together.

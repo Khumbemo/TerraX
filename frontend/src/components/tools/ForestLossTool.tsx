@@ -363,10 +363,11 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
               jobId={out.map.image.url.split('/')[3]}
               idPrefix="forest"
               classes={out.legend.length}
+              askPeriod={Boolean(out.emissions)}
               intro={
                 result.mode === 'burn'
                   ? 'Mapped burned areas include the map’s errors. Draw a stratified random sample, label each point’s true severity class from field plots (e.g. CBI) or finer imagery without looking at the map, then upload it for accuracy and area estimates with 95 % confidence intervals (Olofsson et al. 2014).'
-                  : 'Mapped loss includes the map’s errors, and loss the map missed hides in the large stable classes. Draw a stratified random sample, label each point’s true change from field visits or finer imagery of both dates without looking at the map, then upload it for loss area with a 95 % confidence interval (Olofsson et al. 2014), as IPCC and REDD+ reporting expect.'
+                  : 'Mapped loss includes the map’s errors, and loss the map missed hides in the large stable classes. Draw a stratified random sample, label each point’s true change from field visits or finer imagery of both dates without looking at the map, then label it here over imagery or upload it, for loss area with a 95 % confidence interval (Olofsson et al. 2014), as IPCC and REDD+ reporting expect.'
               }
               onAccuracy={a => {
                 setValidated(a);
