@@ -35,7 +35,11 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         l_thr = number(params, "lossThreshold", -0.2, -2, 0, "Set the forest threshold between −1 and 1, and the loss threshold below 0 (for example −0.2).")
         if l_thr >= 0:
             raise ToolError("Set the forest threshold between −1 and 1, and the loss threshold below 0 (for example −0.2).")
-        r = fp.analyze_ndvi_change(a, bands(params, "bandsA"), b, bands(params, "bandsB"), f_thr, l_thr, bnd, mmu)
+        base = _baseline(ctx, inputs, params, a) if inputs.get("forestMap") else None
+        try:
+            r = fp.analyze_ndvi_change(a, bands(params, "bandsA"), b, bands(params, "bandsB"), f_thr, l_thr, bnd, mmu, baseline=base)
+        except ValueError as e:
+            raise ToolError(str(e)) from None
     elif mode == "burn":
         r = fp.analyze_burn(a, bands(params, "bandsA"), b, bands(params, "bandsB"), bnd, mmu)
     else:
@@ -78,6 +82,28 @@ def run(ctx: ToolContext, inputs: dict, params: dict) -> dict:
         "downloads": downloads,
         "emissions": emissions,
     })
+
+
+def _baseline(ctx: ToolContext, inputs: dict, params: dict, a):
+    """Forest at the start from a tree-cover, canopy height or class map (processing/baseline.py)."""
+    from ..processing.baseline import FAO_COVER, FAO_HEIGHT, FAO_MIN_HA, forest_baseline
+
+    spec = params.get("forestMap") or {}
+    if not isinstance(spec, dict):
+        raise ToolError("Describe the forest map as {kind, minCover, minHeight, classes, minHa}.")
+    kind = spec.get("kind", "cover")
+    m = raster(ctx, inputs, "forestMap")
+    cover = number(spec, "minCover", FAO_COVER, 0, 100, "Set the minimum tree cover between 0 and 100 %.")
+    height = number(spec, "minHeight", FAO_HEIGHT, 0, 200, "Set the minimum tree height between 0 and 200 m.")
+    min_ha = number(spec, "minHa", FAO_MIN_HA, 0, 1000, "Set the minimum forest area between 0 and 1,000 ha.")
+    classes = spec.get("classes") or []
+    if not isinstance(classes, list) or not all(isinstance(c, int | float) and not isinstance(c, bool) for c in classes):
+        raise ToolError("List the forest classes as numbers, for example [10] for ESA WorldCover tree cover.")
+    ctx.progress(0.2, "Forest at the start from the forest map")
+    try:
+        return forest_baseline(m, kind, a, ground_geometry(a.meta, a.gw, a.gh), min_cover=cover, min_height=height, classes=[float(c) for c in classes], min_ha=min_ha)
+    except ValueError as e:
+        raise ToolError(str(e)) from None
 
 
 class EmissionSettings(TypedDict):

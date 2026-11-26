@@ -13,6 +13,7 @@ import type { Boundary } from '../../lib/zonal';
 import FileDrop from '../FileDrop';
 import JobStatus from '../JobStatus';
 import { ArtifactImage, Downloads, Notes, Stat, useUpload } from '../ToolKit';
+import { ForestMapSettings, NDVI_FOREST, forestMapRequest, type ForestMapInputs } from './ForestMapPanel';
 import { EmissionSettings, EmissionsResult, NO_EMISSIONS, emissionRequest, type Emissions, type EmissionInputs } from './EmissionsPanel';
 import MapValidation, { type AccuracyResult } from './MapValidation';
 import MonitorPanel from './MonitorPanel';
@@ -134,6 +135,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
   const [mmu, setMmu] = useState('0');
   const [out, setOut] = useState<ForestJob | null>(null);
   const [emis, setEmis] = useState<EmissionInputs>(NO_EMISSIONS);
+  const [forestMap, setForestMap] = useState<ForestMapInputs>(NDVI_FOREST);
   const [validated, setValidated] = useState<(AccuracyResult & { emissions?: Emissions }) | null>(null);
   const report = (r: ForestJob, accuracyMarkdown: string | null) =>
     onOutput({ tool: 'forest', name: r.name, markdown: r.markdown + (accuracyMarkdown ?? ''), map: r.map, figures: r.map.image ? [{ title: r.map.image.label, url: r.map.image.url }] : [] });
@@ -147,6 +149,11 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
     setB(null);
     setOut(null);
     onOutput(null);
+  };
+
+  const loadForestMap = async (file: File) => {
+    const f = await job.run('forestmap', signal => files.upload(file, signal), fail);
+    if (f) setForestMap(v => ({ ...v, map: f }));
   };
 
   const loadBiomass = async (file: File) => {
@@ -171,13 +178,15 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
     if (m === 'hansen' && (!Number.isFinite(cThr) || cThr < 0 || cThr > 100)) return fail('Set the canopy threshold between 0 and 100 %.');
     const em = m === 'burn' ? null : emissionRequest(emis);
     if (typeof em === 'string') return fail(em);
+    const fm = m === 'ndvi' ? forestMapRequest(forestMap) : null;
+    if (typeof fm === 'string') return fail(fm);
     const r = await job.run(
       'run',
       (signal, onProgress) =>
         runJob<ForestJob>(
           'forest',
-          { a: sa.file.id, b: sb?.file.id, biomass: em?.biomass },
-          { mode: m, bandsA: sa.bands, bandsB: sb?.bands ?? {}, forestThreshold: fThr, lossThreshold: lThr, canopyThreshold: cThr, mmuHa, boundary, emissions: em?.params },
+          { a: sa.file.id, b: sb?.file.id, biomass: em?.biomass, forestMap: fm?.file },
+          { mode: m, bandsA: sa.bands, bandsB: sb?.bands ?? {}, forestThreshold: fThr, lossThreshold: lThr, canopyThreshold: cThr, mmuHa, boundary, emissions: em?.params, forestMap: fm?.params },
           { signal, onProgress },
         ),
       msg => {
@@ -256,7 +265,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
           <>
             <label className="param">
               <span>Forest if NDVI ≥</span>
-              <input id="forest-thr" type="number" step="0.05" min="0" max="1" value={forestThr} onChange={e => setForestThr(e.target.value)} />
+              <input id="forest-thr" type="number" step="0.05" min="0" max="1" value={forestThr} disabled={forestMap.kind !== 'ndvi'} title={forestMap.kind !== 'ndvi' ? 'The forest map decides forest at the start' : undefined} onChange={e => setForestThr(e.target.value)} />
             </label>
             <label className="param">
               <span>Loss if ΔNDVI ≤</span>
@@ -282,6 +291,7 @@ export default function ForestLossTool({ onOutput, boundary }: Props) {
           </button>
         </div>
       </div>
+      {mode === 'ndvi' && <ForestMapSettings value={forestMap} onChange={setForestMap} onMapFile={loadForestMap} busy={busy === 'forestmap'} />}
       {mode !== 'burn' && <EmissionSettings value={emis} onChange={setEmis} onMapFile={loadBiomass} busy={busy === 'biomass'} />}
       {mode !== 'burn' && <MonitorPanel boundary={boundary} />}
       <JobStatus job={job} onCancel={job.cancel} />

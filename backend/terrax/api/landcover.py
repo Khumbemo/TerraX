@@ -236,6 +236,9 @@ def _redd_summary(job_id: str, acc: dict, validated: dict, period_years: float |
     if r.get("mode") == "ndvi" and r.get("forestThreshold") is not None:
         rule = (f"NDVI ≥ {r['forestThreshold']:g} on the earlier image, loss a drop of at least {abs(r.get('lossThreshold', 0)):g} "
                 "(a spectral proxy, not the FAO definition of ≥ 10 % canopy cover of trees ≥ 5 m on ≥ 0.5 ha).")
+    elif r.get("mode") == "ndvi" and r.get("forestRule"):
+        rule = (f"{r['forestRule']} from a forest map at the start, loss a drop in NDVI of at least {abs(r.get('lossThreshold', 0)):g} "
+                "(the FAO definition also needs ≥ 0.5 ha and land not mainly in agricultural or urban use).")
     md = redd.summary(res.get("name") or "Forest loss", acc, validated, res.get("emissions"), period_years, rule)
     name = "forest_emissions_summary.md"
     art = storage.job_dir(job_id) / "artifacts"

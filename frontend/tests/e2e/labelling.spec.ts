@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { openTool, start } from './helpers';
 
@@ -46,5 +50,36 @@ test('forest loss: label the sample over imagery in the app, then the accuracy a
   const md = await (await import('node:fs/promises')).readFile((await dl.path())!, 'utf8');
   expect(md).toContain('## 1. Activity data');
   expect(md).toContain('t CO₂/yr');
+  expect(errors).toEqual([]);
+});
+
+test('forest loss: forest at the start from a class map instead of NDVI', async ({ page }) => {
+  // A class map on the sample's grid: forest (10) where the earlier NDVI is ≥ 0.5, but only in the western half.
+  const out = join(mkdtempSync(join(tmpdir(), 'terrax-classes-')), 'classes.tif');
+  execFileSync('python3', ['-c', `
+import numpy as np, rasterio
+with rasterio.open('../backend/data/samples/forest_ndvi_2016_synthetic.tif') as s:
+    ndvi = s.read(1); prof = s.profile
+c = np.where(ndvi >= 0.5, 10, 40).astype('uint8')
+c[:, c.shape[1] // 2:] = 40
+prof.update(dtype='uint8', count=1, nodata=0)
+with rasterio.open(${JSON.stringify(out)}, 'w', **prof) as d:
+    d.write(c, 1)
+`]);
+  const errors = await start(page);
+  await openTool(page, 'Forest loss');
+  await page.click('button:has-text("Try synthetic sample")');
+  const lossStat = page.locator('.result-block .stat', { hasText: 'Forest loss' }).first();
+  await expect(lossStat).toContainText('184.05 ha');
+  await page.click('summary:has-text("Forest at the start")');
+  await page.selectOption('#forest-map-kind', 'classes');
+  await expect(page.locator('#forest-thr')).toBeDisabled();
+  await page.setInputFiles('#forest-map', out);
+  await page.fill('#forest-map-classes', '10');
+  await page.click('button.btn-primary:has-text("Estimate forest loss")');
+  await expect(page.locator('.report-card')).toContainText('class 10 in the class map');
+  const after = Number(/([\d,.]+) ha/.exec(await lossStat.innerText())![1].replace(/,/g, ''));
+  expect(after).toBeGreaterThan(0);
+  expect(after).toBeLessThan(184.05);
   expect(errors).toEqual([]);
 });

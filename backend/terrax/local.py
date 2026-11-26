@@ -32,8 +32,9 @@ from typing import Any
 TOOLS: dict[str, dict[str, Any]] = {
     "forest": {"summary": "Forest loss between two dates (NDVI change), Hansen loss by year, or burn severity (dNBR); CO₂ emissions from the loss",
                "inputs": {"a": "earlier image (NDVI, or red/NIR bands; the Hansen treecover2000 or pre-fire NBR)", "b": "later image (the Hansen lossyear or post-fire NBR)",
-                          "biomass": "optional above-ground biomass map (t/ha, e.g. the canopy tool's agb_mg_ha.tif) for CO₂ emissions"},
-               "params": {"mode": "ndvi | hansen | burn", "forestThreshold": "0.5", "lossThreshold": "-0.2", "canopyThreshold": "30 (Hansen, %)", "mmuHa": "0 (minimum mapping unit, ha)",
+                          "biomass": "optional above-ground biomass map (t/ha, e.g. the canopy tool's agb_mg_ha.tif) for CO₂ emissions",
+                          "forestMap": "optional forest map at the start: tree cover %, canopy height (m) or a class map (NDVI mode)"},
+               "params": {"mode": "ndvi | hansen | burn", "forestThreshold": "0.5 (NDVI; or a forest map)", "forestMap": '{"kind": "cover | height | classes", "minCover": 10, "minHeight": 5, "classes": [10], "minHa": 0.5} (with input forestMap)', "lossThreshold": "-0.2", "canopyThreshold": "30 (Hansen, %)", "mmuHa": "0 (minimum mapping unit, ha)",
                           "emissions.agb": "above-ground biomass of the lost forest, t/ha (or give a biomass map)", "emissions.agbCi": "its 95 % half-width, t/ha",
                           "emissions.zone": "trop-rain | trop-moist | trop-dry | trop-shrub | trop-mountain | temp-broadleaf | temp-conifer (IPCC root-to-shoot ratio)",
                           "emissions.biomassCiPct": "a biomass map's 95 % uncertainty, %", "emissions.afterBiomass": "0 (biomass left after clearing, t/ha)"}},

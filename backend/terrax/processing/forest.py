@@ -147,7 +147,10 @@ def _range_error(counts: list[tuple[int, int]], name: str, what: str, hint: str)
         raise ValueError(f"{name} has values outside −1…1, so it does not look like {what}. {hint}")
 
 
-def analyze_ndvi_change(before: Raster, before_bands: dict, after: Raster, after_bands: dict, forest_thr: float, loss_thr: float, boundary=None, mmu_ha: float = 0) -> dict:
+def analyze_ndvi_change(before: Raster, before_bands: dict, after: Raster, after_bands: dict, forest_thr: float, loss_thr: float, boundary=None, mmu_ha: float = 0,
+                        baseline=None) -> dict:
+    """NDVI change. Forest at the start is NDVI ≥ `forest_thr` on the earlier image, or, with a `baseline`
+    (processing/baseline.py), that map's forest; loss is ΔNDVI ≤ `loss_thr` on forest."""
     if not same_grid(before.meta, after.meta):
         raise ValueError(f"The two images are on different grids ({before.meta.width}×{before.meta.height} vs {after.meta.width}×{after.meta.height}, or different extents or CRS). Export both dates with the same region, scale and CRS so pixels line up.")
     if loss_thr >= 0:
@@ -164,9 +167,11 @@ def analyze_ndvi_change(before: Raster, before_bands: dict, after: Raster, after
         # Compare in float64, as JavaScript did, so values exactly on a threshold are classed the same way.
         v0, v1 = b.astype(np.float64), a.astype(np.float64)
         valid = np.isfinite(v0) & np.isfinite(v1)
+        if baseline is not None:
+            valid &= baseline.known[st.rows]
         d = np.where(valid, v1 - v0, 0)
         c = np.zeros(v0.shape, dtype=np.uint8)
-        forest = valid & (v0 >= forest_thr)
+        forest = valid & (baseline.forest[st.rows] if baseline is not None else (v0 >= forest_thr))
         gain = valid & ~forest & (d >= -loss_thr)
         c[forest] = 1
         c[forest & (d <= loss_thr)] = 2
@@ -180,13 +185,22 @@ def analyze_ndvi_change(before: Raster, before_bands: dict, after: Raster, after
     _range_error([p[4] for p in parts], after.meta.filename, "NDVI", "For multi-band imagery, assign the red and NIR bands.")
     n_valid = sum(p[0] for p in parts)
     sum_d = sum(p[1] for p in parts)
-    notes = [vb.note, va.note,
-             f"Forest is NDVI ≥ {forest_thr:g} on the earlier image; loss is a drop of {abs(loss_thr):g} or more (ΔNDVI ≤ {loss_thr:g}); gain is a rise of at least {abs(loss_thr):g} on non-forest.",
-             "NDVI thresholds are a proxy for forest: they do not apply the FAO definition (≥ 10 % canopy cover, trees ≥ 5 m, ≥ 0.5 ha). Seasonal leaf fall, clouds, haze or different sensors can look like loss, so compare images from the same season and check hotspots against high-resolution imagery."]
+    if baseline is None:
+        rule = f"NDVI ≥ {forest_thr:g}"
+        notes = [vb.note, va.note,
+                 f"Forest is NDVI ≥ {forest_thr:g} on the earlier image; loss is a drop of {abs(loss_thr):g} or more (ΔNDVI ≤ {loss_thr:g}); gain is a rise of at least {abs(loss_thr):g} on non-forest.",
+                 "NDVI thresholds are a proxy for forest: they do not apply the FAO definition (≥ 10 % canopy cover, trees ≥ 5 m, ≥ 0.5 ha). A tree-cover, canopy height or class map "
+                 "gives a better start. Seasonal leaf fall, clouds, haze or different sensors can look like loss, so compare images from the same season and check hotspots "
+                 "against high-resolution imagery."]
+    else:
+        rule = baseline.rule
+        notes = [vb.note, va.note, *baseline.notes,
+                 f"Loss is a drop in NDVI of {abs(loss_thr):g} or more (ΔNDVI ≤ {loss_thr:g}) on that forest; gain is a rise of at least {abs(loss_thr):g} on non-forest. "
+                 "Seasonal leaf fall, clouds, haze or different sensors can look like loss, so compare images from the same season."]
     _finish(plan, notes, sum(p[2] for p in parts))
     patches = _patch_step("ndvi", classes, plan, 1, mmu_ha, notes)
     t = _Totals(plan, classes)
-    return {"mode": "ndvi", "forestThreshold": forest_thr, "lossThreshold": loss_thr, "forestBefore": t.unit(1, 2), "loss": t.unit(2),
+    return {"mode": "ndvi", "forestThreshold": forest_thr if baseline is None else None, "forestRule": rule, "lossThreshold": loss_thr, "forestBefore": t.unit(1, 2), "loss": t.unit(2),
             "gain": t.unit(4), "validPixels": n_valid, "meanDelta": sum_d / n_valid if n_valid else None,
             "classes": classes, "width": plan.width, "height": plan.height, "patches": patches, "notes": notes}
 
@@ -324,7 +338,7 @@ def forest_markdown(r: dict, names: list[str]) -> str:
     fa = format_area
     if r["mode"] == "ndvi":
         pct = r["loss"]["pixels"] / r["forestBefore"]["pixels"] * 100 if r["forestBefore"]["pixels"] else None
-        lines += ["| Measure | Value |", "|---|---|", f"| Forest at start (NDVI ≥ {r['forestThreshold']:g}) | {fa(r['forestBefore'])} |",
+        lines += ["| Measure | Value |", "|---|---|", f"| Forest at start ({r['forestRule']}) | {fa(r['forestBefore'])} |",
                   f"| Forest loss (ΔNDVI ≤ {r['lossThreshold']:g}) | {fa(r['loss'])} |",
                   f"| Loss as share of starting forest | {f'{pct:.2f} %' if pct is not None else '—'} |", f"| Vegetation gain on non-forest | {fa(r['gain'])} |",
                   f"| Mean ΔNDVI (all valid pixels) | {fmt(r['meanDelta'])} |", f"| Valid pixels compared | {r['validPixels']:,} |", ""]
