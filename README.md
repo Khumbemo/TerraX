@@ -341,11 +341,11 @@ CI (`.github/workflows/ci.yml`) runs all five (the QGIS plugin on QGIS 3.34 LTR,
 
 TerraX needs its Python server, so a static host such as GitHub Pages or Netlify cannot run it. The older browser-only build, which runs every analysis in the browser and is kept as a claude.ai artifact, is described in `deploy/browser-preview/`.
 
-### Free, one container: Hugging Face Spaces or Render
+### One container: Hugging Face Spaces or Render
 
 The root `Dockerfile` builds a single container for hosts that run one service. In it, the FastAPI server serves the web app itself (`TERRAX_STATIC`) and runs analyses on background threads (`TERRAX_JOB_THREADS`), so nginx, Redis and Celery are not needed.
 
-**Hugging Face Spaces.** The free CPU tier has 2 vCPU and 16 GB of memory, which is enough for real rasters.
+**Hugging Face Spaces.** Hugging Face now needs a PRO subscription to host a Docker Space on its CPU tier: in November 2026, creating one on a free account was refused with "Static Spaces are free for everyone, but hosting Gradio and Docker Spaces on free cpu-basic requires a PRO subscription." (HTTP 402). Check huggingface.co/pro for the current terms.
 
 1. Create a write token at huggingface.co → Settings → Access Tokens.
 2. Upload the app: `HF_TOKEN=hf_... python deploy/huggingface/upload.py <your-name>/terrax`. This creates the Space if needed and uploads the repository with the Space README (`deploy/huggingface/README.md`).
