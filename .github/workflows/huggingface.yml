@@ -1,7 +1,8 @@
 name: Deploy to Hugging Face Spaces
 
-# Runs only when the repository has an HF_TOKEN secret and an HF_SPACE
-# variable (for example khumbemo/terrax): Settings → Secrets and variables → Actions.
+# Runs when the repository has an HF_TOKEN secret (a Hugging Face token with write
+# permission): Settings → Secrets and variables → Actions. The Space is the token
+# owner's "terrax", or the HF_SPACE variable when it is set as <user>/<space>.
 on:
   push:
     branches: [main]
@@ -12,16 +13,26 @@ permissions:
 
 jobs:
   upload:
-    if: ${{ vars.HF_SPACE != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Check for a Hugging Face token
+        id: token
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -n "$HF_TOKEN" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "No HF_TOKEN secret: nothing to deploy."; fi
       - uses: actions/checkout@v7
+        if: steps.token.outputs.present == 'true'
       - uses: actions/setup-python@v7
+        if: steps.token.outputs.present == 'true'
         with:
           python-version: '3.12'
       - run: pip install 'huggingface_hub>=0.25'
+        if: steps.token.outputs.present == 'true'
       - name: Upload to the Space
+        if: steps.token.outputs.present == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python deploy/huggingface/upload.py "${{ vars.HF_SPACE }}"
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: python deploy/huggingface/upload.py "$HF_SPACE"

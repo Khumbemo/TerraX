@@ -1,6 +1,9 @@
 """Uploads TerraX to a Hugging Face Space (Docker SDK).
 
-    HF_TOKEN=hf_... python deploy/huggingface/upload.py <user>/<space>
+    HF_TOKEN=hf_... python deploy/huggingface/upload.py [<user>/<space>]
+
+Without a <user>/<space> argument (or with one that is not of that form) the Space
+is <token owner>/terrax.
 
 Only files tracked by git are sent, with deploy/huggingface/README.md as the
 Space's README (its front matter tells Hugging Face to build the root
@@ -11,6 +14,7 @@ itself, so no git LFS setup is needed. The Space is created if it is missing.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,16 +42,28 @@ def stage(dest: Path) -> int:
     return len(files) + 1
 
 
+def space_name(arg: str | None, owner: str) -> tuple[str, str | None]:
+    """The Space to upload to, and a note when the argument was not usable."""
+    arg = (arg or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*", arg):
+        return arg, None
+    note = f"HF_SPACE {'is not of the form <user>/<space>' if arg else 'is not set'}; using {owner}/terrax."
+    return f"{owner}/terrax", note
+
+
 def main() -> None:
-    if len(sys.argv) != 2 or "/" not in sys.argv[1]:
-        sys.exit("Usage: HF_TOKEN=... python deploy/huggingface/upload.py <user>/<space>")
-    token = os.environ.get("HF_TOKEN")
+    if len(sys.argv) > 2:
+        sys.exit("Usage: HF_TOKEN=... python deploy/huggingface/upload.py [<user>/<space>]")
+    token = os.environ.get("HF_TOKEN", "").strip()
     if not token:
         sys.exit("Set HF_TOKEN to a Hugging Face access token with write permission.")
     from huggingface_hub import HfApi
 
-    space = sys.argv[1]
     api = HfApi(token=token)
+    owner = api.whoami()["name"]
+    space, note = space_name(sys.argv[1] if len(sys.argv) == 2 else None, owner)
+    if note:
+        print(note)
     api.create_repo(space, repo_type="space", space_sdk="docker", exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         n = stage(Path(tmp))
