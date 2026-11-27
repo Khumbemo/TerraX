@@ -173,3 +173,23 @@ test('offline assistant holds a conversation', async ({ page }) => {
   await expect(page.locator('.result-block')).toBeVisible();
   expect(await chat(page, 'dataset-chat', 'how much forest was lost?')).toMatch(/Forest loss.*ha/);
 });
+
+test('the Assistant button shows only when the OS Guide box is out of sight; portals say they are external', async ({ page }) => {
+  const errors = await start(page);
+  // Wide home page: the OS Guide box is on the right, so no duplicate button.
+  await expect(page.locator('#guide-chat')).toBeVisible();
+  await expect(page.locator('#nav-assistant')).toBeHidden();
+  await expect(page.locator('.link-dock')).toContainText('not affiliated with or endorsed by them');
+  // Inside a tool the side panels step aside, and the button opens the guide.
+  await openTool(page, 'Terrain');
+  await expect(page.locator('#guide-chat')).toBeHidden();
+  await page.click('#nav-assistant');
+  await expect(page.locator('#guide-chat-full')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.click('button:has-text("← All tools")');
+  await expect(page.locator('#nav-assistant')).toBeHidden();
+  // On a narrower screen the guide sits at the bottom of the page, so the button is offered again.
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect(page.locator('#nav-assistant')).toBeVisible();
+  expect(errors).toEqual([]);
+});

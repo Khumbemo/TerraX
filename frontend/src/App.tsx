@@ -284,7 +284,8 @@ export default function App() {
           <button type="button" id="nav-settings" onClick={() => setSettings({ open: true, tab: 'settings' })}>
             {t('nav.settings')}
           </button>
-          <button type="button" id="nav-assistant" onClick={() => setGuideOpen(true)}>
+          {/* Only when the OS Guide box is out of sight: inside a tool, or on narrower screens where it sits at the bottom (CSS). */}
+          <button type="button" id="nav-assistant" className={`nav-assistant${view === 'explore' && tool ? ' guide-hidden' : ''}`} onClick={() => setGuideOpen(true)}>
             Assistant
           </button>
         </nav>

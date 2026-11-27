@@ -113,6 +113,12 @@ export default function AboutTab() {
         <li>Planetary K-index: NOAA Space Weather Prediction Center. Sun times: the formulas of aa.quae.nl and the NOAA Solar Calculator.</li>
         <li>AI (optional): the provider of the key you add (Gemini, Claude, OpenAI and others), under that provider’s terms.</li>
       </ul>
+      <h4>External links</h4>
+      <p>
+        The Data portals (NASA Worldview, NASA FIRMS, Global Forest Watch, Google Earth Engine, NOAA SWPC and Ventusky) and other links open external sites, run by their owners
+        under their own terms. TerraX is not affiliated with or endorsed by NASA, NOAA, Google, the World Resources Institute, Ventusky or any other organisation named here; the
+        names are used only to say where the links and data come from.
+      </p>
     </div>
   );
 }

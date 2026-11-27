@@ -2966,3 +2966,15 @@ details[open] > summary {
   flex-wrap: wrap;
   gap: 4px 16px;
 }
+/* The Assistant button in the top bar is for when the OS Guide box is out of sight (see App.tsx). */
+@media (min-width: 1201px) {
+  .nav-assistant:not(.guide-hidden) {
+    display: none;
+  }
+}
+.dock-note {
+  margin: 4px 2px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dim);
+}
