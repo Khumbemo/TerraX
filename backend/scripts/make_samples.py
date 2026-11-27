@@ -181,6 +181,7 @@ def main() -> None:
     landcover_training()
     radar_samples()
     canopy_sample()
+    water_samples()
 
 
 def landcover_training() -> None:
@@ -250,6 +251,59 @@ def canopy_sample() -> None:
     las.number_of_returns = np.concatenate([np.where(under, 2, 1), np.full(under.sum(), 2)]).astype(np.uint8)
     las.write(str(OUT / "lidar_forest_synthetic.laz"))
     print("wrote lidar_forest_synthetic.laz")
+
+
+def water_samples() -> None:
+    """Lakes and a reservoir for the water tool (30 m pixels, south of the forest scene).
+
+    lakes_6band_synthetic.tif: blue, green, red, NIR, SWIR1 and red-edge (705 nm) surface reflectance with three lakes of
+    different water (clear: NDTI ≈ −0.33; turbid, sediment-laden: NDTI ≈ +0.10; green, phytoplankton-rich: NDCI ≈ +0.24),
+    a few ponds and a river along the eastern edge. The reflectances are typical published shapes, not measurements.
+
+    reservoir_mndwi_<date>_synthetic.tif: six dates of an MNDWI-like index in 2023. The reservoir shrinks in the dry
+    season (to about 60 % of its full radius in May) and a floodplain is under water only in July and September; the
+    March image has a cloud (no data) over its north-west.
+    """
+    g = np.random.default_rng(2024)
+    n0 = N0 - 9000
+    h = w = 160
+    yy, xx = np.mgrid[0:h, 0:w].astype(float)
+    land = {"blue": 0.04, "green": 0.07, "red": 0.05, "nir": 0.30, "swir1": 0.18, "re": 0.12}
+    clear = {"blue": 0.06, "green": 0.05, "red": 0.025, "nir": 0.015, "swir1": 0.008, "re": 0.02}
+    turbid = {"blue": 0.07, "green": 0.09, "red": 0.11, "nir": 0.05, "swir1": 0.015, "re": 0.09}
+    green = {"blue": 0.04, "green": 0.07, "red": 0.04, "nir": 0.04, "swir1": 0.01, "re": 0.065}
+    vary = 1 + 0.15 * noise_field(w, h, 25, 77)
+    bands = {k: v * vary for k, v in land.items()}
+    lakes = [
+        (((xx - 55) / 36) ** 2 + ((yy - 50) / 24) ** 2 <= 1, clear),
+        ((xx - 60) ** 2 + (yy - 118) ** 2 <= 17**2, turbid),
+        ((xx - 112) ** 2 + (yy - 95) ** 2 <= 13**2, green),
+        (np.abs(xx - (150 + 4 * np.sin(yy / 14))) <= 1.6, turbid),  # a river along the eastern edge
+    ]
+    for cx, cy, r in ((110, 30, 3.2), (125, 140, 2.4), (20, 140, 4.5), (95, 150, 1.8), (30, 95, 2.8)):
+        lakes.append(((xx - cx) ** 2 + (yy - cy) ** 2 <= r**2, clear))
+    for mask, spec in lakes:
+        for k in bands:
+            bands[k] = np.where(mask, spec[k], bands[k])
+    out = [np.clip(bands[k] + g.normal(0, 0.003, (h, w)), 0.001, 1) for k in ("blue", "green", "red", "nir", "swir1", "re")]
+    write_tif("lakes_6band_synthetic.tif", out, n0=n0)
+    with rasterio.open(OUT / "lakes_6band_synthetic.tif", "r+") as d:
+        for i, name in enumerate(("Blue (B2)", "Green (B3)", "Red (B4)", "NIR (B8)", "SWIR1 (B11)", "Red edge 705 nm (B5)"), 1):
+            d.set_band_description(i, name)
+
+    s = 120
+    yy, xx = np.mgrid[0:s, 0:s].astype(float)
+    full = 30.0
+    for day, frac, flood, cloud in (("2023-01-15", 1.0, False, False), ("2023-03-12", 0.8, False, True), ("2023-05-14", 0.6, False, False),
+                                    ("2023-07-16", 0.95, True, False), ("2023-09-10", 1.0, True, False), ("2023-11-12", 1.0, False, False)):
+        dist = np.hypot((xx - 50) / 1.3, yy - 55)
+        water = dist <= full * frac
+        if flood:
+            water |= (xx > 85) & (np.abs(yy - (60 + 10 * np.sin(xx / 9))) < 9)
+        v = np.where(water, 0.5 + g.normal(0, 0.05, (s, s)), -0.35 + g.normal(0, 0.08, (s, s)))
+        if cloud:
+            v[(xx - 20) ** 2 + (yy - 20) ** 2 <= 22**2] = -9999
+        write_tif(f"reservoir_mndwi_{day}_synthetic.tif", [v], n0=n0 - 6000)
 
 
 def _pip(poly, x, y) -> np.ndarray:

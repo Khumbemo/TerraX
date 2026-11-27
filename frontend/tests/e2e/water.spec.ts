@@ -45,3 +45,39 @@ scene(${JSON.stringify(after)}, slice(30, 60), True)
   await expect(page.locator('.report-card')).toContainText('removed 10.0 % of pixels');
   expect(errors).toEqual([]);
 });
+
+test('water: lakes listed with their turbidity and chlorophyll indices (synthetic 6-band sample)', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Water & floods');
+  await page.click('#water-sample');
+  // Nine water bodies, 430.9 ha (the clear lake alone 243.1 ha); the river along the eastern edge is cut by the image edge.
+  await expect(page.locator('.stat', { hasText: 'Water bodies' })).toContainText('9');
+  await expect(page.locator('.stat', { hasText: 'Total area' })).toContainText(/430\.9/);
+  await expect(page.locator('.stat', { hasText: 'Cut by edge or cloud' })).toContainText('1');
+  await expect(page.locator('#water-bodies-table tbody tr')).toHaveCount(9);
+  await expect(page.locator('#water-bodies-table tbody tr').first()).toContainText('243.09');
+  await expect(page.locator('#water-bodies-table thead')).toContainText('NDTI (mean)');
+  await expect(page.locator('.stat', { hasText: 'Turbidity index NDTI' })).toContainText(/0\.298/);
+  await expect(page.locator('.stat', { hasText: 'Chlorophyll index NDCI' })).toBeVisible();
+  await page.click('#water-view-ndti');
+  await expect(page.locator('.legend-labels')).toContainText('NDTI over interior water');
+  await expect(page.getByRole('button', { name: 'Export water-body inventory (CSV)' })).toBeVisible();
+  await expect(page.locator('.report-card')).toContainText('Lacaux');
+  expect(errors).toEqual([]);
+});
+
+test('water over time: occurrence and water on each date (synthetic 6-date reservoir)', async ({ page }) => {
+  const errors = await start(page);
+  await openTool(page, 'Water & floods');
+  await page.click('#water-dates-many');
+  await page.click('#water-sample');
+  await expect(page.locator('.stat', { hasText: 'Water almost always' })).toContainText('118.7');
+  await expect(page.locator('.stat', { hasText: 'Water at times' })).toContainText('262.17');
+  const rows = page.locator('#water-series-dates tbody tr');
+  await expect(rows).toHaveCount(6);
+  await expect(rows.nth(1)).toContainText('89.7 %'); // the cloudy March image
+  await expect(rows.nth(2)).toContainText('118.71'); // the dry season
+  await expect(page.locator('.stat', { hasText: 'Water bodies' })).toContainText('1');
+  await expect(page.locator('.report-card')).toContainText('Pekel et al. 2016');
+  expect(errors).toEqual([]);
+});

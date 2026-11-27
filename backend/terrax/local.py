@@ -48,10 +48,14 @@ TOOLS: dict[str, dict[str, Any]] = {
     "terrain": {"summary": "Slope, aspect, hillshade and elevation statistics of a DEM", "inputs": {"dem": "DEM GeoTIFF (metres)"}, "params": {}},
     "hydrology": {"summary": "Flow direction and accumulation (D8 or D∞), streams and wetness index", "inputs": {"dem": "DEM GeoTIFF"},
                   "params": {"method": "d8 | dinf", "thresholdKm2": "0.5"}},
-    "water": {"summary": "Surface water and floods: MNDWI/NDWI from optical images, or Sentinel-1 backscatter; one date or before/after",
+    "water": {"summary": "Surface water and floods: MNDWI/NDWI from optical images, or Sentinel-1 backscatter; one date, before/after, or a dated "
+                         "series (water occurrence); with an inventory of water bodies and, optically, turbidity (NDTI) and chlorophyll (NDCI) indices",
               "inputs": {"a": "image (or the date before)", "b": "optional image after, on the same grid",
+                         "images": "instead of a/b: a list of 3 or more dated images on one grid (date in each file name)",
                          "dem": "optional DEM: water standing high above its nearest channel (HAND) is removed"},
-              "params": {"mode": "optical | radar", "bands": '{"green": 1, "nir": 3, "swir1": 4} (optical; MNDWI with SWIR1, else NDWI)', "threshold": "auto (Otsu) or a number",
+              "params": {"mode": "optical | radar", "bands": '{"green": 1, "red": 2, "nir": 3, "swir1": 4, "rededge": 5} (optical; MNDWI with SWIR1, else NDWI; '
+                         'red for NDTI, rededge ~705 nm for NDCI)', "threshold": "auto (Otsu) or a number",
+                         "minObs": "3 (series: valid observations a pixel needs)", "almostPct": "90 (series: % of observations for water almost always)",
                          "band": "0 (radar: the VV band)", "dropDb": "3 (radar: backscatter drop for new water)", "mmuHa": "0 (minimum patch, ha)",
                          "handMax": "15 (m above the nearest channel, with a DEM)", "streamKm2": "0.5 (km² draining to start a channel, with a DEM)"}},
     "contours": {"summary": "Contour lines of a DEM", "inputs": {"dem": "DEM GeoTIFF"}, "params": {"interval": "10 (m)"}},

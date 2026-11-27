@@ -582,6 +582,31 @@
    ]
   },
   {
+   "id": "water-bodies",
+   "title": "Water bodies, water over time and water quality",
+   "keywords": {
+    "lake": 3,
+    "pond": 3,
+    "reservoir": 3,
+    "turbidity": 4,
+    "chlorophyll": 4,
+    "ndti": 4,
+    "ndci": 4,
+    "occurrence": 3,
+    "seasonal": 2,
+    "inventory": 3,
+    "wetland": 1
+   },
+   "phrases": [
+    "water bod|lakes and ponds|water over time|water occurrence|water quality|turbid|algae|algal"
+   ],
+   "answer": "In **Water** (Tools → Water), every run lists the **water bodies** it finds: each lake or pond with its area, perimeter, shoreline development, centre and size class, exported as CSV and GeoJSON. Bodies cut by the image edge, the boundary or cloud are marked **truncated** (only their visible part is measured). Perimeters follow pixel edges, so they run about 27 % longer than a smooth shore.\n\n**Water over time**: upload three or more dated images on one grid. TerraX uses one threshold for every date and maps each pixel's **water occurrence** (water observations ÷ cloud-free observations, as in Pekel et al. 2016), with the water seen on each date and how much of the area was visible.\n\n**Water quality** (optical, with a red band): **NDTI** = (Red − Green)/(Red + Green) for turbidity (Lacaux et al. 2007) and, with a red-edge band near 705 nm (Sentinel-2 B5), **NDCI** = (Red-edge − Red)/(Red-edge + Red) for chlorophyll-a (Mishra & Mishra 2012), on interior water pixels only. They are relative indicators: converting them to NTU or µg/L needs water samples taken near the image date.",
+   "suggestions": [
+    "What is NDWI?",
+    "How do I compute an index?"
+   ]
+  },
+  {
    "id": "ndmi",
    "title": "What NDMI means",
    "keywords": {
