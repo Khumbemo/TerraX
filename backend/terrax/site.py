@@ -5,7 +5,7 @@ Each one overrides its environment default while it is set, and goes back to it 
 * ``signup``: "open" or "closed" (default TERRAX_SIGNUP).
 * ``announcement``: a message shown to everyone at the top of the app.
 * ``maintenance`` and ``maintenanceMessage``: while on, new analyses are refused for everyone but administrators.
-* ``contactName``, ``contactEmail``, ``supportEmail``, ``supportUrl``: who runs this server and where to ask, shown in
+* ``contactName``, ``contactEmail``, ``contactPhone``, ``supportEmail``, ``supportUrl``: who runs this server and where to ask, shown in
   Settings → About. They are entered by an administrator; nothing is preset.
 
 Values are read from the database at most every few seconds per process, so a change reaches every worker quickly.
@@ -24,6 +24,8 @@ from . import db
 from .config import settings
 
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
+#: One or more phone numbers, separated by commas or slashes: digits, spaces, +, -, ( and ).
+_PHONE = re.compile(r"^[0-9+()\-\s,/]+$")
 _URL = re.compile(r"^https?://[^\s<>\"']+$", re.IGNORECASE)
 
 #: key → (kind, maximum length for text)
@@ -36,6 +38,7 @@ KEYS: dict[str, tuple[str, int]] = {
     "contactEmail": ("email", 254),
     "supportEmail": ("email", 254),
     "supportUrl": ("url", 300),
+    "contactPhone": ("phone", 80),
 }
 
 CACHE_SECONDS = 5.0
@@ -65,6 +68,8 @@ def clean(key: str, value: Any) -> Any:
         raise ValueError(f"Keep “{key}” under {limit} characters.")
     if kind == "email" and not _EMAIL.match(v):
         raise ValueError(f"“{v}” is not an e-mail address.")
+    if kind == "phone" and not (_PHONE.match(v) and all(len(re.sub(r"\D", "", n)) >= 6 for n in re.split(r"[,/]", v) if n.strip())):
+        raise ValueError("Write phone numbers with digits (and +, spaces, dashes or brackets), separated by commas.")
     if kind == "url" and not _URL.match(v):
         raise ValueError("The support link must start with https:// (or http://).")
     return v
@@ -120,7 +125,7 @@ def public() -> dict[str, Any]:
     return {
         "announcement": s.get("announcement"),
         "maintenance": maintenance(),
-        "contact": {k: s.get(k) for k in ("contactName", "contactEmail", "supportEmail", "supportUrl")},
+        "contact": {k: s.get(k) for k in ("contactName", "contactEmail", "contactPhone", "supportEmail", "supportUrl")},
         "version": __version__,
         "licence": "MIT",
     }

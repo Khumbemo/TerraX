@@ -45,6 +45,7 @@ interface SiteSettings {
   maintenanceMessage?: string;
   contactName?: string;
   contactEmail?: string;
+  contactPhone?: string;
   supportEmail?: string;
   supportUrl?: string;
 }
@@ -154,7 +155,7 @@ export default function AdminPanel() {
   useEffect(loadJobs, [loadJobs]);
 
   const saveSite = async () => {
-    const keys: (keyof SiteSettings)[] = ['signup', 'announcement', 'maintenance', 'maintenanceMessage', 'contactName', 'contactEmail', 'supportEmail', 'supportUrl'];
+    const keys: (keyof SiteSettings)[] = ['signup', 'announcement', 'maintenance', 'maintenanceMessage', 'contactName', 'contactEmail', 'contactPhone', 'supportEmail', 'supportUrl'];
     const changes = Object.fromEntries(keys.filter(k => (siteDraft[k] ?? null) !== (site?.[k] ?? null)).map(k => [k, siteDraft[k] ?? null]));
     if (!Object.keys(changes).length) return notify('Nothing changed.');
     try {
@@ -471,6 +472,17 @@ export default function AdminPanel() {
           <label className="input-group">
             <span>E-mail for enquiries</span>
             <input id="admin-site-contact-email" type="email" maxLength={254} value={siteDraft.contactEmail ?? ''} onChange={e => setDraft({ contactEmail: e.target.value })} />
+          </label>
+          <label className="input-group">
+            <span>Phone numbers (separate several with commas)</span>
+            <input
+              id="admin-site-contact-phone"
+              type="tel"
+              maxLength={80}
+              placeholder="+91 …, +91 …"
+              value={siteDraft.contactPhone ?? ''}
+              onChange={e => setDraft({ contactPhone: e.target.value })}
+            />
           </label>
           <label className="input-group">
             <span>E-mail for technical support</span>

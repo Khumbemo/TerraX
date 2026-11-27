@@ -21,7 +21,8 @@ const SOFTWARE =
 export default function AboutTab() {
   const site = useSite();
   const c = site?.contact;
-  const any = c && (c.contactName || c.contactEmail || c.supportEmail || c.supportUrl);
+  const any = c && (c.contactName || c.contactEmail || c.contactPhone || c.supportEmail || c.supportUrl);
+  const phones = (c?.contactPhone ?? '').split(/[,/]/).map(p => p.trim()).filter(Boolean);
   return (
     <div className="prose" id="about-tab">
       <h3>About TerraX{site?.version ? ` ${site.version}` : ''}</h3>
@@ -46,6 +47,18 @@ export default function AboutTab() {
               <dt>Enquiries</dt>
               <dd>
                 <a href={`mailto:${c.contactEmail}`}>{c.contactEmail}</a>
+              </dd>
+            </>
+          )}
+          {phones.length > 0 && (
+            <>
+              <dt>Phone</dt>
+              <dd className="about-phones">
+                {phones.map(p => (
+                  <a key={p} href={`tel:${p.replace(/[^\d+]/g, '')}`}>
+                    {p}
+                  </a>
+                ))}
               </dd>
             </>
           )}

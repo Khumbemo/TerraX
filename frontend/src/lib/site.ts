@@ -6,7 +6,7 @@ import { request } from './api';
 export interface SiteInfo {
   announcement: string | null;
   maintenance: string | null;
-  contact: { contactName: string | null; contactEmail: string | null; supportEmail: string | null; supportUrl: string | null };
+  contact: { contactName: string | null; contactEmail: string | null; contactPhone: string | null; supportEmail: string | null; supportUrl: string | null };
   version: string | null;
   licence: string;
 }
