@@ -348,7 +348,7 @@ The root `Dockerfile` builds a single container for hosts that run one service. 
 
 1. Create a write token at huggingface.co → Settings → Access Tokens.
 2. Upload the app: `HF_TOKEN=hf_... python deploy/huggingface/upload.py <your-name>/terrax`. This creates the Space if needed and uploads the repository with the Space README (`deploy/huggingface/README.md`).
-3. Optional: upload automatically on every push to `main`. In GitHub → Settings → Secrets and variables → Actions, add the secret `HF_TOKEN` and the variable `HF_SPACE` (for example `khumbemo/terrax`). The **Deploy to Hugging Face Spaces** workflow then runs on each push.
+3. Optional: upload automatically on every push to `main`. In GitHub → Settings → Secrets and variables → Actions, add the secret `HF_TOKEN` (a Hugging Face token with write permission). The Space is the token owner's `terrax`; set the variable `HF_SPACE` (for example `khumbemo/terrax`) for another name. The **Deploy to Hugging Face Spaces** workflow then runs on each push.
 
 **Render.** [Deploy with the blueprint](https://render.com/deploy?repo=https://github.com/Khumbemo/TerraX) (`render.yaml`). The free plan has 512 MB of memory. It runs the sample data one analysis at a time, sleeps after 15 idle minutes and takes about a minute to wake. Large rasters need a paid plan.
 
