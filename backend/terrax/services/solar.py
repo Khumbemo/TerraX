@@ -1,11 +1,15 @@
 """Solar geometry for the telemetry panel and the assistant.
 
 The equation of time and the declination follow the NOAA Solar Calculator
-(Meeus, *Astronomical Algorithms*). Accuracy is well under a minute of time
-and 0.01° of declination for current dates. Altitude, azimuth and the
-sunrise and sunset times use the formulas of aa.quae.nl, as SunCalc does.
-Sunrise and sunset use an altitude of −0.833°, which allows for refraction
-and the solar semi-diameter. Altitude has no refraction correction.
+(Meeus, *Astronomical Algorithms*). Altitude and azimuth come from the same
+declination and the hour angle that the equation of time gives, and sunrise
+and sunset are found by searching for the instant the sun's centre is at
+−0.833° (which allows for refraction and the solar semi-diameter). Altitude
+has no refraction correction.
+
+Checked against astropy (IAU SOFA/ERFA) for 2000–2045 at the equator, Kohima,
+Sydney, London and Tromsø: declination within 0.003°, equation of time within
+about a second; see tests/test_services.py for the reference values.
 """
 
 from __future__ import annotations
@@ -16,8 +20,6 @@ from datetime import UTC, datetime, timedelta
 
 RAD = math.pi / 180
 DAY_S = 86_400.0
-J1970 = 2440588
-J2000 = 2451545
 
 
 def _utc(dt: datetime) -> datetime:
@@ -81,66 +83,72 @@ def _js_round(x: float) -> int:
     return math.floor(x + 0.5)
 
 
-# ── Position and rise/set (aa.quae.nl formulas, as in SunCalc) ───────────────
+# ── Position and rise/set, from the same NOAA (Meeus) sun ──────────────────
 
-_E = RAD * 23.4397  # obliquity of the ecliptic
-_J0 = 0.0009
-
-
-def _to_days(dt: datetime) -> float:
-    return _unix(dt) / DAY_S - 0.5 + J1970 - J2000
-
-
-def _from_julian(j: float) -> datetime:
-    return datetime.fromtimestamp((j + 0.5 - J1970) * DAY_S, tz=UTC)
-
-
-def _mean_anomaly(d: float) -> float:
-    return RAD * (357.5291 + 0.98560028 * d)
-
-
-def _ecliptic_longitude(M: float) -> float:
-    C = RAD * (1.9148 * math.sin(M) + 0.02 * math.sin(2 * M) + 0.0003 * math.sin(3 * M))
-    return M + C + RAD * 102.9372 + math.pi
-
-
-def _declination(L: float) -> float:
-    return math.asin(math.sin(_E) * math.sin(L))
-
-
-def _right_ascension(L: float) -> float:
-    return math.atan2(math.sin(L) * math.cos(_E), math.cos(L))
+def _hour_angle(dt: datetime, lon: float, eot_minutes: float) -> float:
+    """Local hour angle of the sun, degrees (0 at local apparent noon, positive in the afternoon)."""
+    return (utc_hours(dt) + lon / 15 + eot_minutes / 60 - 12) * 15
 
 
 def sun_position(dt: datetime, lat: float, lon: float) -> tuple[float, float]:
-    """(altitude, azimuth from north) in degrees."""
-    lw, phi, d = RAD * -lon, RAD * lat, _to_days(dt)
-    L = _ecliptic_longitude(_mean_anomaly(d))
-    dec, ra = _declination(L), _right_ascension(L)
-    H = RAD * (280.16 + 360.9856235 * d) - lw - ra
-    az = math.atan2(math.sin(H), math.cos(H) * math.sin(phi) - math.tan(dec) * math.cos(phi))
-    alt = math.asin(math.sin(phi) * math.sin(dec) + math.cos(phi) * math.cos(dec) * math.cos(H))
-    # Measured from south, positive westward → from north, clockwise.
+    """(altitude, azimuth from north) in degrees: geometric (no refraction), from the NOAA declination and
+    the hour angle given by the equation of time."""
+    a = solar_angles(dt)
+    phi, dec, H = lat * RAD, a.declination * RAD, _hour_angle(dt, lon, a.equation_of_time) * RAD
+    alt = math.asin(max(-1.0, min(1.0, math.sin(phi) * math.sin(dec) + math.cos(phi) * math.cos(dec) * math.cos(H))))
+    az = math.atan2(math.sin(H), math.cos(H) * math.sin(phi) - math.tan(dec) * math.cos(phi)) if abs(lat) < 90 else 0.0
+    # atan2 gives the azimuth from south, positive westward → from north, clockwise.
     return alt / RAD, ((az / RAD + 180) % 360 + 360) % 360
 
 
+def _solar_noon(dt: datetime, lon: float) -> datetime:
+    """The local apparent noon nearest the given instant (UTC)."""
+    day = _utc(dt).replace(hour=0, minute=0, second=0, microsecond=0)
+    best = None
+    for k in (-1, 0, 1):
+        noon = day + timedelta(days=k, hours=12 - lon / 15)
+        for _ in range(3):  # the equation of time changes by < 30 s a day: three steps settle it
+            noon = day + timedelta(days=k, hours=12 - lon / 15 - solar_angles(noon).equation_of_time / 60)
+        if best is None or abs((noon - dt).total_seconds()) < abs((best - dt).total_seconds()):
+            best = noon
+    assert best is not None
+    return best
+
+
+def _crossing(f, t0: datetime, t1: datetime) -> datetime | None:
+    """The first instant in [t0, t1] where f changes sign: 6-minute steps, then bisection to under a second."""
+    step = timedelta(minutes=6)
+    a, fa = t0, f(t0)
+    while a < t1:
+        b = min(a + step, t1)
+        fb = f(b)
+        if (fa <= 0) != (fb <= 0):
+            for _ in range(20):  # 6 min / 2^20 ≪ 1 s
+                m = a + (b - a) / 2
+                fm = f(m)
+                if (fa <= 0) != (fm <= 0):
+                    b, fb = m, fm
+                else:
+                    a, fa = m, fm
+            return a + (b - a) / 2
+        a, fa = b, fb
+    return None
+
+
 def sun_times(dt: datetime, lat: float, lon: float, altitude: float = -0.833) -> tuple[datetime | None, datetime | None]:
-    """Sunrise and sunset nearest the given instant; None when the sun does not cross that altitude."""
-    lw, phi, d = RAD * -lon, RAD * lat, _to_days(dt)
-    n = math.floor(d - _J0 - lw / (2 * math.pi) + 0.5)  # JavaScript Math.round
-    ds = _J0 + lw / (2 * math.pi) + n
-    M = _mean_anomaly(ds)
-    L = _ecliptic_longitude(M)
-    dec = _declination(L)
-    j_noon = J2000 + ds + 0.0053 * math.sin(M) - 0.0069 * math.sin(2 * L)
-    cos_w = (math.sin(altitude * RAD) - math.sin(phi) * math.sin(dec)) / (math.cos(phi) * math.cos(dec))
-    if not -1 <= cos_w <= 1:
+    """Sunrise and sunset of the solar day nearest the given instant: when the sun's centre crosses `altitude`
+    (−0.833°: refraction and the semi-diameter). None when it does not cross that altitude that day (polar night
+    or midnight sun)."""
+    noon = _solar_noon(dt, lon)
+
+    def above(t: datetime) -> float:
+        return sun_position(t, lat, lon)[0] - altitude
+
+    rise = _crossing(above, noon - timedelta(hours=12), noon)
+    sset = _crossing(above, noon, noon + timedelta(hours=12))
+    if rise is None or sset is None:
         return None, None
-    w = math.acos(cos_w)
-    a = _J0 + (w + lw) / (2 * math.pi) + n
-    j_set = J2000 + a + 0.0053 * math.sin(M) - 0.0069 * math.sin(2 * L)
-    j_rise = j_noon - (j_set - j_noon)
-    return _from_julian(j_rise), _from_julian(j_set)
+    return rise, sset
 
 
 @dataclass
