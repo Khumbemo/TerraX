@@ -8,6 +8,8 @@ export type Theme = 'dark' | 'light' | 'galaxy';
 export type Background = 'earth-night' | 'earth' | 'galaxy' | 'custom' | 'off';
 /** How see-through panels are over the background. */
 export type PanelStyle = 'clear' | 'balanced' | 'solid';
+/** What the Planetary telemetry panel shows. */
+export type TelemetryView = 'earth' | 'moon' | 'orbit' | 'system';
 
 interface Prefs {
   theme: Theme;
@@ -16,6 +18,8 @@ interface Prefs {
   background: Background;
   panels: PanelStyle;
   setPanels: (p: PanelStyle) => void;
+  telemetryView: TelemetryView;
+  setTelemetryView: (v: TelemetryView) => void;
   map: MapSettings;
   updateMap: (patch: Partial<MapSettings>) => void;
   /** Bumped when the custom background image changes. */
@@ -63,6 +67,11 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.dataset.panels = panels;
   }, [panels]);
+  const [telemetryView, setTelemetryViewState] = useState<TelemetryView>(() => stored('telemetry_view', ['earth', 'moon', 'orbit', 'system'] as const, 'earth'));
+  const setTelemetryView = useCallback((v: TelemetryView) => {
+    setTelemetryViewState(v);
+    setJSON('telemetry_view', v);
+  }, []);
   const [customBgVersion, setCustomBgVersion] = useState(0);
   const setBackground = useCallback((b: Background) => {
     setBgState(b);
@@ -95,13 +104,13 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const t = useCallback((key: string, fallback = '') => translate(lang, key, fallback), [lang]);
 
   const value = useMemo(
-    () => ({ theme, units, lang, background, panels, setPanels, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t }),
-    [theme, units, lang, background, panels, setPanels, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t],
+    () => ({ theme, units, lang, background, panels, setPanels, telemetryView, setTelemetryView, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t }),
+    [theme, units, lang, background, panels, setPanels, telemetryView, setTelemetryView, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t],
   );
   return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
 }
 
-const DEFAULTS: Prefs = { theme: 'dark', units: 'metric', lang: 'en', background: 'off', panels: 'balanced', setPanels: () => {}, map: DEFAULT_MAP_SETTINGS, updateMap: () => {}, customBgVersion: 0, setBackground: () => {}, bumpCustomBg: () => {}, setTheme: () => {}, setUnits: () => {}, setLang: () => {}, t: (key, fallback = '') => translate('en', key, fallback) };
+const DEFAULTS: Prefs = { theme: 'dark', units: 'metric', lang: 'en', background: 'off', panels: 'balanced', setPanels: () => {}, telemetryView: 'earth', setTelemetryView: () => {}, map: DEFAULT_MAP_SETTINGS, updateMap: () => {}, customBgVersion: 0, setBackground: () => {}, bumpCustomBg: () => {}, setTheme: () => {}, setUnits: () => {}, setLang: () => {}, t: (key, fallback = '') => translate('en', key, fallback) };
 
 export function usePrefs(): Prefs {
   return useContext(PrefsContext) ?? DEFAULTS;

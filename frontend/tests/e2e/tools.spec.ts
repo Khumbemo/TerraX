@@ -193,3 +193,32 @@ test('the Assistant button shows only when the OS Guide box is out of sight; por
   await expect(page.locator('#nav-assistant')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('planetary telemetry: Earth and Moon, Earth around the Sun and the solar system, with a time-lapse', async ({ page }) => {
+  const errors = await start(page);
+  await page.selectOption('#telemetry-view', 'moon');
+  await expect(page.locator('#sky-readings')).toContainText('Phase');
+  await expect(page.locator('#sky-readings')).toContainText('Next moonrise');
+  await expect(page.locator('.telemetry-panel')).toContainText('Moon turns once in');
+  await page.click('#sky-play');
+  await expect(page.locator('#sky-when')).toContainText('Time-lapse');
+  await page.click('#sky-play');
+  await expect(page.locator('#sky-when')).toContainText('Now');
+  await page.selectOption('#telemetry-view', 'orbit');
+  await expect(page.locator('.telemetry-panel')).toContainText('Perihelion (closest)');
+  await expect(page.locator('.telemetry-panel')).toContainText('solstice');
+  await page.selectOption('#telemetry-view', 'system');
+  await expect(page.locator('.planet-row')).toHaveCount(9); // eight planets and Pluto
+  await page.locator('.planet-row summary', { hasText: 'Venus' }).click();
+  await expect(page.locator('.planet-row', { hasText: 'Venus' })).toContainText('(backwards)'); // retrograde (NASA)
+  await expect(page.locator('#sky-sources a')).toHaveAttribute('href', 'https://nssdc.gsfc.nasa.gov/planetary/factsheet/');
+  // The choice is kept, and also offered in Settings.
+  await page.reload();
+  await expect(page.locator('#telemetry-view')).toHaveValue('system');
+  await page.click('#nav-settings');
+  await expect(page.locator('#pref-telemetry')).toHaveValue('system');
+  await page.selectOption('#pref-telemetry', 'earth');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('canvas.globe').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});

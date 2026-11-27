@@ -1,13 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useToast } from '../lib/toast';
 import { idbSet } from '../lib/idb';
-import { usePrefs, type Background, type PanelStyle, type Theme } from '../lib/prefs';
+import { usePrefs, type Background, type PanelStyle, type TelemetryView, type Theme } from '../lib/prefs';
 import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
 import AiKeysSection from './AiKeysSection';
 import GEEGuidance from './GEEGuidance';
 import AboutTab from './AboutTab';
 import MapSettingsTab from './MapSettingsTab';
+import { TELEMETRY_VIEWS } from './SkyTelemetry';
 
 export interface Target {
   lat: number;
@@ -142,6 +143,16 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                       <select id="pref-units" value={prefs.units} onChange={e => prefs.setUnits(e.target.value as Units)}>
                         <option value="metric">{prefs.t('prefs.metric')}</option>
                         <option value="imperial">{prefs.t('prefs.imperial')}</option>
+                      </select>
+                    </label>
+                    <label className="inline-select" title="What the Planetary telemetry panel shows">
+                      <span>Telemetry</span>
+                      <select id="pref-telemetry" value={prefs.telemetryView} onChange={e => prefs.setTelemetryView(e.target.value as TelemetryView)}>
+                        {TELEMETRY_VIEWS.map(([id, label]) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="inline-select">
