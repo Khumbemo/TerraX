@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@protomaps/basemaps": "^5.7.2",
+    "d3-geo": "^3.1.2",
     "jspdf": "^4.2.1",
     "maplibre-gl": "^6.11.2",
     "pmtiles": "^4.5.0",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
+    "@types/d3-geo": "^3.1.1",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",

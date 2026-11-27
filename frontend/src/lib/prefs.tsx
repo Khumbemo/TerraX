@@ -3,9 +3,10 @@ import { translate, type Lang } from './i18n';
 import { getJSON, setJSON } from './storage';
 import type { Units } from './units';
 import { DEFAULT_MAP_SETTINGS, normaliseMapSettings, type MapSettings } from './basemaps';
+import { SPACE_IMAGE_IDS, type SpaceImage } from './backgrounds';
 
 export type Theme = 'dark' | 'light' | 'galaxy';
-export type Background = 'earth-night' | 'earth' | 'galaxy' | 'custom' | 'off';
+export type Background = 'earth-night' | 'earth' | 'galaxy' | SpaceImage | 'custom' | 'off';
 /** How see-through panels are over the background. */
 export type PanelStyle = 'clear' | 'balanced' | 'solid';
 /** What the Planetary telemetry panel shows. */
@@ -22,6 +23,9 @@ interface Prefs {
   setTelemetryView: (v: TelemetryView) => void;
   map: MapSettings;
   updateMap: (patch: Partial<MapSettings>) => void;
+  /** Whether the opening animation plays when TerraX opens. */
+  intro: boolean;
+  setIntro: (on: boolean) => void;
   /** Bumped when the custom background image changes. */
   customBgVersion: number;
   setBackground: (b: Background) => void;
@@ -49,7 +53,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
       setJSON('bg_version', 2);
       if (getJSON<unknown>('background', null) === 'earth') setJSON('background', 'earth-night');
     }
-    return stored('background', ['earth-night', 'earth', 'galaxy', 'custom', 'off'] as const, 'earth-night');
+    return stored<Background>('background', ['earth-night', 'earth', 'galaxy', ...SPACE_IMAGE_IDS, 'custom', 'off'], 'earth-night');
   });
   const [map, setMapState] = useState<MapSettings>(() => normaliseMapSettings(getJSON<unknown>('map', null)));
   const updateMap = useCallback((patch: Partial<MapSettings>) => {
@@ -71,6 +75,11 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const setTelemetryView = useCallback((v: TelemetryView) => {
     setTelemetryViewState(v);
     setJSON('telemetry_view', v);
+  }, []);
+  const [intro, setIntroState] = useState<boolean>(() => getJSON<unknown>('intro', true) !== false);
+  const setIntro = useCallback((on: boolean) => {
+    setIntroState(on);
+    setJSON('intro', on);
   }, []);
   const [customBgVersion, setCustomBgVersion] = useState(0);
   const setBackground = useCallback((b: Background) => {
@@ -104,13 +113,13 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const t = useCallback((key: string, fallback = '') => translate(lang, key, fallback), [lang]);
 
   const value = useMemo(
-    () => ({ theme, units, lang, background, panels, setPanels, telemetryView, setTelemetryView, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t }),
-    [theme, units, lang, background, panels, setPanels, telemetryView, setTelemetryView, map, updateMap, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t],
+    () => ({ theme, units, lang, background, panels, setPanels, telemetryView, setTelemetryView, map, updateMap, intro, setIntro, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t }),
+    [theme, units, lang, background, panels, setPanels, telemetryView, setTelemetryView, map, updateMap, intro, setIntro, customBgVersion, setBackground, bumpCustomBg, setTheme, setUnits, setLang, t],
   );
   return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
 }
 
-const DEFAULTS: Prefs = { theme: 'dark', units: 'metric', lang: 'en', background: 'off', panels: 'balanced', setPanels: () => {}, telemetryView: 'earth', setTelemetryView: () => {}, map: DEFAULT_MAP_SETTINGS, updateMap: () => {}, customBgVersion: 0, setBackground: () => {}, bumpCustomBg: () => {}, setTheme: () => {}, setUnits: () => {}, setLang: () => {}, t: (key, fallback = '') => translate('en', key, fallback) };
+const DEFAULTS: Prefs = { theme: 'dark', units: 'metric', lang: 'en', background: 'off', panels: 'balanced', setPanels: () => {}, telemetryView: 'earth', setTelemetryView: () => {}, intro: true, setIntro: () => {}, map: DEFAULT_MAP_SETTINGS, updateMap: () => {}, customBgVersion: 0, setBackground: () => {}, bumpCustomBg: () => {}, setTheme: () => {}, setUnits: () => {}, setLang: () => {}, t: (key, fallback = '') => translate('en', key, fallback) };
 
 export function usePrefs(): Prefs {
   return useContext(PrefsContext) ?? DEFAULTS;

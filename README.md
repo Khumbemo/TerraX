@@ -45,6 +45,14 @@ The left-hand panel shows the Sun and time at the target (altitude, azimuth, dec
 
 Each picture shows the positions now, and "Play" steps through positions computed for a month, a year or 12 years. Positions come from ERFA, the open-source edition of the IAU's SOFA routines (Earth: eraEpv00; Moon: eraMoon98; planets: eraPlan94), with aberration, light time, IAU 2006/2000A precession-nutation and the observer's place on the WGS84 ellipsoid. Physical facts are NASA's [Planetary Fact Sheet](https://nssdc.gsfc.nasa.gov/planetary/factsheet/). Checked against astropy's own pipeline (tests/test_sky.py, tests/test_services.py): the Sun, Venus and Jupiter within 4 arcsec in the sky, the Moon within 20 arcsec (its model's documented error) and 41 km, equinoxes and solstices to the second, sunrise and sunset to the minute (0.4 min where the Sun only grazes the horizon).
 
+## Logo, opening animation and backgrounds
+
+The TerraX logo is the Earth with two crossing orbits that make the X. Its land is Natural Earth 1:110m (public domain), seen from above north-east India. `frontend/src/components/LogoMark.tsx` draws it. `frontend/scripts/make-logo.tsx` writes `public/logo.svg` and the app icons from it: run `npx tsx scripts/make-logo.tsx`, which needs Playwright's Chromium.
+
+When TerraX opens, a short animation plays once per browser tab before the start or sign-in page: stars rush past, the Earth turns into place, the orbits draw, and the name appears. Any key, a click or **Skip** ends it. It is turned off in **Settings → Opening animation**, shortened for people who ask their system for reduced motion, and can be replayed with `?intro=1`.
+
+**Settings → Background** offers the Earth at night or in live day and night, a galaxy, ten space pictures, your own image, or none. The ten pictures are the Milky Way, a nebula, a spiral galaxy, a deep field, a star field, the Moon, Mars, Jupiter, Saturn and Neptune. They are artistic renderings made by `frontend/scripts/render-backgrounds.py` from noise and sphere geometry. They are not photographs, not to scale, and only loosely follow the real objects (the Moon's maria and Saturn's ring divisions sit roughly where the real ones are). They are released with TerraX under its MIT licence. For a real photograph, use **My own image**: NASA images are generally not copyrighted, but check each image's credit.
+
 ## Maps
 
 The map is MapLibre GL. Under **Settings → Map**, or with **Layers** on the map, you pick one base map and any number of overlays, each with its own opacity.

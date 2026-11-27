@@ -3006,3 +3006,202 @@ details[open] > summary {
   border-radius: 50%;
   display: inline-block;
 }
+
+/* Logo ------------------------------------------------------------------------------------------------------------ */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  margin-right: 2px;
+  letter-spacing: 0;
+}
+.brand-x {
+  background: linear-gradient(135deg, #38bdf8, #34d399);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.login-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+.gate-logo {
+  width: 112px;
+  height: 112px;
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.25));
+}
+
+/* Opening animation ------------------------------------------------------------------------------------------------- */
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: #02040a;
+  overflow: hidden;
+  cursor: pointer;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.intro-leaving {
+  opacity: 0;
+  transform: scale(1.06);
+  pointer-events: none;
+}
+.intro-stars {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.intro-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.intro-mark {
+  width: min(56vmin, 420px);
+  height: min(56vmin, 420px);
+  will-change: transform, opacity;
+}
+.intro-mark svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* The orbits draw themselves, then the satellite arrives. */
+.intro-mark .logo-orbit ellipse {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.intro-mark .orbits-on .logo-orbit ellipse {
+  animation: intro-draw 1.1s cubic-bezier(0.3, 0.6, 0.2, 1) forwards;
+}
+.intro-mark .orbits-on .logo-orbit-b ellipse {
+  animation-delay: 0.25s;
+}
+@keyframes intro-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.intro-word {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.8s ease, transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.intro-word.on {
+  opacity: 1;
+  transform: none;
+}
+.intro-name {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: clamp(30px, 6vmin, 54px);
+  letter-spacing: 0.6em;
+  margin-right: -0.6em;
+  color: #e0f2fe;
+  text-shadow: 0 0 24px rgba(56, 189, 248, 0.45);
+  transition: letter-spacing 1.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.intro-word.on .intro-name {
+  letter-spacing: 0.32em;
+  margin-right: -0.32em;
+}
+.intro-x {
+  background: linear-gradient(135deg, #38bdf8, #34d399);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.intro-tag {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.6vmin, 14px);
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+  opacity: 0.8;
+}
+.intro-skip {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.intro-skip:hover,
+.intro-skip:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-mark .logo-orbit ellipse {
+    stroke-dashoffset: 0;
+    animation: none !important;
+  }
+  .intro-word {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Background gallery in Settings ------------------------------------------------------------------------------------ */
+.bg-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.bg-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.bg-thumb img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 5px;
+  display: block;
+  background: #02040a;
+}
+.bg-thumb span {
+  padding: 0 2px 2px;
+}
+.bg-thumb:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.bg-thumb.active {
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--accent);
+}

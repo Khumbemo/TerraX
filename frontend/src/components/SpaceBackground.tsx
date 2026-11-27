@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { idbGet } from '../lib/idb';
 import { usePrefs } from '../lib/prefs';
 import { request } from '../lib/api';
+import { isSpaceImage, spaceImageUrl } from '../lib/backgrounds';
 import { decodeCities, landMask, renderEarth, renderGalaxy, type Cities, type LandShapes } from '../lib/space-render';
 
 interface Props {
@@ -27,7 +28,7 @@ function loadCities(): Promise<Cities> {
 
 const isEarth = (b: string) => b === 'earth' || b === 'earth-night';
 
-/** Full-window decorative background: Earth from orbit, a galaxy, or the user's own image. */
+/** Full-window decorative background: Earth from orbit, a galaxy, a space picture, or the user's own image. */
 export default function SpaceBackground({ target }: Props) {
   const { background, theme, customBgVersion } = usePrefs();
   const ref = useRef<HTMLCanvasElement>(null);
@@ -95,8 +96,14 @@ export default function SpaceBackground({ target }: Props) {
 
   if (!active) return <div className="earth-background" aria-hidden="true" />;
   return (
-    <div className={`space-background bg-${isEarth(background) ? 'earth' : background}`} aria-hidden="true">
-      {background === 'custom' ? custom && <div className="space-custom" style={{ backgroundImage: `url(${custom})` }} /> : <canvas ref={ref} className="space-canvas" />}
+    <div className={`space-background bg-${isEarth(background) ? 'earth' : isSpaceImage(background) ? 'image' : background}`} aria-hidden="true">
+      {background === 'custom' ? (
+        custom && <div className="space-custom" style={{ backgroundImage: `url(${custom})` }} />
+      ) : isSpaceImage(background) ? (
+        <div className="space-custom space-image" style={{ backgroundImage: `url(${spaceImageUrl(background)})` }} />
+      ) : (
+        <canvas ref={ref} className="space-canvas" />
+      )}
       <div className="space-shade" />
     </div>
   );

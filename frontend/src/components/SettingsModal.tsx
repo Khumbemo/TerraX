@@ -9,6 +9,7 @@ import GEEGuidance from './GEEGuidance';
 import AboutTab from './AboutTab';
 import MapSettingsTab from './MapSettingsTab';
 import { TELEMETRY_VIEWS } from './SkyTelemetry';
+import { SPACE_IMAGES, spaceImageUrl } from '../lib/backgrounds';
 
 export interface Target {
   lat: number;
@@ -98,6 +99,13 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="earth-night">{prefs.t('prefs.bg.earthNight')}</option>
                         <option value="earth">{prefs.t('prefs.bg.earth')}</option>
                         <option value="galaxy">{prefs.t('prefs.bg.galaxy')}</option>
+                        <optgroup label={prefs.t('prefs.bg.space')}>
+                          {SPACE_IMAGES.map(([id, label]) => (
+                            <option key={id} value={id}>
+                              {prefs.t(`prefs.bg.${id}`, label)}
+                            </option>
+                          ))}
+                        </optgroup>
                         <option value="custom">{prefs.t('prefs.bg.custom')}</option>
                         <option value="off">{prefs.t('prefs.bg.off')}</option>
                       </select>
@@ -162,14 +170,35 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="hi">हिन्दी (Hindi)</option>
                       </select>
                     </label>
+                    <label className="check" title={prefs.t('prefs.introHint')}>
+                      <input id="pref-intro" type="checkbox" checked={prefs.intro} onChange={e => prefs.setIntro(e.target.checked)} />
+                      <span>{prefs.t('prefs.intro')}</span>
+                    </label>
                     {onStartTour && (
                       <button type="button" id="start-tour" className="btn btn-small" onClick={onStartTour}>
                         {prefs.t('prefs.tour')}
                       </button>
                     )}
                   </div>
+                  <div className="bg-gallery" role="radiogroup" aria-label={prefs.t('prefs.bg.space')}>
+                    {SPACE_IMAGES.map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="radio"
+                        aria-checked={prefs.background === id}
+                        className={`bg-thumb${prefs.background === id ? ' active' : ''}`}
+                        data-bg={id}
+                        onClick={() => prefs.setBackground(id)}
+                      >
+                        <img src={spaceImageUrl(id, true)} alt="" loading="lazy" width={192} height={108} />
+                        <span>{prefs.t(`prefs.bg.${id}`, label)}</span>
+                      </button>
+                    ))}
+                  </div>
                   <p className="field-hint">{prefs.t('prefs.unitsNote')}</p>
                   <p className="field-hint">{prefs.t('prefs.bgNote')}</p>
+                  <p className="field-hint">{prefs.t('prefs.spaceNote')}</p>
                 </section>
                 <AiKeysSection onAiChange={onAiChange} />
 

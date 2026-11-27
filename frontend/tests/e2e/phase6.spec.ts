@@ -211,3 +211,44 @@ test('telemetry globe rotates while online and stops on target when offline', as
   await expect(page.locator('.globe-status')).toContainText('paused');
   expect(errors).toEqual([]);
 });
+
+test('logo, opening animation and space pictures', async ({ page, request }) => {
+  // The animation is skipped in automated browsers unless asked for with ?intro.
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto('/?intro=1');
+  await expect(page.locator('[data-testid=intro]')).toBeVisible();
+  await expect(page.locator('.intro-mark svg .logo-land')).toBeAttached(); // the turning Earth is drawn
+  await page.click('.intro-skip');
+  await expect(page.locator('[data-testid=intro]')).toHaveCount(0);
+  await expect(page.locator('.gate-logo')).toBeVisible();
+  expect(await page.locator('.gate-logo').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  // Without ?intro (and in this automated browser) it does not play.
+  await page.goto('/');
+  await expect(page.locator('#operator-name')).toBeVisible();
+  await expect(page.locator('[data-testid=intro]')).toHaveCount(0);
+  await page.fill('#operator-name', 'Test Operator');
+  await page.click('button:has-text("Start session")');
+  expect(await page.locator('.brand-logo').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  await page.click('#nav-settings');
+  // Every space picture and its thumbnail is served.
+  await expect(page.locator('.bg-thumb')).toHaveCount(10);
+  const ids = await page.locator('.bg-thumb').evaluateAll(els => els.map(e => (e as HTMLElement).dataset.bg!));
+  for (const id of ids)
+    for (const f of [`${id}.webp`, `${id}.thumb.webp`]) {
+      const r = await request.get(`/backgrounds/${f}`);
+      expect(r.status(), f).toBe(200);
+    }
+  await page.click('.bg-thumb[data-bg=saturn]');
+  await expect(page.locator('#pref-background')).toHaveValue('saturn');
+  await expect(page.locator('.bg-thumb[data-bg=saturn]')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('.space-background.bg-image .space-image')).toHaveAttribute('style', /backgrounds\/saturn\.webp/);
+  await page.selectOption('#pref-background', 'nebula');
+  await expect(page.locator('.space-image')).toHaveAttribute('style', /nebula\.webp/);
+  // The animation can be turned off; the choice is kept.
+  await page.uncheck('#pref-intro');
+  await page.reload();
+  expect(await page.evaluate(() => [localStorage.getItem('terrax_intro'), localStorage.getItem('terrax_background')])).toEqual(['false', '"nebula"']);
+  await expect(page.locator('.space-image')).toHaveAttribute('style', /nebula\.webp/);
+  expect(errors).toEqual([]);
+});
