@@ -27,10 +27,12 @@ dependencies = [
   "google-genai>=1.0",
   "sqlalchemy>=2.0,<3",
   "alembic>=1.13,<2",
+  # IAU SOFA routines (ERFA): Moon, Earth and planet positions for the telemetry panel's sky models.
+  "pyerfa>=2.0.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "moto[s3]>=5", "ipyleaflet>=0.19", "ipywidgets>=8", "nbclient>=0.10", "nbformat>=5.9", "ipykernel>=6"]
+dev = ["astropy>=6", "pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.11", "moto[s3]>=5", "ipyleaflet>=0.19", "ipywidgets>=8", "nbclient>=0.10", "nbformat>=5.9", "ipykernel>=6"]
 # Interactive maps of results in Jupyter (terrax.notebook.show).
 notebook = ["ipyleaflet>=0.19", "ipywidgets>=8"]
 # Uploads and results in an S3-compatible bucket (TERRAX_S3_BUCKET: AWS S3, Cloudflare R2, Backblaze B2, MinIO, …).

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import IntroGate from './components/IntroGate';
 import { AccountProvider } from './lib/account';
 import { installErrorReporting } from './lib/errorReport';
 import { PrefsProvider } from './lib/prefs';
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')!).render(
         <AccountProvider>
           <ErrorBoundary>
             <App />
+            <IntroGate />
           </ErrorBoundary>
         </AccountProvider>
       </ToastProvider>

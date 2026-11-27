@@ -11,6 +11,10 @@ import { openTool, start } from './helpers';
 // Files are uploaded with page.request, which shares the page's cookies: uploads
 // belong to the browser (guest or account) that made them.
 
+// Requests from a page that a service worker controls bypass page.route, so the mocks above could be missed once the
+// offline worker takes over; these tests do not need it (phase6.spec tests offline use).
+test.use({ serviceWorkers: 'block' });
+
 async function upload(request: APIRequestContext, name: string, body: Buffer, mimeType: string) {
   const r = await request.post('/api/files', { multipart: { file: { name, mimeType, buffer: body } } });
   expect(r.ok()).toBeTruthy();

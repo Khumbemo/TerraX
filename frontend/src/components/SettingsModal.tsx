@@ -1,13 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useToast } from '../lib/toast';
 import { idbSet } from '../lib/idb';
-import { usePrefs, type Background, type PanelStyle, type Theme } from '../lib/prefs';
+import { usePrefs, type Background, type PanelStyle, type TelemetryView, type Theme } from '../lib/prefs';
 import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
 import AiKeysSection from './AiKeysSection';
 import GEEGuidance from './GEEGuidance';
 import AboutTab from './AboutTab';
 import MapSettingsTab from './MapSettingsTab';
+import { TELEMETRY_VIEWS } from './SkyTelemetry';
+import { SPACE_IMAGES, spaceImageUrl } from '../lib/backgrounds';
 
 export interface Target {
   lat: number;
@@ -97,6 +99,13 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="earth-night">{prefs.t('prefs.bg.earthNight')}</option>
                         <option value="earth">{prefs.t('prefs.bg.earth')}</option>
                         <option value="galaxy">{prefs.t('prefs.bg.galaxy')}</option>
+                        <optgroup label={prefs.t('prefs.bg.space')}>
+                          {SPACE_IMAGES.map(([id, label]) => (
+                            <option key={id} value={id}>
+                              {prefs.t(`prefs.bg.${id}`, label)}
+                            </option>
+                          ))}
+                        </optgroup>
                         <option value="custom">{prefs.t('prefs.bg.custom')}</option>
                         <option value="off">{prefs.t('prefs.bg.off')}</option>
                       </select>
@@ -144,6 +153,16 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="imperial">{prefs.t('prefs.imperial')}</option>
                       </select>
                     </label>
+                    <label className="inline-select" title="What the Planetary telemetry panel shows">
+                      <span>Telemetry</span>
+                      <select id="pref-telemetry" value={prefs.telemetryView} onChange={e => prefs.setTelemetryView(e.target.value as TelemetryView)}>
+                        {TELEMETRY_VIEWS.map(([id, label]) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <label className="inline-select">
                       <span>{prefs.t('prefs.language')}</span>
                       <select id="pref-lang" value={prefs.lang} onChange={e => prefs.setLang(e.target.value as Lang)}>
@@ -151,14 +170,35 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="hi">हिन्दी (Hindi)</option>
                       </select>
                     </label>
+                    <label className="check" title={prefs.t('prefs.introHint')}>
+                      <input id="pref-intro" type="checkbox" checked={prefs.intro} onChange={e => prefs.setIntro(e.target.checked)} />
+                      <span>{prefs.t('prefs.intro')}</span>
+                    </label>
                     {onStartTour && (
                       <button type="button" id="start-tour" className="btn btn-small" onClick={onStartTour}>
                         {prefs.t('prefs.tour')}
                       </button>
                     )}
                   </div>
+                  <div className="bg-gallery" role="radiogroup" aria-label={prefs.t('prefs.bg.space')}>
+                    {SPACE_IMAGES.map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="radio"
+                        aria-checked={prefs.background === id}
+                        className={`bg-thumb${prefs.background === id ? ' active' : ''}`}
+                        data-bg={id}
+                        onClick={() => prefs.setBackground(id)}
+                      >
+                        <img src={spaceImageUrl(id, true)} alt="" loading="lazy" width={192} height={108} />
+                        <span>{prefs.t(`prefs.bg.${id}`, label)}</span>
+                      </button>
+                    ))}
+                  </div>
                   <p className="field-hint">{prefs.t('prefs.unitsNote')}</p>
                   <p className="field-hint">{prefs.t('prefs.bgNote')}</p>
+                  <p className="field-hint">{prefs.t('prefs.spaceNote')}</p>
                 </section>
                 <AiKeysSection onAiChange={onAiChange} />
 

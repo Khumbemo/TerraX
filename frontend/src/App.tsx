@@ -264,7 +264,10 @@ export default function App() {
     <div className="terrax-app">
       <SpaceBackground target={target} />
       <header className="top-navbar">
-        <div className="brand">TERRAX</div>
+        <div className="brand">
+          <img src="./logo.svg" alt="" className="brand-logo" width={30} height={30} />
+          TERRA<span className="brand-x">X</span>
+        </div>
         <nav className="nav-links" aria-label="Main">
           <button
             type="button"

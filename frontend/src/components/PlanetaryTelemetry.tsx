@@ -3,6 +3,8 @@ import { feature } from 'topojson-client';
 import land from 'world-atlas/land-110m.json';
 import type { MultiPolygon, Polygon } from 'geojson';
 import { request } from '../lib/api';
+import { usePrefs } from '../lib/prefs';
+import SkyTelemetry, { TELEMETRY_VIEWS } from './SkyTelemetry';
 
 interface Props {
   target: { lat: number; lon: number; name: string };
@@ -238,6 +240,7 @@ const Row = ({ label, value, title }: { label: string; value: string; title?: st
 const utcClock = (d: Date | null) => (d ? `${d.toISOString().slice(11, 16)} UTC` : '—');
 
 export default function PlanetaryTelemetry({ target }: Props) {
+  const { telemetryView: view, setTelemetryView: setView } = usePrefs();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [now, setNow] = useState(() => new Date());
   const { data: tele, error: teleError } = useTelemetry(target);
@@ -264,7 +267,7 @@ export default function PlanetaryTelemetry({ target }: Props) {
     lonRef.current = target.lon;
     drawGlobe(canvasRef.current, lat0, target.lon, subsolarRef.current, target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spinning, minuteKey, lat0, target.lat, target.lon, Boolean(tele)]);
+  }, [spinning, minuteKey, lat0, target.lat, target.lon, Boolean(tele), view]);
 
   // Spinning view while online: the globe turns eastward; drawing stops when it is off-screen or the tab is hidden.
   useEffect(() => {
@@ -290,7 +293,7 @@ export default function PlanetaryTelemetry({ target }: Props) {
       io?.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spinning, lat0, target.lat, target.lon]);
+  }, [spinning, lat0, target.lat, target.lon, view]);
 
   const eot = report?.equationOfTime ?? 0;
   const sunrise = report?.sunrise ? new Date(report.sunrise) : null;
@@ -304,6 +307,19 @@ export default function PlanetaryTelemetry({ target }: Props) {
       <div className="panel-header">
         <span className="pulse-dot" aria-hidden="true" /> Planetary telemetry
       </div>
+      <label className="telemetry-view">
+        <span className="visually-hidden">Show</span>
+        <select id="telemetry-view" value={view} onChange={e => setView(e.target.value as typeof view)}>
+          {TELEMETRY_VIEWS.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {view !== 'earth' && <SkyTelemetry view={view} target={target} />}
+      {view === 'earth' && (
+      <>
 
       <canvas
         ref={canvasRef}
@@ -356,6 +372,8 @@ export default function PlanetaryTelemetry({ target }: Props) {
         <Row label="Planetary Kp" value={!kp ? (teleError ? 'Unavailable (server not reachable)' : 'Loading…') : kp.reading ? `${kp.reading.kp.toFixed(2)} · ${kp.reading.label}` : (kp.error ?? '—')} />
         {kp?.reading && <Row label="Interval start" value={`${kp.reading.time.slice(0, 16).replace('T', ' ')} UTC`} />}
       </div>
+      </>
+      )}
       <p className="panel-foot">
         Target {Math.abs(target.lat).toFixed(3)}° {target.lat >= 0 ? 'N' : 'S'}, {Math.abs(target.lon).toFixed(3)}° {target.lon >= 0 ? 'E' : 'W'} · change in Settings
       </p>

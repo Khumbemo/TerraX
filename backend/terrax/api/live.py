@@ -54,6 +54,25 @@ def kp() -> dict[str, Any]:
     return {"reading": value, "error": error}
 
 
+@router.get("/sky")
+def sky_now(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180), at: datetime | None = None) -> dict[str, Any]:
+    """The Earth and Moon, the Earth's orbit and the planets now (IAU SOFA/ERFA), with NASA's fact sheet."""
+    from ..services.planet_facts import LABELS
+    from ..services.sky import sky_report
+
+    out = sky_report(at or datetime.now(UTC), lat, lon)
+    out["factLabels"] = LABELS
+    return out
+
+
+@router.get("/sky/track")
+def sky_track(model: str = Query(..., pattern="^(moon|orbit|system)$"), at: datetime | None = None) -> dict[str, Any]:
+    """Positions over time for the animated models (moon: a lunation, orbit: a year, system: 12 years)."""
+    from ..services.sky import track
+
+    return {"model": model, "track": track(model, at or datetime.now(UTC))}
+
+
 @router.get("/telemetry")
 def telemetry(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)) -> dict[str, Any]:
     value, error = current_kp()

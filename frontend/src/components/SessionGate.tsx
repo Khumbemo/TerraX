@@ -25,7 +25,10 @@ export default function SessionGate({ onStart, account }: Props) {
     <div className="login-wrapper">
       <form className="login-panel" onSubmit={submit}>
         <div className="login-header">
-          <div className="brand-title">TERRAX</div>
+          <img src="./logo.svg" alt="TerraX logo" className="gate-logo" width={112} height={112} />
+          <div className="brand-title">
+            TERRA<span className="brand-x">X</span>
+          </div>
           <div className="brand-subtitle">{t('session.subtitle')}</div>
         </div>
 
