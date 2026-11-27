@@ -369,7 +369,7 @@ def _series(ctx: ToolContext, inputs: dict, params: dict, mode: str) -> dict:
     notes: list[str] = []
 
     def values(r: Raster, keep_notes: bool) -> tuple[np.ndarray, str]:
-        sink = notes if keep_notes else []
+        sink = notes if keep_notes and not (mode == "optical" and r.meta.bands == 1) else []  # single-band files: one note below
         if mode == "optical":
             return _optical(r, params, sink)
         return _radar_db(r, band, sink), "VV backscatter"
@@ -422,6 +422,10 @@ def _series(ctx: ToolContext, inputs: dict, params: dict, mode: str) -> dict:
         per_date.append({"date": when.isoformat(), "file": r.meta.filename, "observedPct": float(ok.sum()) / max(1, n_in) * 100,
                          "waterPixels": int(w_.sum()), "waterHa": w_ha, "waterSharePct": share})
     assert inside is not None
+    single = sum(1 for r, _ in dated if r.meta.bands == 1)
+    if mode == "optical" and single:
+        who = f"All {n} images have" if single == n else f"{single} of the {n} images {'have' if single > 1 else 'has'}"
+        notes.append(f"{who} one band, read as a water index (NDWI or MNDWI) already computed.")
     ctx.progress(0.75, "Water occurrence")
     occ, cls = wb.occurrence(n_water, n_valid, min_obs, almost)
     cls = np.where(inside, cls, 0).astype(np.uint8)

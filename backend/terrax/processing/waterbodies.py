@@ -236,6 +236,9 @@ def inventory_markdown(inv: Inventory, records: list[dict[str, Any]], extra_cols
     sep = "|---|---|---|---|---|---|" + "---|" * len(cols)
     def cell(v: Any) -> str:
         return "—" if v is None else fmt(v, 3) if isinstance(v, float) else str(v)
+
+    def coord(v: float | None) -> str:  # 5 decimals ≈ 1 m
+        return "—" if v is None else f"{v:.5f}"
     lines = [
         f"{inv.count:,} water bodies, {fmt(float(inv.area_ha[1:].sum()), 4)} ha in all; the largest is {fmt(float(inv.area_ha[1]), 4)} ha.", "",
         "| Size | Bodies | Area (ha) |", "|---|---|---|", *[f"| {s['label']} | {s['count']:,} | {fmt(s['ha'], 4)} |" for s in sizes], "",
@@ -244,7 +247,7 @@ def inventory_markdown(inv: Inventory, records: list[dict[str, Any]], extra_cols
     ]
     for r in records[:top]:
         lines.append(f"| {r['id']}{'*' if r['truncated'] else ''} | {fmt(r['area_ha'], 4)} | {fmt(r['perimeter_m'] / 1000, 3)} | {cell(r['shore_dev'])} | "
-                     f"{cell(r['lat'])} | {cell(r['lon'])} |" + "".join(f" {cell(r.get(c[0]))} |" for c in cols))
+                     f"{coord(r['lat'])} | {coord(r['lon'])} |" + "".join(f" {cell(r.get(c[0]))} |" for c in cols))
     return "\n".join(lines)
 
 
@@ -273,7 +276,7 @@ def series_markdown(r: dict[str, Any], inv_md: str | None) -> str:
         f"| Class | Area ({unit}) |", "|---|---|", *[f"| {c['label']} | {a(c['ha'], c['pixels'])} |" for c in r["classes"]], "",
         "### Water on each date", "",
         f"| Date | File | Observed (% of area) | Water seen ({unit}) | Water share of what was seen |", "|---|---|---|---|---|",
-        *[f"| {d['date']} | {d['file']} | {d['observedPct']:.0f} % | {a(d['waterHa'], d['waterPixels'])} | "
+        *[f"| {d['date']} | {d['file']} | {d['observedPct']:.1f} % | {a(d['waterHa'], d['waterPixels'])} | "
           + (f"{d['waterSharePct']:.2f} %" if d["waterSharePct"] is not None else "—") + " |" for d in r["dates"]],
         "",
         "Water seen on a date is only what was visible: compare dates with similar observed shares, or compare the water share of what was seen.",

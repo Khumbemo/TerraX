@@ -232,6 +232,7 @@ def test_water_bodies_and_quality_from_one_image(client, tmp_path):
     assert q["ndti"]["pixels"] == 468 and q["ndti"]["median"] == pytest.approx(-1 / 3, abs=1e-4) and q["ndti"]["p90"] == pytest.approx(1 / 9, abs=1e-4)
     assert q["ndci"]["pixels"] == 468 and q["ndtiImage"]["url"] and q["ndciImage"]["url"]
     md = res["markdown"]
+    assert f"| {a['lat']:.5f} | {a['lon']:.5f} |" in md  # coordinates to about a metre, not 3 significant figures
     assert "### Water bodies" in md and "### Water quality indicators" in md and "Lacaux" in md and "Mishra & Mishra 2012" in md
     csv_dl = next(d for d in res["downloads"] if d["filename"] == "lakes_water_bodies.csv")
     text = client.get(csv_dl["url"]).text.splitlines()
@@ -288,6 +289,8 @@ def test_water_over_time(client, tmp_path):
     assert occ[0, 0] == 100 and occ[0, 15] == pytest.approx(50) and occ[40, 15] == pytest.approx(40) and occ[40, 40] == 0
     csv_text = client.get(next(x for x in res["downloads"] if x["filename"].endswith("_water_by_date.csv"))["url"]).text
     assert csv_text.splitlines()[3].startswith("2024-05-01,lake_2024-05-01.tif,50.0,250,22.5,20.0")
+    assert sum("one band, read as a water index" in n for n in r["notes"]) == 1 and any(n.startswith("All 5 images have one band") for n in r["notes"])
+    assert "| 2024-05-01 | lake_2024-05-01.tif | 50.0 % |" in res["markdown"]
     assert "Pekel et al. 2016" in res["markdown"] and "### Water on each date" in res["markdown"]
     # Requiring 5 valid observations leaves the cloudy rows out.
     strict = run(client, "water", {"images": ids}, {"mode": "optical", "minObs": 5})["result"]
