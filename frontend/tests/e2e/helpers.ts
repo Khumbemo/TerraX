@@ -26,6 +26,8 @@ export async function chat(page: Page, chatId: string, message: string): Promise
   const inputId = `${chatId}-input`;
   const panel = page.locator('section.chat-panel', { has: page.locator(`#${inputId}`) });
   const answers = panel.locator('.bot-style:not(.typing)');
+  // Focusing the OS Guide opens it full screen (a new input with the same id), so click first, then fill whichever is shown.
+  await page.locator(`#${inputId}`).first().click();
   const before = await answers.count();
   await page.fill(`#${inputId}`, message);
   await page.press(`#${inputId}`, 'Enter');

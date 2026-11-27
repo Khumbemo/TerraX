@@ -6,6 +6,7 @@ import type { Units } from '../lib/units';
 import type { Lang } from '../lib/i18n';
 import AiKeysSection from './AiKeysSection';
 import GEEGuidance from './GEEGuidance';
+import AboutTab from './AboutTab';
 import MapSettingsTab from './MapSettingsTab';
 
 export interface Target {
@@ -30,7 +31,7 @@ const TABS: [Tab, string][] = [
   ['map', 'Map'],
   ['guide', 'How TerraX works'],
   ['gee', 'Earth Engine manual'],
-  ['about', 'About'],
+  ['about', 'About, licences and support'],
 ];
 
 export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose, onStartTour }: Props) {
@@ -239,28 +240,7 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
 
             {tab === 'gee' && <GEEGuidance />}
 
-            {tab === 'about' && (
-              <div className="prose">
-                <h3>About TerraX</h3>
-                <p>
-                  TerraX is an Earth-observation workbench for climate, forest and land analysis: a React and TypeScript web app with MapLibre maps, and a Python server
-                  (FastAPI, Celery workers with Redis; rasterio, GeoPandas, scikit-learn, SciPy) that runs every analysis.
-                </p>
-                <h4>Data and services</h4>
-                <ul>
-                  <li>Basemap: © OpenStreetMap contributors, © CARTO. Globe coastlines: Natural Earth 1:110m (public domain) via world-atlas.</li>
-                  <li>Planetary K-index: NOAA Space Weather Prediction Center.</li>
-                  <li>Sun position and rise/set times: the formulas of aa.quae.nl (as in SunCalc); equation of time and declination: NOAA Solar Calculator equations (Meeus).</li>
-                  <li>Live data (fetched by the server): Open-Meteo (ERA5), NASA POWER and Earth Search (Sentinel-2 L2A).</li>
-                  <li>AI: any provider's API (optional) — Gemini, Claude, OpenAI, Groq, Mistral and others, or a local model.</li>
-                </ul>
-                <h4>Sample data</h4>
-                <p>
-                  The six sample series for Kohima, Nagaland are bundled for demonstration. Their original source is not documented in this project, so do not use them
-                  as research data.
-                </p>
-              </div>
-            )}
+            {tab === 'about' && <AboutTab />}
           </div>
         </div>
       </div>

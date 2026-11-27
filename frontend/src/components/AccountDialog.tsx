@@ -86,7 +86,7 @@ export default function AccountDialog({ currentProject, applyProject, saveReport
   );
   if (page) return <div className="login-wrapper">{body}</div>;
   return (
-    <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && close()}>
+    <div className="modal-backdrop modal-full" onMouseDown={e => e.target === e.currentTarget && close()}>
       {body}
     </div>
   );

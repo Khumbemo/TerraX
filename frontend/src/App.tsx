@@ -20,6 +20,7 @@ import { buildProject, mergeReports, parseProject, type Project } from './lib/pr
 import { loadReports, saveReports } from './lib/reports';
 import { getJSON, removeItem, setJSON } from './lib/storage';
 import { useToast } from './lib/toast';
+import { useSite } from './lib/site';
 import { toolInfo, type ToolId, type ToolOutput } from './lib/tools/registry';
 import type { ReportRecord } from './lib/types';
 import type { Boundary } from './lib/zonal';
@@ -97,6 +98,12 @@ export default function App() {
   useEffect(refreshAi, [refreshAi, account.user?.id]);
 
   const [tour, setTour] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [resultsChatOpen, setResultsChatOpen] = useState(false);
+  const [hiddenNotice, setHiddenNotice] = useState<string | null>(null);
+  const site = useSite();
+  // A new result starts with its assistant docked under it.
+  useEffect(() => setResultsChatOpen(false), [output]);
   const endTour = useCallback(() => {
     setTour(false);
     setJSON('tour_done', true);
@@ -277,6 +284,9 @@ export default function App() {
           <button type="button" id="nav-settings" onClick={() => setSettings({ open: true, tab: 'settings' })}>
             {t('nav.settings')}
           </button>
+          <button type="button" id="nav-assistant" onClick={() => setGuideOpen(true)}>
+            Assistant
+          </button>
         </nav>
         <div className="nav-right">
           <span className={`ai-pill ai-${aiMode ?? 'off'}`} title={aiMode ? AI_MODE_TEXT[aiMode] : 'Checking AI status'}>
@@ -325,7 +335,7 @@ export default function App() {
         </Suspense>
       )}
 
-      <main className="terrax-workspace">
+      <main className={`terrax-workspace${view === 'explore' && tool ? ' focus' : ''}`}>
         <aside className="telemetry-panel">
           <ErrorBoundary area="Telemetry" inline>
             <PlanetaryTelemetry target={target} />
@@ -333,6 +343,19 @@ export default function App() {
         </aside>
 
         <div className="center-column">
+          {site?.maintenance && (
+            <div className="site-notice site-maintenance" role="status" id="site-maintenance">
+              <strong>Maintenance.</strong> {site.maintenance}
+            </div>
+          )}
+          {site?.announcement && hiddenNotice !== site.announcement && (
+            <div className="site-notice" role="status" id="site-announcement">
+              <span>{site.announcement}</span>
+              <button type="button" className="icon-btn push-right" aria-label="Hide this announcement" onClick={() => setHiddenNotice(site.announcement)}>
+                ×
+              </button>
+            </div>
+          )}
           {view === 'reports' ? (
             <Suspense fallback={<Loading />}>
               <ReportsView
@@ -416,6 +439,8 @@ export default function App() {
                         placeholder="Ask about these results"
                         onAsk={askData}
                         starters={['Summarise the results', 'How was this calculated?', 'How reliable is this?']}
+                        expanded={resultsChatOpen}
+                        onExpand={setResultsChatOpen}
                       />
                     </>
                   )}
@@ -434,6 +459,9 @@ export default function App() {
             placeholder="Ask about TerraX"
             onAsk={askGuide}
             starters={STARTER_SUGGESTIONS}
+            expanded={guideOpen}
+            onExpand={setGuideOpen}
+            expandOnFocus
           />
           <LiveTelemetryDock />
         </aside>
