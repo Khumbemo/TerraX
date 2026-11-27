@@ -63,15 +63,16 @@ docker compose up --build
 # open http://localhost:8080
 ```
 
-This starts five containers:
+This starts six containers:
 
 - `web`: nginx serving the app and proxying `/api`
 - `api`: FastAPI
 - `worker`: Celery
 - `beat`: the hourly clean-up
 - `redis`
+- `db`: PostgreSQL (accounts, sessions, job history and projects)
 
-Uploads and results are kept in the `storage` volume. To handle more jobs at once, scale the workers with `docker compose up --scale worker=3`.
+Uploads and results are kept in the `storage` volume and the database in the `db` volume. To handle more jobs at once, scale the workers with `docker compose up --scale worker=3`.
 
 ## Run for development
 
