@@ -17,6 +17,7 @@ export default function LiveTelemetryDock() {
           <span className="dock-sub">{l.sub}</span>
         </a>
       ))}
+      <p className="dock-note">External sites, run by their owners. TerraX is not affiliated with or endorsed by them.</p>
     </nav>
   );
 }
