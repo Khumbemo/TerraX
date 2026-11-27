@@ -25,13 +25,21 @@ def test_equation_of_time_and_declination_match_noaa():
     assert r.mean_solar_time == approx(6 + 94.108 / 15) and 0 <= r.azimuth < 360
 
 
-def test_solar_matches_suncalc_reference():
-    # Values from SunCalc 1.9 (the library the TypeScript app used) for the same instants.
+def test_solar_position_and_times_match_astropy():
+    # Reference values from astropy 8.0 (IAU SOFA/ERFA): geometric sun, no refraction; rise and set when the
+    # centre is at −0.833°, to the second. (TerraX used SunCalc's simpler model before: 45 s and 2.7 min late here,
+    # and up to 13 min in the Arctic winter.)
     r = solar.solar_report(datetime(2026, 10, 6, 12, tzinfo=UTC), 51.5, -0.12)
-    assert r.altitude == approx(33.397622822903635, abs=1e-9) and r.azimuth == approx(183.27040427909765, abs=1e-9)
-    assert r.sunrise.isoformat().startswith("2026-10-06T06:09:59.43") and r.sunset.isoformat().startswith("2026-10-06T17:29:43.27")
-    polar = solar.solar_report(datetime(2026, 12, 21, 23, tzinfo=UTC), 69.6, 18.9)
+    assert r.altitude == approx(33.2134, abs=0.01) and r.azimuth == approx(183.3952, abs=0.01)
+    assert abs((r.sunrise - datetime(2026, 10, 6, 6, 9, 14, tzinfo=UTC)).total_seconds()) < 5
+    assert abs((r.sunset - datetime(2026, 10, 6, 17, 27, 1, tzinfo=UTC)).total_seconds()) < 5
+    k = solar.solar_report(datetime(2026, 3, 20, 6, tzinfo=UTC), 25.674, 94.108)  # Kohima, the equinox
+    assert abs((k.sunrise - datetime(2026, 3, 19, 23, 47, 56, tzinfo=UTC)).total_seconds()) < 5
+    assert abs((k.sunset - datetime(2026, 3, 20, 11, 54, 36, tzinfo=UTC)).total_seconds()) < 5
+    polar = solar.solar_report(datetime(2026, 12, 21, 23, tzinfo=UTC), 69.6, 18.9)  # Tromsø: polar night
     assert polar.sunrise is None and polar.sunset is None
+    summer = solar.solar_report(datetime(2026, 6, 21, 12, tzinfo=UTC), 69.6, 18.9)  # midnight sun
+    assert summer.sunrise is None and summer.sunset is None and summer.altitude > 40
     assert solar.format_clock(24.26) == "00:15:36" and solar.format_clock(-1) == "23:00:00"
 
 
@@ -171,7 +179,7 @@ def test_telemetry_endpoint(client, monkeypatch):
     assert t["kp"]["reading"]["kp"] == 4.33 and t["kp"]["reading"]["label"] == "Active"
     assert -90 <= t["solar"]["altitude"] <= 90 and "subsolar" in t["solar"]
     s = client.get("/api/live/solar", params={"lat": 51.5, "lon": -0.12, "at": "2026-10-06T12:00:00Z"}).json()
-    assert s["altitude"] == approx(33.3976, abs=1e-4) and s["sunrise"].startswith("2026-10-06T06:09")
+    assert s["altitude"] == approx(33.2134, abs=0.01) and s["sunrise"].startswith("2026-10-06T06:09")  # astropy: 33.2134°, 06:09:14
 
 
 def test_world_maps_helpers():
