@@ -107,7 +107,7 @@ export default function AdminPanel() {
       {stats && (
         <div className="stat-grid" id="admin-stats">
           <div className="stat"><div className="stat-label">Accounts</div><div className="stat-value">{stats.users}</div></div>
-          <div className="stat"><div className="stat-label">Signed in now</div><div className="stat-value">{stats.activeSessions}</div></div>
+          <div className="stat" title="Browsers and devices signed in whose session has not expired or been signed out; not the people online right now"><div className="stat-label">Active sign-ins</div><div className="stat-value">{stats.activeSessions}</div></div>
           <div className="stat"><div className="stat-label">Stored</div><div className="stat-value">{mb(stats.storedBytes)} in {stats.files} files</div></div>
           <div className="stat"><div className="stat-label">Analyses, last 24 h</div><div className="stat-value">{Object.values(stats.jobsLastDay).reduce((a, b) => a + b, 0)} ({stats.jobsLastDay.error ?? 0} failed)</div></div>
           <div className="stat"><div className="stat-label">Errors, last 24 h</div><div className="stat-value">{stats.errorsLastDay}</div></div>
@@ -152,13 +152,14 @@ export default function AdminPanel() {
               {users.map(u => (
                 <tr key={u.id} className={u.disabled ? 'muted' : undefined}>
                   <td className="admin-user">
-                    <div className="admin-email">
+                    <div className="admin-email" title={u.email}>
                       {u.email}
-                      {u.disabled ? ' (disabled)' : ''}
-                      {u.twoFactor ? ' · 2FA' : ''}
-                      {u.singleSignOn ? ' · SSO' : ''}
-                      {!u.emailVerified ? ' · unconfirmed' : ''}
                     </div>
+                    {(u.disabled || u.twoFactor || u.singleSignOn || !u.emailVerified) && (
+                      <div className="admin-tags">
+                        {[u.disabled && 'disabled', u.twoFactor && '2FA', u.singleSignOn && 'SSO', !u.emailVerified && 'unconfirmed'].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
                     <div className="admin-actions">
                       <button type="button" className="btn btn-small" onClick={() => patch(u, { disabled: !u.disabled })}>
                         {u.disabled ? 'Enable' : 'Disable'}
