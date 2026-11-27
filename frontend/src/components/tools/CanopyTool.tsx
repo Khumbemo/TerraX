@@ -214,7 +214,7 @@ export default function CanopyTool({ onOutput }: Props) {
               <div className="legend-labels">
                 <span>{fmt(out.range[0], 3)} m</span>
                 <span>canopy height</span>
-                <span>{fmt(out.range[1], 3)} m</span>
+                <span title="98th percentile: taller cells share the top colour">≥ {fmt(out.range[1], 3)} m</span>
               </div>
             </figcaption>
           </figure>

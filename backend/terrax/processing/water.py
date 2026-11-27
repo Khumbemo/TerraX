@@ -130,11 +130,21 @@ def summarise(cls: np.ndarray, cell_area_rows: np.ndarray | None, two: bool) -> 
     return out
 
 
-def water_markdown(r: dict[str, Any]) -> str:
+def water_markdown(r: dict[str, Any], bodies_md: str | None = None) -> str:
     unit = "ha" if r["summary"]["classes"][0]["ha"] is not None else "pixels"
     rows = [f"| {c['label']} | {fmt(c['ha'], 4) if c['ha'] is not None else c['pixels']} |" for c in r["summary"]["classes"]]
-    return "\n".join([
-        "## Dataset", "", *[f"- {d}" for d in r["dates"]], "",
-        "## Results", "", f"| Class | Area ({unit}) |", "|---|---|", *rows, "",
-        "## Method and limits", "", *[f"- {n}" for n in r["notes"]],
-    ])
+    lines = ["## Dataset", "", *[f"- {d}" for d in r["dates"]], "",
+             "## Results", "", f"| Class | Area ({unit}) |", "|---|---|", *rows]
+    if bodies_md:
+        lines += ["", f"### Water bodies{' on the later date' if len(r['dates']) > 1 else ''}", "", bodies_md]
+    q = r.get("quality")
+    if q:
+        lines += ["", f"### Water quality indicators ({q['source']}, interior water pixels)", "",
+                  "| Index | What it indicates | 10th percentile | Median | 90th percentile |", "|---|---|---|---|---|"]
+        for key, label, what in (("ndti", "NDTI", "turbidity (suspended sediment)"), ("ndci", "NDCI", "chlorophyll-a (phytoplankton)")):
+            s = q.get(key)
+            if s:
+                lines.append(f"| {label} | {what} | {s['p10']:.3f} | {s['median']:.3f} | {s['p90']:.3f} |")
+        lines += ["", "Relative indicators for comparing places and dates, not concentrations; see the limits below."]
+    lines += ["", "## Method and limits", "", *[f"- {n}" for n in r["notes"]]]
+    return "\n".join(lines)
