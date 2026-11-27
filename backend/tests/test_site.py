@@ -31,6 +31,8 @@ def test_only_admins_change_settings_and_every_value_is_checked(app):
         ({"signup": "maybe"}, "open or closed"),
         ({"contactEmail": "not an address"}, "not an e-mail address"),
         ({"supportUrl": "javascript:alert(1)"}, "https://"),
+        ({"contactPhone": "call me"}, "phone numbers"),
+        ({"contactPhone": "12345"}, "phone numbers"),  # too short to be a number
         ({"announcement": "x" * 501}, "under 500"),
         ({"maintenance": "yes"}, "on or off"),
         ({"colour": "red"}, "Unknown setting"),
@@ -43,7 +45,12 @@ def test_only_admins_change_settings_and_every_value_is_checked(app):
     assert r.json()["settings"] == {"contactName": "TerraX lab", "contactEmail": "help@example.org", "supportUrl": "https://example.org/help"}
     # Public: anyone sees the contact details, the licence and the version.
     pub = new_client(app).get("/api/site").json()
-    assert pub["contact"] == {"contactName": "TerraX lab", "contactEmail": "help@example.org", "supportEmail": None, "supportUrl": "https://example.org/help"}
+    assert pub["contact"] == {"contactName": "TerraX lab", "contactEmail": "help@example.org", "contactPhone": None, "supportEmail": None,
+                              "supportUrl": "https://example.org/help"}
+    # Several phone numbers, written as people write them.
+    adm.put("/api/admin/settings", json={"contactPhone": "+91 98765 43210, 0123-456789"})
+    assert new_client(app).get("/api/site").json()["contact"]["contactPhone"] == "+91 98765 43210, 0123-456789"
+    adm.put("/api/admin/settings", json={"contactPhone": None})
     assert pub["licence"] == "MIT" and pub["version"] and pub["announcement"] is None and pub["maintenance"] is None
     # Clearing a value (empty or null) removes it; the change is audited without the values.
     adm.put("/api/admin/settings", json={"supportUrl": "", "contactName": None})

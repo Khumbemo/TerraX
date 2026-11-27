@@ -227,6 +227,7 @@ test('owner controls: site settings reach everyone, About shows the contact; too
   await page.fill('#admin-site-announcement', note);
   await page.fill('#admin-site-contact-name', 'TerraX e2e lab');
   await page.fill('#admin-site-support-email', 'support@example.org');
+  await page.fill('#admin-site-contact-phone', '+91 98765 43210, 0123-456789');
   await page.click('#admin-site-save');
   await expect(page.getByText('Site settings saved')).toBeVisible();
   await page.click('#admin-section-system');
@@ -243,6 +244,8 @@ test('owner controls: site settings reach everyone, About shows the contact; too
   await other.click('button[role=tab]:has-text("About")');
   await expect(other.locator('#about-contact')).toContainText('TerraX e2e lab');
   await expect(other.locator('#about-contact a[href^="mailto:support@example.org"]')).toBeVisible();
+  await expect(other.locator('#about-contact a[href="tel:+919876543210"]')).toHaveText('+91 98765 43210');
+  await expect(other.locator('#about-contact a[href="tel:0123456789"]')).toBeVisible();
   await expect(other.locator('#about-tab')).toContainText('MIT Licence');
   await other.keyboard.press('Escape');
   // A tool takes the whole screen: the side panels step aside, the map stays beside the tool, and they come back after.
@@ -262,6 +265,7 @@ test('owner controls: site settings reach everyone, About shows the contact; too
   await page.fill('#admin-site-announcement', '');
   await page.fill('#admin-site-contact-name', '');
   await page.fill('#admin-site-support-email', '');
+  await page.fill('#admin-site-contact-phone', '');
   await page.click('#admin-site-save');
   await expect(page.getByText('Site settings saved')).toBeVisible();
   expect(errors).toEqual([]);
