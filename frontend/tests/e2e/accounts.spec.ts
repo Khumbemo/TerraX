@@ -72,6 +72,9 @@ test('admin: usage, accounts and errors reported from a browser', async ({ page 
   await page.click('#account-tab-admin');
   await expect(page.locator('#admin-stats')).toContainText('Accounts');
   await expect(page.locator('#admin-users')).toContainText('admin@terrax.test');
+  // The long Admin page must not squeeze the tab bar (it clips its overflow, so a squeezed bar hides the labels).
+  const tabs = await page.locator('.account-tabs').evaluate(el => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+  expect(tabs.client).toBeGreaterThanOrEqual(tabs.scroll);
   await page.selectOption('#admin-error-source', 'client');
   await expect(page.locator('#admin-errors')).toContainText(marker);
   const metrics = await page.request.get('/api/metrics');
