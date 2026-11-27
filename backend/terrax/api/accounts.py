@@ -22,7 +22,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, or_, select, update
 
-from .. import audit, auth, db, mailer, oidc, ratelimit, storage, totp
+from .. import audit, auth, db, mailer, oidc, ratelimit, site, storage, totp
 from ..auth import Principal, require_user, signed_in
 from ..config import settings
 from ..monitoring import metrics
@@ -40,7 +40,7 @@ def _set_session_cookie(response: Response, request: Request, token: str) -> Non
 def _me(request: Request) -> dict[str, Any]:
     p: Principal | None = getattr(request.state, "principal", None)
     s = settings()
-    return {"mode": s.auth_mode, "signup": s.signup, "user": auth.public_user(p.user) if p and p.user else None, "guest": bool(p and p.is_guest),
+    return {"mode": s.auth_mode, "signup": site.signup(), "user": auth.public_user(p.user) if p and p.user else None, "guest": bool(p and p.is_guest),
             "mail": mailer.can_send(), "verifyEmail": auth.verification_required(), "sso": {"name": s.oidc_name} if oidc.enabled() else None}
 
 
@@ -90,7 +90,7 @@ def _send_verification(request: Request, user: dict[str, Any]) -> bool:
 @router.post("/api/auth/signup", status_code=201)
 def signup(req: SignUp, request: Request, response: Response) -> dict[str, Any]:
     p: Principal | None = getattr(request.state, "principal", None)
-    if settings().signup != "open" and not (p and p.is_admin):
+    if site.signup() != "open" and not (p and p.is_admin):
         raise HTTPException(403, "New accounts are created by an administrator on this server.")
     ratelimit.check("signup", auth.client_ip(request))
     by_admin = bool(p and p.is_admin)
@@ -452,7 +452,7 @@ def _sso_account(ident: dict[str, Any]) -> dict[str, Any] | str:
     if u is None:
         if not email or not ident["email_verified"]:
             return "The sign-in provider did not give a verified e-mail address."
-        if not s.oidc_create_accounts or s.signup != "open":
+        if not s.oidc_create_accounts or site.signup() != "open":
             return "There is no TerraX account for this e-mail; ask an administrator to create one."
         u = auth.create_user(email, None, ident.get("name", ""), verified=True, oidc_sub=ident["sub"])
     if u["disabled"]:

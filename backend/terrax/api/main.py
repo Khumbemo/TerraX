@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import __version__, auth, db, objectstore, ratelimit, storage
+from .. import __version__, auth, db, objectstore, ratelimit, site, storage
 from ..agents.llm import server_configured
 from ..auth import Principal, principal
 from ..config import settings
@@ -45,6 +45,8 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings().cors_origins), 
 app.add_middleware(BodyLimitMiddleware)  # added last, so it runs first: before CORS, logging and the routes
 
 _started = threading.Event()
+#: When this process started (for the Admin tab).
+STARTED = time.time()
 _start_lock = threading.Lock()
 
 
@@ -157,13 +159,12 @@ def health() -> dict[str, Any]:
     from ..tools import load_all
 
     return {"ok": True, "version": __version__, "eager": s.eager, "jobs": job_mode(), "redis": redis_ok, "tools": sorted(load_all()), "ai": server_configured(),
-            "auth": s.auth_mode, "signup": s.signup, "objectStore": bool(s.s3_bucket)}
+            "auth": s.auth_mode, "signup": site.signup(), "objectStore": bool(s.s3_bucket)}
 
 
-@app.get("/api/health/ready")
-def ready() -> JSONResponse:
-    """Readiness for a load balancer or orchestrator: the database answers, the storage folder takes writes, the
-    bucket (when there is one) answers, and (with Celery) Redis answers. 503 when any of them fails."""
+def readiness_checks() -> dict[str, bool]:
+    """The database answers, the storage folder takes writes, the bucket (when there is one) answers, and (with Celery)
+    Redis answers."""
     checks: dict[str, bool] = {"database": db.ping()}
     try:
         probe = storage.root() / f".ready-{storage.new_id()}"
@@ -181,8 +182,21 @@ def ready() -> JSONResponse:
             checks["redis"] = bool(redis.Redis.from_url(settings().redis_url, socket_connect_timeout=1).ping())
         except Exception:
             checks["redis"] = False
+    return checks
+
+
+@app.get("/api/health/ready")
+def ready() -> JSONResponse:
+    """Readiness for a load balancer or orchestrator; 503 when a check fails (see readiness_checks)."""
+    checks = readiness_checks()
     ok = all(checks.values())
     return JSONResponse({"ok": ok, "checks": checks}, status_code=200 if ok else 503)
+
+
+@app.get("/api/site")
+def site_info() -> dict:
+    """The announcement, maintenance notice and contact details set by the server's administrators (public)."""
+    return site.public()
 
 
 @app.get("/api/metrics", include_in_schema=False)
@@ -322,6 +336,8 @@ def create_job(req: JobRequest, request: Request, p: Principal = Depends(princip
 
     if req.tool not in load_all():
         raise HTTPException(400, f"Unknown tool “{req.tool}”.")
+    if (paused := site.maintenance()) and not p.is_admin:
+        raise HTTPException(503, paused)
     ratelimit.check("jobs", p.owner, auth.client_ip(request))
     for v in _file_ids(req.inputs):
         auth.own_file(p, v)  # 404 for missing uploads, and for anyone else's

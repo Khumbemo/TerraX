@@ -71,10 +71,13 @@ test('admin: usage, accounts and errors reported from a browser', async ({ page 
   await page.click('#account-button');
   await page.click('#account-tab-admin');
   await expect(page.locator('#admin-stats')).toContainText('Accounts');
+  await expect(page.locator('#admin-health')).toContainText('Everything is working');
+  await page.click('#admin-section-accounts');
   await expect(page.locator('#admin-users')).toContainText('admin@terrax.test');
   // The long Admin page must not squeeze the tab bar (it clips its overflow, so a squeezed bar hides the labels).
   const tabs = await page.locator('.account-tabs').evaluate(el => ({ client: el.clientHeight, scroll: el.scrollHeight }));
   expect(tabs.client).toBeGreaterThanOrEqual(tabs.scroll);
+  await page.click('#admin-section-errors');
   await page.selectOption('#admin-error-source', 'client');
   await expect(page.locator('#admin-errors')).toContainText(marker);
   const metrics = await page.request.get('/api/metrics');
@@ -176,6 +179,7 @@ test('two-factor sign-in, signing out other devices and the audit log', async ({
   await page.click('#signin-submit');
   await page.click('#account-button');
   await page.click('#account-tab-admin');
+  await page.click('#admin-section-audit');
   await page.fill('#admin-audit-q', email);
   for (const action of ['auth.signup', 'auth.2fa_enabled', 'auth.login', 'auth.sessions_ended']) await expect(page.locator('#admin-audit')).toContainText(action);
   expect(await page.locator('#admin-audit').innerText()).not.toContain(recovery);
@@ -202,5 +206,63 @@ test('links back from e-mail and single sign-on open the right form and leave th
   // A confirmation link that is no longer valid says so.
   await page.goto('/?verify=expired-token');
   await expect(page.locator('.modal .notice')).toContainText('not valid any more');
+  expect(errors).toEqual([]);
+});
+
+test('owner controls: site settings reach everyone, About shows the contact; tools open full screen', async ({ page, browser }) => {
+  const errors = await start(page);
+  await page.click('#account-button');
+  await page.fill('#signin-email', 'admin@terrax.test');
+  await page.fill('#signin-password', 'e2e admin passphrase');
+  await page.click('#signin-submit');
+  await page.click('#account-button');
+  // The account window fills the screen.
+  const box = await page.locator('.account-modal').boundingBox();
+  const vp = page.viewportSize()!;
+  expect(box!.width).toBeGreaterThanOrEqual(vp.width - 1);
+  expect(box!.height).toBeGreaterThanOrEqual(vp.height - 1);
+  await page.click('#account-tab-admin');
+  await page.click('#admin-section-site');
+  const note = `Announcement ${Date.now()}`;
+  await page.fill('#admin-site-announcement', note);
+  await page.fill('#admin-site-contact-name', 'TerraX e2e lab');
+  await page.fill('#admin-site-support-email', 'support@example.org');
+  await page.click('#admin-site-save');
+  await expect(page.getByText('Site settings saved')).toBeVisible();
+  await page.click('#admin-section-system');
+  await expect(page.locator('#admin-config')).toContainText('Database type');
+  await page.click('#admin-backup-now');
+  await expect(page.locator('#admin-backups tbody tr').first()).toBeVisible();
+
+  // Another visitor (a guest) sees the announcement and the contact. (Maintenance is tested in pytest: pausing analyses
+  // here would fail the other tests running in parallel on this server.)
+  const other = await (await browser.newContext()).newPage();
+  await start(other, 'Visitor');
+  await expect(other.locator('#site-announcement')).toContainText(note);
+  await other.click('#nav-settings');
+  await other.click('button[role=tab]:has-text("About")');
+  await expect(other.locator('#about-contact')).toContainText('TerraX e2e lab');
+  await expect(other.locator('#about-contact a[href^="mailto:support@example.org"]')).toBeVisible();
+  await expect(other.locator('#about-tab')).toContainText('MIT Licence');
+  await other.keyboard.press('Escape');
+  // A tool takes the whole screen: the side panels step aside, the map stays beside the tool, and they come back after.
+  await expect(other.locator('.telemetry-panel')).toBeVisible();
+  await openTool(other, 'Terrain');
+  await expect(other.locator('.terrax-workspace.focus')).toBeVisible();
+  await expect(other.locator('.telemetry-panel')).toBeHidden();
+  await expect(other.locator('.right-links-panel')).toBeHidden();
+  const map = await other.locator('.map-container').boundingBox();
+  const tool = await other.locator('.tool-workspace').boundingBox();
+  expect(map!.x).toBeGreaterThan(tool!.x + tool!.width - 1); // beside it, on the right
+  await other.click('button:has-text("← All tools")');
+  await expect(other.locator('.telemetry-panel')).toBeVisible();
+
+  // Back to normal for the other tests.
+  await page.click('#admin-section-site');
+  await page.fill('#admin-site-announcement', '');
+  await page.fill('#admin-site-contact-name', '');
+  await page.fill('#admin-site-support-email', '');
+  await page.click('#admin-site-save');
+  await expect(page.getByText('Site settings saved')).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -159,3 +159,113 @@ def stats() -> dict[str, Any]:
             "errorsLastDay": int(c.execute(select(func.count()).select_from(db.errors).where(db.errors.c.at >= day)).scalar_one()),
             "projects": int(c.execute(select(func.count()).select_from(db.projects)).scalar_one()),
         }
+
+
+# Site settings, system status, all jobs, backups and clean-up ------------------------------------------------------
+
+
+@router.get("/settings")
+def get_settings() -> dict[str, Any]:
+    """The site settings administrators have set, and the server defaults they override."""
+    from .. import site
+    from ..config import settings
+
+    return {"settings": site.stored(), "defaults": {"signup": settings().signup}}
+
+
+@router.put("/settings")
+def put_settings(changes: dict[str, Any], request: Request, p: Principal = Depends(require_admin)) -> dict[str, Any]:
+    """Changes some settings; a null or empty value clears one (back to the server default). Audited."""
+    from .. import site
+
+    try:
+        out = site.update(changes, p.user["email"] if p.user else "")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    audit.record("admin.settings_changed", request, detail={k: ("set" if v not in (None, "") else "cleared") for k, v in changes.items()})
+    return {"settings": out}
+
+
+@router.get("/system")
+def system() -> dict[str, Any]:
+    """Health checks and the server's configuration as it is running (never secrets: only whether they are set)."""
+    import platform
+
+    from .. import __version__, mailer, oidc, site
+    from ..agents.llm import server_configured
+    from ..config import settings
+    from ..tasks import job_mode
+    from .main import STARTED, readiness_checks
+
+    s = settings()
+    checks = readiness_checks()
+    return {
+        "version": __version__, "python": platform.python_version(), "uptimeSeconds": time.time() - STARTED,
+        "checks": checks, "ok": all(checks.values()),
+        "config": [
+            {"name": "Accounts", "value": {"off": "off (guests only)", "optional": "optional (guests and accounts)", "required": "required (everyone signs in)"}.get(s.auth_mode, s.auth_mode), "env": "TERRAX_AUTH"},
+            {"name": "Sign-up", "value": site.signup(), "env": "TERRAX_SIGNUP, or the Site settings section"},
+            {"name": "Analyses run on", "value": {"celery": "Celery workers", "threads": f"background threads ({s.job_threads})", "inline": "the request itself"}.get(job_mode(), job_mode()), "env": "REDIS_URL / TERRAX_JOB_THREADS"},
+            {"name": "Database type", "value": "PostgreSQL" if s.database_url.startswith("postgresql") else "SQLite in the storage folder", "env": "DATABASE_URL"},
+            {"name": "Uploads and results", "value": f"bucket {s.s3_bucket}" if s.s3_bucket else "the storage folder on this machine", "env": "TERRAX_S3_BUCKET"},
+            {"name": "Guests' work kept", "value": f"{s.retention_hours:g} hours", "env": "TERRAX_RETENTION_HOURS"},
+            {"name": "Accounts' work kept", "value": f"{s.user_retention_days:g} days", "env": "TERRAX_USER_RETENTION_DAYS"},
+            {"name": "Storage per account / guest", "value": f"{s.user_quota_mb:,} MB / {s.guest_quota_mb:,} MB", "env": "TERRAX_USER_QUOTA_MB / TERRAX_GUEST_QUOTA_MB"},
+            {"name": "Largest upload", "value": f"{s.max_upload // (1024 * 1024):,} MB", "env": "TERRAX_MAX_UPLOAD_MB"},
+            {"name": "Analyses per minute (each user)", "value": f"{s.jobs_per_minute}" if s.rate_limits else "no limit", "env": "TERRAX_JOBS_PER_MINUTE"},
+            {"name": "Database backups", "value": f"every {s.backup_hours:g} hours, newest {s.backup_keep} kept" if s.backup_hours > 0 else "off", "env": "TERRAX_BACKUP_HOURS / TERRAX_BACKUP_KEEP"},
+            {"name": "E-mail (password reset)", "value": "set up" if mailer.can_send() else "not set up", "env": "TERRAX_SMTP_*"},
+            {"name": "Single sign-on", "value": s.oidc_name if oidc.enabled() else "off", "env": "TERRAX_OIDC_*"},
+            {"name": "Server AI key", "value": "set" if server_configured() else "none (users add their own)", "env": "TERRAX_AI_KEY"},
+            {"name": "Error reporting to Sentry", "value": "on" if s.sentry_dsn else "off", "env": "SENTRY_DSN"},
+        ],
+    }
+
+
+@router.get("/jobs")
+def all_jobs(state: str | None = None, tool: str | None = None, limit: int = Query(100, ge=1, le=500)) -> dict[str, Any]:
+    """Recent analyses by everyone, newest first, with who ran them (guests are shown as guests)."""
+    stmt = select(db.jobs.c.id, db.jobs.c.owner, db.jobs.c.tool, db.jobs.c.state, db.jobs.c.message, db.jobs.c.name, db.jobs.c.created, db.jobs.c.seconds)
+    if state:
+        stmt = stmt.where(db.jobs.c.state == state)
+    if tool:
+        stmt = stmt.where(db.jobs.c.tool == tool)
+    with db.connect() as c:
+        rows = c.execute(stmt.order_by(db.jobs.c.created.desc()).limit(limit)).all()
+        ids = {r.owner[2:] for r in rows if r.owner.startswith("u:")}
+        emails = dict(c.execute(select(db.users.c.id, db.users.c.email).where(db.users.c.id.in_(ids))).all()) if ids else {}
+    return {"jobs": [{"id": r.id, "tool": r.tool, "state": r.state, "name": r.name, "created": r.created, "seconds": r.seconds,
+                      "message": r.message if r.state == "error" else "",
+                      "who": emails.get(r.owner[2:], "deleted account") if r.owner.startswith("u:") else "guest"} for r in rows]}
+
+
+@router.get("/backups")
+def backups() -> dict[str, Any]:
+    from .. import backup
+    from ..config import settings
+
+    s = settings()
+    return {"backups": backup.list_backups(), "everyHours": s.backup_hours, "keep": s.backup_keep}
+
+
+@router.post("/backups", status_code=201)
+def backup_now(request: Request) -> dict[str, Any]:
+    """Backs the database up now (accounts, history, projects, settings), like `python -m terrax.manage backup`."""
+    from .. import backup
+
+    made = backup.create()
+    audit.record("admin.backup_made", request, detail={"name": made["name"], "rows": sum(made["rows"].values())})
+    return {"name": made["name"], "size": made["size"], "rows": sum(made["rows"].values()), "removed": len(made["removed"])}
+
+
+@router.post("/cleanup")
+def cleanup_now(request: Request) -> dict[str, Any]:
+    """Runs the hourly clean-up now: expired uploads and results, old errors, rate-limit counters and audit entries."""
+    from ..audit import purge as purge_audit
+    from ..monitoring import purge_errors
+    from ..ratelimit import purge_counters
+    from ..storage import purge_old
+
+    out = {"errors": purge_errors(), "counters": purge_counters(), "audit": purge_audit(), "files": purge_old()}
+    audit.record("admin.cleanup", request, detail=out)
+    return out

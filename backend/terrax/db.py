@@ -211,6 +211,16 @@ monitor_alerts = Table(
     Column("emailed", Boolean, nullable=False, default=False),
 )
 
+#: Settings the server's administrators change in the Admin tab (sign-up, announcement, maintenance, contact details);
+#: each overrides its environment default while it is set. See terrax/site.py.
+site_settings = Table(
+    "site_settings", metadata,
+    Column("key", String(60), primary_key=True),
+    Column("value", JSON, nullable=False),
+    Column("updated", Float, nullable=False),
+    Column("updated_by", String(254), nullable=False, default=""),
+)
+
 _engines: dict[str, Engine] = {}
 _lock = threading.Lock()
 

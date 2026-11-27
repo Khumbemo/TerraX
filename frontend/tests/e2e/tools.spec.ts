@@ -163,6 +163,11 @@ test('offline assistant holds a conversation', async ({ page }) => {
   expect(await chat(page, 'guide-chat', 'how do i calcualte forest los')).toContain('Forest loss');
   expect(await chat(page, 'guide-chat', 'yes')).toContain('same season');
   expect(await chat(page, 'guide-chat', 'convert 3 acres to hectares')).toContain('1.21406 ha');
+  // The guide opened full screen when typed into; Esc closes it and keeps the conversation.
+  await expect(page.locator('#guide-chat-full')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#guide-chat-full')).toHaveCount(0);
+  await expect(page.locator('#guide-chat')).toContainText('1.21406 ha');
   await openTool(page, 'Forest loss');
   await page.click('button:has-text("Try synthetic sample")');
   await expect(page.locator('.result-block')).toBeVisible();

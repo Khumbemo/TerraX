@@ -51,7 +51,8 @@ test('AI keys: an old Gemini key carries over, a new key is recognised, and keys
   // Nothing of the old single-key storage is left behind.
   expect(await page.evaluate(() => [localStorage.getItem('terrax_api_key'), localStorage.getItem('terrax_model')])).toEqual([null, null]);
 
-  // Removing both keys turns AI back to the server's key or off.
+  // Removing both keys turns AI back to the server's key or off. (The guide opened full screen when typed into: close it.)
+  await page.keyboard.press('Escape');
   await page.click('#nav-settings');
   await rows.first().locator('button:has-text("Remove")').click();
   await rows.first().locator('button:has-text("Remove")').click();

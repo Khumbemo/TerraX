@@ -314,7 +314,10 @@ code {
 input[type='text'],
 input[type='password'],
 input[type='url'],
+input[type='email'],
+input[type='search'],
 input:not([type]),
+textarea,
 select {
   background: var(--bg);
   border: 1px solid var(--line-strong);
@@ -2753,4 +2756,207 @@ details[open] > summary {
   gap: 6px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* ── Full-screen working views ──────────────────────────────────────────────────────────────────────────────────── */
+
+/* A tool takes the whole screen: the side panels step aside; on wide screens the tool scrolls on the left and the
+   map stays beside it on the right. */
+.terrax-workspace.focus {
+  grid-template-columns: minmax(0, 1fr);
+}
+.terrax-workspace.focus > .telemetry-panel,
+.terrax-workspace.focus > .right-links-panel {
+  display: none;
+}
+@media (min-width: 1201px) {
+  .terrax-workspace.focus {
+    --focus-map: clamp(420px, 56vw, calc(100vw - 520px - 3 * var(--gutter)));
+  }
+  .terrax-workspace.focus .center-column {
+    margin-right: calc(var(--focus-map) + var(--gutter));
+  }
+  .terrax-workspace.focus .center-column > .map-container {
+    position: fixed;
+    top: calc(58px + var(--gutter));
+    right: var(--gutter);
+    bottom: var(--gutter);
+    width: var(--focus-map);
+    height: auto;
+    z-index: 1;
+  }
+}
+@media (max-width: 1200px) {
+  .terrax-workspace.focus .center-column > .map-container {
+    height: min(55vh, 480px);
+  }
+}
+
+/* The assistant over the whole screen. */
+.chat-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(3, 7, 14, 0.86);
+  backdrop-filter: blur(3px);
+  display: flex;
+  justify-content: center;
+}
+.chat-panel.chat-full {
+  width: min(960px, 100%);
+  height: 100%;
+  border-radius: 0;
+  border-top: 0;
+  border-bottom: 0;
+  background: var(--panel);
+  padding: 16px clamp(16px, 4vw, 32px);
+}
+.chat-panel.chat-full .chat-history {
+  flex: 1;
+  max-height: none;
+}
+.chat-panel.chat-full .chat-bubble {
+  font-size: 15px;
+}
+.chat-panel.chat-full .chat-input-area input {
+  font-size: 16px;
+  padding-block: 12px;
+}
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-expand {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.chat-expand:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The account window over the whole screen, its content centred at a readable width. */
+.modal-backdrop.modal-full {
+  padding: 0;
+}
+.modal.account-modal {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: 0;
+  --pad-x: max(18px, calc((100% - 1180px) / 2));
+}
+.account-modal .modal-head,
+.account-modal .account-body {
+  padding-left: var(--pad-x);
+  padding-right: var(--pad-x);
+}
+.account-modal .account-tabs {
+  margin-left: var(--pad-x);
+  margin-right: var(--pad-x);
+}
+.account-modal .account-body {
+  flex: 1;
+}
+
+/* Announcements and maintenance set by the server's administrators. */
+.site-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+  font-size: 14px;
+}
+.site-notice.site-maintenance {
+  border-left-color: var(--warn);
+}
+
+/* Admin tab. */
+.admin-sections {
+  margin-bottom: 12px;
+}
+.admin-panel section > h3:first-child {
+  margin-top: 4px;
+}
+.admin-panel h4 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.admin-health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+}
+.admin-health.bad {
+  border-left-color: var(--danger);
+}
+.check-ok {
+  color: var(--green);
+}
+.check-bad {
+  color: var(--danger);
+}
+.row-bad td {
+  color: var(--danger);
+}
+.admin-site {
+  max-width: 640px;
+}
+.admin-site textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+}
+.account-form .inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.account-form input[type='checkbox'] {
+  width: auto;
+  flex: none;
+}
+#admin-config th {
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Settings → About. */
+.about-contact {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 8px 0;
+}
+.about-contact dt {
+  color: var(--muted);
+}
+.about-contact dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
