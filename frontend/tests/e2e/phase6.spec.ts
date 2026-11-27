@@ -252,3 +252,29 @@ test('logo, opening animation and space pictures', async ({ page, request }) => 
   await expect(page.locator('.space-image')).toHaveAttribute('style', /nebula\.webp/);
   expect(errors).toEqual([]);
 });
+
+test('languages: every one loads, Arabic reads right to left while numbers and English content keep their order', async ({ page }) => {
+  const errors = await start(page);
+  await page.click('#nav-settings');
+  await expect(page.locator('#pref-lang option')).toHaveCount(18);
+  const codes = await page.locator('#pref-lang option').evaluateAll(els => els.map(e => (e as HTMLOptionElement).value));
+  for (const code of codes) {
+    await page.selectOption('#pref-lang', code);
+    await expect(page.locator('html')).toHaveAttribute('lang', code);
+    // The tab label changes from English (except in English itself) once the language has loaded.
+    if (code !== 'en') await expect(page.locator('#settings-title')).not.toHaveText('Settings & guide');
+  }
+  await page.selectOption('#pref-lang', 'ar');
+  await expect(page.locator('#settings-title')).toHaveText('الإعدادات والدليل');
+  await expect(page.locator('#settings-title')).toHaveAttribute('dir', 'rtl');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.tool-card[data-name="Forest loss"] .tool-name')).toHaveText('فقدان الغابات');
+  await expect(page.locator('.tool-card[data-name="Forest loss"] .tool-name')).toHaveAttribute('dir', 'rtl');
+  // The page layout and the untranslated content stay left to right.
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  expect(await page.locator('.brand').innerText()).toBe('TERRAX');
+  // The choice is kept after a reload.
+  await page.reload();
+  await expect(page.locator('#nav-settings')).toHaveText('الإعدادات');
+  expect(errors).toEqual([]);
+});

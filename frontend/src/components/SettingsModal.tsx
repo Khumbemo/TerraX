@@ -3,7 +3,7 @@ import { useToast } from '../lib/toast';
 import { idbSet } from '../lib/idb';
 import { usePrefs, type Background, type PanelStyle, type TelemetryView, type Theme } from '../lib/prefs';
 import type { Units } from '../lib/units';
-import type { Lang } from '../lib/i18n';
+import { LANGUAGES, type Lang } from '../lib/i18n';
 import AiKeysSection from './AiKeysSection';
 import GEEGuidance from './GEEGuidance';
 import AboutTab from './AboutTab';
@@ -28,13 +28,7 @@ interface Props {
 
 type Tab = 'settings' | 'map' | 'guide' | 'gee' | 'about';
 
-const TABS: [Tab, string][] = [
-  ['settings', 'Settings'],
-  ['map', 'Map'],
-  ['guide', 'How TerraX works'],
-  ['gee', 'Earth Engine manual'],
-  ['about', 'About, licences and support'],
-];
+const TABS: Tab[] = ['settings', 'map', 'guide', 'gee', 'about'];
 
 export default function SettingsModal({ initialTab = 'settings', target, onTargetChange, onAiChange, onClose, onStartTour }: Props) {
   const notify = useToast();
@@ -55,34 +49,34 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
     const la = Number(lat);
     const lo = Number(lon);
     if (!Number.isFinite(la) || la < -90 || la > 90 || !Number.isFinite(lo) || lo < -180 || lo > 180) {
-      notify('Latitude must be between −90 and 90, and longitude between −180 and 180.', 'error');
+      notify(prefs.t('target.invalid'), 'error');
       return;
     }
     onTargetChange({ lat: la, lon: lo, name: placeName.trim() || 'Target' });
-    notify('Target location updated.', 'success');
+    notify(prefs.t('target.updated'), 'success');
   };
 
   return (
     <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div className="modal-head">
-          <h2 id="settings-title">Settings & guide</h2>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <h2 id="settings-title" dir={prefs.dir}>{prefs.t('settings.title')}</h2>
+          <button type="button" className="icon-btn" aria-label={prefs.t('settings.close')} onClick={onClose}>
             ✕
           </button>
         </div>
         <div className="modal-body">
-          <div className="modal-tabs" role="tablist" aria-orientation="vertical">
-            {TABS.map(([id, label]) => (
+          <div className="modal-tabs" role="tablist" aria-orientation="vertical" dir={prefs.dir}>
+            {TABS.map(id => (
               <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
-                {label}
+                {prefs.t(`settings.tab.${id}`)}
               </button>
             ))}
           </div>
           <div className="modal-content">
             {tab === 'settings' && (
               <div className="settings-stack">
-                <section aria-label="Display">
+                <section aria-label="Display" dir={prefs.dir}>
                   <h3>{prefs.t('prefs.display')}</h3>
                   <div className="param-row">
                     <label className="inline-select">
@@ -153,8 +147,8 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                         <option value="imperial">{prefs.t('prefs.imperial')}</option>
                       </select>
                     </label>
-                    <label className="inline-select" title="What the Planetary telemetry panel shows">
-                      <span>Telemetry</span>
+                    <label className="inline-select" title={prefs.t('prefs.telemetryHint')}>
+                      <span>{prefs.t('prefs.telemetry')}</span>
                       <select id="pref-telemetry" value={prefs.telemetryView} onChange={e => prefs.setTelemetryView(e.target.value as TelemetryView)}>
                         {TELEMETRY_VIEWS.map(([id, label]) => (
                           <option key={id} value={id}>
@@ -166,8 +160,11 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                     <label className="inline-select">
                       <span>{prefs.t('prefs.language')}</span>
                       <select id="pref-lang" value={prefs.lang} onChange={e => prefs.setLang(e.target.value as Lang)}>
-                        <option value="en">English</option>
-                        <option value="hi">हिन्दी (Hindi)</option>
+                        {LANGUAGES.map(([code, native, english]) => (
+                          <option key={code} value={code} lang={code}>
+                            {code === 'en' ? native : `${native} (${english})`}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="check" title={prefs.t('prefs.introHint')}>
@@ -202,26 +199,26 @@ export default function SettingsModal({ initialTab = 'settings', target, onTarge
                 </section>
                 <AiKeysSection onAiChange={onAiChange} />
 
-                <section>
-                  <h3>Telemetry target</h3>
+                <section dir={prefs.dir}>
+                  <h3>{prefs.t('target.title')}</h3>
                   <form onSubmit={saveTarget} className="target-form">
                     <label>
-                      <span>Name</span>
+                      <span>{prefs.t('target.name')}</span>
                       <input id="target-name" value={placeName} maxLength={60} onChange={e => setPlaceName(e.target.value)} />
                     </label>
                     <label>
-                      <span>Latitude (°N)</span>
+                      <span>{prefs.t('target.lat')}</span>
                       <input id="target-lat" inputMode="decimal" value={lat} onChange={e => setLat(e.target.value)} />
                     </label>
                     <label>
-                      <span>Longitude (°E)</span>
+                      <span>{prefs.t('target.lon')}</span>
                       <input id="target-lon" inputMode="decimal" value={lon} onChange={e => setLon(e.target.value)} />
                     </label>
                     <button type="submit" className="btn btn-primary">
-                      Update target
+                      {prefs.t('target.update')}
                     </button>
                   </form>
-                  <p className="field-hint">Used for solar time, sun position and the map marker. Use negative values for south and west.</p>
+                  <p className="field-hint">{prefs.t('target.hint')}</p>
                 </section>
               </div>
             )}

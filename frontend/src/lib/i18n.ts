@@ -1,103 +1,47 @@
-// Interface language for the app chrome (navigation, tool hub, session
-// screen, settings and tour). Tool screens and reports stay in English.
-export type Lang = 'en' | 'hi';
+// Interface language for the app's frame: navigation, start page, tool list, Settings and the tour. Tool screens and
+// reports stay in English for now. English is built in; other languages load when chosen (src/lib/locales/*.ts).
+// The translations were written with AI assistance and have not all been reviewed by native speakers; corrections are
+// welcome (see the README).
 
-const HI: Record<string, string> = {
-  'nav.tools': 'टूल',
-  'nav.reports': 'रिपोर्ट',
-  'nav.settings': 'सेटिंग्स',
-  'nav.end': 'सत्र समाप्त करें',
-  'hub.title': 'टूल',
-  'hub.intro': 'कोई विश्लेषण चुनें, फिर अपनी GIS फ़ाइलें अपलोड करें। हर टूल में पहले आज़माने के लिए नमूना डेटा है।',
-  'hub.englishNote': 'टूल के भीतर के विवरण और रिपोर्ट अंग्रेज़ी में हैं।',
-  'workspace.all': '← सभी टूल',
-  'tool.forest.name': 'वन हानि',
-  'tool.forest.group': 'वानिकी',
-  'tool.forest.summary': 'दो तारीख़ों के बीच कहाँ और कितना वन घटा, इसका अनुमान लगाएँ।',
-  'tool.carbon.name': 'कार्बन और बायोमास',
-  'tool.carbon.group': 'वानिकी',
-  'tool.carbon.summary': 'वन सर्वेक्षण के आँकड़ों से पेड़ों का बायोमास, कार्बन भंडार और CO₂ का अनुमान लगाएँ।',
-  'tool.survey.name': 'भूमि सर्वेक्षण',
-  'tool.survey.group': 'सर्वेक्षण',
-  'tool.survey.summary': 'किसी भूखंड की सीमा, चलकर बनाया गया मार्ग या बिंदुओं को मापें।',
-  'tool.residential.name': 'आवासीय भूखंड',
-  'tool.residential.group': 'संपत्ति',
-  'tool.residential.summary': 'अपने भूखंड की पुरानी और नई तस्वीरों की तुलना करके अतिक्रमण और पड़ोसी के विस्तार का पता लगाएँ।',
-  'tool.weather.name': 'मौसम और जलवायु',
-  'tool.weather.group': 'जलवायु',
-  'tool.weather.summary': 'वर्षा, तापमान, आर्द्रता, मिट्टी की नमी, वाष्पोत्सर्जन और विकिरण की श्रृंखलाओं का विश्लेषण करें।',
-  'tool.satellite.name': 'उपग्रह चित्र',
-  'tool.satellite.group': 'सुदूर संवेदन',
-  'tool.satellite.summary': 'मल्टीस्पेक्ट्रल चित्र देखें और स्पेक्ट्रल सूचकांक निकालें।',
-  'tool.landcover.name': 'भूमि आवरण',
-  'tool.landcover.group': 'सुदूर संवेदन',
-  'tool.landcover.summary': 'मिलते-जुलते स्पेक्ट्रम वाले पिक्सेल को वर्गों में बाँटें, उन्हें नाम दें और उनका क्षेत्रफल मापें।',
-  'tool.terrain.name': 'भू-आकृति',
-  'tool.terrain.group': 'ऊँचाई',
-  'tool.terrain.summary': 'ऊँचाई मॉडल से ढलान, ढलान की दिशा, धाराएँ और जलग्रहण क्षेत्र निकालें।',
-  'tool.photo.name': 'अंतरिक्ष और हवाई फ़ोटो',
-  'tool.photo.group': 'चित्र',
-  'tool.photo.summary': 'उपग्रह, ड्रोन या अंतरिक्ष स्टेशन की तस्वीरों में हरियाली का अनुमान लगाएँ।',
-  'session.subtitle': 'पृथ्वी अवलोकन कार्यक्षेत्र',
-  'session.name': 'आपका नाम (वैकल्पिक)',
-  'session.hint': 'आपकी बनाई रिपोर्टों पर दिखाया जाता है।',
-  'session.start': 'सत्र शुरू करें',
-  'session.note':
-    'आपकी फ़ाइलें विश्लेषण के लिए उस TerraX सर्वर पर अपलोड होती हैं जिसका आप उपयोग कर रहे हैं, और केवल आप उन्हें देख सकते हैं। अतिथि के रूप में वे सीमित समय (डिफ़ॉल्ट 72 घंटे) बाद हटा दी जाती हैं; खाते के साथ वे अधिक समय (डिफ़ॉल्ट 30 दिन) तक रखी जाती हैं, आपके इतिहास और प्रोजेक्ट के साथ। यदि आप AI चालू करते हैं, तो व्याख्या माँगने पर परिणामों का सारांश Google के Gemini API को भेजा जाता है।',
-  'prefs.display': 'प्रदर्शन',
-  'prefs.theme': 'थीम',
-  'prefs.dark': 'गहरा',
-  'prefs.light': 'हल्का',
-  'prefs.units': 'इकाइयाँ',
-  'prefs.metric': 'मीट्रिक',
-  'prefs.imperial': 'इंपीरियल (US)',
-  'prefs.unitsNote': 'स्क्रीन पर दिखाए गए मानों पर लागू; रिपोर्ट SI इकाइयों में रहती हैं।',
-  'prefs.language': 'भाषा',
-  'prefs.galaxy': 'आकाशगंगा',
-  'prefs.background': 'पृष्ठभूमि',
-  'prefs.bg.earthNight': 'रात में पृथ्वी (शहरों की रोशनी)',
-  'prefs.panels': 'पैनल',
-  'prefs.panels.clear': 'पारदर्शी (वॉलपेपर अधिक दिखे)',
-  'prefs.panels.balanced': 'संतुलित',
-  'prefs.panels.solid': 'ठोस (पढ़ने में सबसे आसान)',
-  'prefs.bg.earth': 'पृथ्वी, अभी का दिन-रात',
-  'prefs.bg.galaxy': 'आकाशगंगा',
-  'prefs.bg.custom': 'मेरी अपनी तस्वीर',
-  'prefs.bg.off': 'बंद',
-  'prefs.bg.choose': 'तस्वीर चुनें…',
-  'prefs.bgNote': 'पृथ्वी Natural Earth भूमि डेटा से बनाई गई है; शहरों की रोशनी GeoNames के 49,000 स्थानों (5,000+ आबादी) से, आबादी के अनुसार। "अभी का दिन-रात" असली सूर्य स्थिति दिखाता है। यह एक मॉडल है, उपग्रह का रात्रि-प्रकाश डेटा नहीं। हल्की थीम में पृष्ठभूमि बंद रहती है।',
-  'prefs.bg.space': 'अंतरिक्ष चित्र',
-  'prefs.bg.milky-way': 'मिल्की वे (आकाशगंगा)',
-  'prefs.bg.nebula': 'नीहारिका',
-  'prefs.bg.spiral-galaxy': 'सर्पिल आकाशगंगा',
-  'prefs.bg.deep-field': 'डीप फ़ील्ड',
-  'prefs.bg.starfield': 'तारामंडल',
-  'prefs.bg.moon': 'चंद्रमा',
-  'prefs.bg.mars': 'मंगल',
-  'prefs.bg.jupiter': 'बृहस्पति',
-  'prefs.bg.saturn': 'शनि',
-  'prefs.bg.neptune': 'वरुण (नेपच्यून)',
-  'prefs.spaceNote': 'अंतरिक्ष चित्र TerraX द्वारा बनाए गए कलात्मक चित्र हैं (तस्वीरें नहीं, पैमाने पर नहीं), MIT लाइसेंस के तहत मुक्त। असली तस्वीर के लिए "मेरी अपनी तस्वीर" चुनें: NASA की तस्वीरें आम तौर पर कॉपीराइट-मुक्त होती हैं, पर हर तस्वीर का श्रेय जाँच लें।',
-  'prefs.intro': 'शुरुआती एनिमेशन',
-  'prefs.introHint': 'ऐप खुलने पर हर बार एक बार TerraX एनिमेशन चलाएँ',
-  'prefs.tour': 'परिचय दौरा शुरू करें',
-  'tour.next': 'आगे',
-  'tour.back': 'पीछे',
-  'tour.done': 'समाप्त',
-  'tour.skip': 'छोड़ें',
-  'tour.1.title': 'एक टूल चुनें',
-  'tour.1.text': 'हर कार्ड एक विश्लेषण है: वन हानि, कार्बन, भूमि सर्वेक्षण, मौसम, उपग्रह चित्र, भूमि आवरण, भू-आकृति और फ़ोटो। हर टूल में नमूना डेटा है।',
-  'tour.2.title': 'मानचित्र',
-  'tour.2.text': 'परिणाम यहाँ दिखते हैं। ऊपर दाईं ओर "Layers" से परतें चालू या बंद करें, पारदर्शिता बदलें और लेजेंड देखें।',
-  'tour.3.title': 'सहायक',
-  'tour.3.text': 'यह सहायक बिना इंटरनेट के भी टूल, शब्दों और आपके परिणामों के बारे में प्रश्नों का उत्तर देता है।',
-  'tour.4.title': 'रिपोर्ट',
-  'tour.4.text': 'सहेजी गई रिपोर्ट यहाँ मिलती हैं। इन्हें Markdown या चित्रों सहित PDF के रूप में डाउनलोड करें, और पूरा प्रोजेक्ट निर्यात करें।',
-  'tour.5.title': 'सेटिंग्स',
-  'tour.5.text': 'यहाँ लक्ष्य स्थान, AI, थीम, इकाइयाँ और भाषा बदलें।',
-};
+export const LANGUAGES = [
+  ['en', 'English', 'English'],
+  ['zh', '简体中文', 'Chinese (Simplified)'],
+  ['hi', 'हिन्दी', 'Hindi'],
+  ['es', 'Español', 'Spanish'],
+  ['fr', 'Français', 'French'],
+  ['ar', 'العربية', 'Arabic'],
+  ['bn', 'বাংলা', 'Bengali'],
+  ['pt', 'Português', 'Portuguese'],
+  ['ru', 'Русский', 'Russian'],
+  ['ur', 'اردو', 'Urdu'],
+  ['id', 'Bahasa Indonesia', 'Indonesian'],
+  ['de', 'Deutsch', 'German'],
+  ['ja', '日本語', 'Japanese'],
+  ['ko', '한국어', 'Korean'],
+  ['tr', 'Türkçe', 'Turkish'],
+  ['vi', 'Tiếng Việt', 'Vietnamese'],
+  ['sw', 'Kiswahili', 'Swahili'],
+  ['it', 'Italiano', 'Italian'],
+] as const;
 
-const EN: Record<string, string> = {
+export type Lang = (typeof LANGUAGES)[number][0];
+export type Messages = Record<string, string>;
+
+export const LANG_CODES = LANGUAGES.map(([code]) => code) as readonly Lang[];
+
+/** Languages written right to left. */
+export const RTL: readonly Lang[] = ['ar', 'ur'];
+
+/** The supported language closest to the browser's own preferences, else English. */
+export function browserLang(prefs: readonly string[] = typeof navigator === 'undefined' ? [] : (navigator.languages ?? [navigator.language])): Lang {
+  for (const p of prefs) {
+    const base = p.toLowerCase().split('-')[0] as Lang;
+    if (LANG_CODES.includes(base)) return base;
+  }
+  return 'en';
+}
+
+export const EN: Messages = {
   'nav.tools': 'Tools',
   'nav.reports': 'Reports',
   'nav.settings': 'Settings',
@@ -133,7 +77,8 @@ const EN: Record<string, string> = {
   'prefs.bg.custom': 'My own image',
   'prefs.bg.off': 'Off',
   'prefs.bg.choose': 'Choose image…',
-  'prefs.bgNote': 'The Earth is drawn from bundled Natural Earth land data. City lights come from 49,000 GeoNames places with 5,000+ people, sized and brightened by population: a model of where people live, not satellite night-light data. "Live day and night" uses the sun’s real position now. The background is hidden in the light theme.',
+  'prefs.bgNote':
+    'The Earth is drawn from bundled Natural Earth land data. City lights come from 49,000 GeoNames places with 5,000+ people, sized and brightened by population: a model of where people live, not satellite night-light data. "Live day and night" uses the sun’s real position now. The background is hidden in the light theme.',
   'prefs.bg.space': 'Space pictures',
   'prefs.bg.milky-way': 'Milky Way',
   'prefs.bg.nebula': 'Nebula',
@@ -145,7 +90,8 @@ const EN: Record<string, string> = {
   'prefs.bg.jupiter': 'Jupiter',
   'prefs.bg.saturn': 'Saturn',
   'prefs.bg.neptune': 'Neptune',
-  'prefs.spaceNote': 'Space pictures are artistic renderings made by TerraX (not photographs, not to scale), free to use under its MIT licence. For a real photograph, choose “My own image”: NASA images are generally not copyrighted, but check each image’s credit.',
+  'prefs.spaceNote':
+    'Space pictures are artistic renderings made by TerraX (not photographs, not to scale), free to use under its MIT licence. For a real photograph, choose “My own image”: NASA images are generally not copyrighted, but check each image’s credit.',
   'prefs.intro': 'Opening animation',
   'prefs.introHint': 'Play the TerraX animation once each time the app opens',
   'prefs.tour': 'Take the tour',
@@ -163,11 +109,77 @@ const EN: Record<string, string> = {
   'tour.4.text': 'Saved reports live here. Download them as Markdown or as PDF with figures, and export the whole project.',
   'tour.5.title': 'Settings',
   'tour.5.text': 'Change the target location, AI, theme, units and language here.',
+  'nav.assistant': 'Assistant',
+  'nav.signin': 'Sign in',
+  'gate.signin': 'Sign in',
+  'gate.signinRest': 'to keep your analyses and projects on the server, or start as a guest.',
+  'gate.signedIn': 'Signed in as {email}.',
+  'settings.title': 'Settings & guide',
+  'settings.tab.settings': 'Settings',
+  'settings.tab.map': 'Map',
+  'settings.tab.guide': 'How TerraX works',
+  'settings.tab.gee': 'Earth Engine manual',
+  'settings.tab.about': 'About, licences and support',
+  'settings.close': 'Close',
+  'prefs.telemetry': 'Telemetry',
+  'prefs.telemetryHint': 'What the Planetary telemetry panel shows',
+  'target.title': 'Telemetry target',
+  'target.name': 'Name',
+  'target.lat': 'Latitude (°N)',
+  'target.lon': 'Longitude (°E)',
+  'target.update': 'Update target',
+  'target.hint': 'Used for solar time, sun position and the map marker. Use negative values for south and west.',
+  'target.updated': 'Target location updated.',
+  'target.invalid': 'Latitude must be between −90 and 90, and longitude between −180 and 180.',
+  'tool.forest.name': 'Forest loss',
+  'tool.forest.group': 'Forestry',
+  'tool.forest.summary': 'Estimate where and how much forest was lost between two dates.',
+  'tool.carbon.name': 'Carbon & biomass',
+  'tool.carbon.group': 'Forestry',
+  'tool.carbon.summary': 'Estimate tree biomass, carbon stock and CO₂ from a field inventory.',
+  'tool.survey.name': 'Land survey',
+  'tool.survey.group': 'Survey',
+  'tool.survey.summary': 'Measure a plot boundary, walked traverse or set of points.',
+  'tool.residential.name': 'Residential plot',
+  'tool.residential.group': 'Property',
+  'tool.residential.summary': 'Compare past and current images of your plot to spot encroachment and neighbouring expansion.',
+  'tool.weather.name': 'Weather & climate',
+  'tool.weather.group': 'Climate',
+  'tool.weather.summary': 'Analyse rainfall, temperature, humidity, soil moisture, ET and radiation series.',
+  'tool.satellite.name': 'Satellite imagery',
+  'tool.satellite.group': 'Remote sensing',
+  'tool.satellite.summary': 'Explore multispectral scenes and compute spectral indices.',
+  'tool.landcover.name': 'Land cover',
+  'tool.landcover.group': 'Remote sensing',
+  'tool.landcover.summary': 'Group pixels into spectral classes, name them and measure their areas.',
+  'tool.radar.name': 'Radar (Sentinel-1)',
+  'tool.radar.group': 'Remote sensing',
+  'tool.radar.summary': 'Backscatter through cloud: speckle filtering, polarisation indices and change between two dates.',
+  'tool.water.name': 'Water & floods',
+  'tool.water.group': 'Remote sensing',
+  'tool.water.summary': 'Map open water from optical or radar images, floods between two dates, and how often water was present over many dates; list every lake and pond.',
+  'tool.canopy.name': 'Canopy height',
+  'tool.canopy.group': 'Elevation',
+  'tool.canopy.summary': 'Canopy height, cover and tree tops from LiDAR or surface and terrain models.',
+  'tool.terrain.name': 'Terrain',
+  'tool.terrain.group': 'Elevation',
+  'tool.terrain.summary': 'Derive slope, aspect, relief, streams and watersheds from an elevation model.',
+  'tool.photo.name': 'Space & aerial photos',
+  'tool.photo.group': 'Imagery',
+  'tool.photo.summary': 'Estimate green cover in images from satellites, drones or the ISS.',
 };
 
-/** Translation for `key`, falling back to English and then to `fallback`. */
-export function translate(lang: Lang, key: string, fallback = ''): string {
-  return (lang === 'hi' ? HI[key] : undefined) ?? EN[key] ?? fallback;
+/** The messages of a language other than English, loaded on demand. */
+export async function loadMessages(lang: Lang): Promise<Messages> {
+  if (lang === 'en') return EN;
+  const mods = import.meta.glob<{ default: Messages }>('./locales/*.ts');
+  const load = mods[`./locales/${lang}.ts`];
+  return load ? (await load()).default : EN;
 }
 
-export const I18N_KEYS = { EN, HI };
+/** Translation for `key` in `messages`, falling back to English and then to `fallback`. `{name}` is replaced from vars. */
+export function translate(messages: Messages, key: string, fallback = '', vars?: Record<string, string>): string {
+  let s = messages[key] ?? EN[key] ?? fallback;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
+  return s;
+}

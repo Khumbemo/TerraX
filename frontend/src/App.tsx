@@ -266,7 +266,9 @@ export default function App() {
       <header className="top-navbar">
         <div className="brand">
           <img src="./logo.svg" alt="" className="brand-logo" width={30} height={30} />
-          TERRA<span className="brand-x">X</span>
+          <span>
+            TERRA<span className="brand-x">X</span>
+          </span>
         </div>
         <nav className="nav-links" aria-label="Main">
           <button
@@ -289,7 +291,7 @@ export default function App() {
           </button>
           {/* Only when the OS Guide box is out of sight: inside a tool, or on narrower screens where it sits at the bottom (CSS). */}
           <button type="button" id="nav-assistant" className={`nav-assistant${view === 'explore' && tool ? ' guide-hidden' : ''}`} onClick={() => setGuideOpen(true)}>
-            Assistant
+            {t('nav.assistant')}
           </button>
         </nav>
         <div className="nav-right">
@@ -299,7 +301,7 @@ export default function App() {
           {session.operator && <span className="operator">{session.operator}</span>}
           {account.me && account.me.mode !== 'off' && (
             <button type="button" id="account-button" className="link-btn" onClick={() => account.openDialog(account.user ? 'history' : 'signin')}>
-              {account.user ? account.user.name || account.user.email : 'Sign in'}
+              {account.user ? account.user.name || account.user.email : t('nav.signin')}
             </button>
           )}
           {account.me?.mode === 'off' && (

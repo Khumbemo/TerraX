@@ -810,17 +810,12 @@ select {
   gap: 6px;
   margin-top: 12px;
 }
-.lang-switch button {
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 12px;
-  cursor: pointer;
+.lang-switch {
+  align-items: center;
   color: var(--muted);
 }
-.lang-switch button.active {
-  border-color: var(--accent);
-  color: var(--text);
+.lang-switch select {
+  max-width: 100%;
 }
 .tour-layer {
   position: fixed;
@@ -3204,4 +3199,18 @@ details[open] > summary {
   border-color: var(--accent);
   color: var(--text);
   box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Languages in other scripts ---------------------------------------------------------------------------------------- */
+/* Labels use a monospaced Latin font in upper case with wide letter-spacing. Other scripts take the system's own font
+   for their glyphs; Arabic and Urdu letters join, so they get no letter-spacing at all, and CJK none either. */
+html:is([lang='zh'], [lang='ja'], [lang='ko'], [lang='ar'], [lang='ur'], [lang='hi'], [lang='bn']) {
+  --mono: 'Inter', system-ui, -apple-system, 'Segoe UI', 'Noto Sans', sans-serif;
+}
+html:is([lang='zh'], [lang='ja'], [lang='ko'], [lang='ar'], [lang='ur']) *:not(.brand, .brand-title, .intro-name, .brand-x, .intro-x) {
+  letter-spacing: normal !important;
+}
+/* Right-to-left text sits in elements marked dir="rtl"; the page layout itself stays left to right. */
+[dir='rtl'] {
+  text-align: start;
 }

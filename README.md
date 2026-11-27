@@ -45,6 +45,22 @@ The left-hand panel shows the Sun and time at the target (altitude, azimuth, dec
 
 Each picture shows the positions now, and "Play" steps through positions computed for a month, a year or 12 years. Positions come from ERFA, the open-source edition of the IAU's SOFA routines (Earth: eraEpv00; Moon: eraMoon98; planets: eraPlan94), with aberration, light time, IAU 2006/2000A precession-nutation and the observer's place on the WGS84 ellipsoid. Physical facts are NASA's [Planetary Fact Sheet](https://nssdc.gsfc.nasa.gov/planetary/factsheet/). Checked against astropy's own pipeline (tests/test_sky.py, tests/test_services.py): the Sun, Venus and Jupiter within 4 arcsec in the sky, the Moon within 20 arcsec (its model's documented error) and 41 km, equinoxes and solstices to the second, sunrise and sunset to the minute (0.4 min where the Sun only grazes the horizon).
 
+## Languages
+
+The app's frame can be shown in 18 languages: English, Chinese (Simplified), Hindi, Spanish, French, Arabic, Bengali, Portuguese, Russian, Urdu, Indonesian, German, Japanese, Korean, Turkish, Vietnamese, Swahili and Italian. The frame is the navigation, the start page, the tool list, Settings and the tour.
+
+- **Choosing a language.** Pick one on the start page (🌐) or in **Settings → Language**. On a first visit TerraX uses the browser's language if it has it, and English otherwise.
+- **What stays in English.** Tool screens, results, reports and the assistant are in English for now.
+- **Right-to-left scripts.** Arabic and Urdu text reads right to left inside its own boxes. The page layout stays left to right, so numbers, signs and English content keep their order.
+- **Loading.** Each language loads only when chosen.
+
+The translations are in `frontend/src/lib/locales/`, one file per language, with English in `frontend/src/lib/i18n.ts`. **They were written with AI assistance and have not all been checked by native speakers.** Corrections are welcome. A unit test checks that every language has every string and keeps placeholders such as `{email}`.
+
+To add a language:
+1. Copy a locale file.
+2. Translate the values.
+3. Add the language to `LANGUAGES` in `i18n.ts`, and to `RTL` if it is written right to left.
+
 ## Logo, opening animation and backgrounds
 
 The TerraX logo is the Earth with two crossing orbits that make the X. Its land is Natural Earth 1:110m (public domain), seen from above north-east India. `frontend/src/components/LogoMark.tsx` draws it. `frontend/scripts/make-logo.tsx` writes `public/logo.svg` and the app icons from it: run `npx tsx scripts/make-logo.tsx`, which needs Playwright's Chromium.
