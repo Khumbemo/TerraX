@@ -6,11 +6,11 @@ interface Props {
 }
 
 export default function ToolHub({ onOpen }: Props) {
-  const { t } = usePrefs();
+  const { t, dir } = usePrefs();
   const note = t('hub.englishNote');
   return (
     <section className="tool-hub" aria-label="Tools">
-      <div className="tool-hub-head">
+      <div className="tool-hub-head" dir={dir}>
         <h2>{t('hub.title')}</h2>
         <p className="muted">
           {t('hub.intro')}
@@ -23,9 +23,15 @@ export default function ToolHub({ onOpen }: Props) {
             <span className="tool-mark" aria-hidden="true">
               {tool.mark}
             </span>
-            <span className="tool-group">{t(`tool.${tool.id}.group`, tool.group)}</span>
-            <span className="tool-name">{t(`tool.${tool.id}.name`, tool.name)}</span>
-            <span className="tool-summary">{t(`tool.${tool.id}.summary`, tool.summary)}</span>
+            <span className="tool-group" dir={dir}>
+              {t(`tool.${tool.id}.group`, tool.group)}
+            </span>
+            <span className="tool-name" dir={dir}>
+              {t(`tool.${tool.id}.name`, tool.name)}
+            </span>
+            <span className="tool-summary" dir={dir}>
+              {t(`tool.${tool.id}.summary`, tool.summary)}
+            </span>
             <ul className="tool-measures">
               {tool.measures.map(m => (
                 <li key={m}>{m}</li>

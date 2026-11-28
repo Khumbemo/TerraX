@@ -20,7 +20,7 @@ interface Props {
 
 /** A short guided tour: highlights one part of the screen per step. */
 export default function Tour({ onClose }: Props) {
-  const { t } = usePrefs();
+  const { t, dir } = usePrefs();
   const [i, setI] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const step = STEPS[i];
@@ -65,7 +65,7 @@ export default function Tour({ onClose }: Props) {
   return (
     <div className="tour-layer" role="dialog" aria-modal="true" aria-labelledby="tour-title">
       {rect && <div className="tour-highlight" style={{ top: rect.top - 6, left: rect.left - 6, width: rect.width + 12, height: rect.height + 12 }} />}
-      <div className="tour-card" style={{ top, left, width: cardW }}>
+      <div className="tour-card" style={{ top, left, width: cardW }} dir={dir}>
         <div className="eyebrow">
           {i + 1} / {STEPS.length}
         </div>
