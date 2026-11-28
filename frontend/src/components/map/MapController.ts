@@ -27,6 +27,8 @@ export interface LayerVis {
   image: boolean;
   features: boolean;
   boundary: boolean;
+  /** Saved reports' footprints ("My areas"). */
+  areas: boolean;
   opacity: number;
 }
 
@@ -41,6 +43,17 @@ export interface MapState {
   draw: DrawState | null;
   /** Bumped when the local .pmtiles file changes. */
   pmtilesVersion: number;
+  /** Footprints of saved reports ("My areas"): polygons with an `id` and a `title` property. */
+  areas?: FeatureCollection | null;
+  /** The point whose place card is open. */
+  pick?: { lat: number; lon: number } | null;
+}
+
+export interface MapHandlers {
+  /** A click on the map away from any area (not while drawing). */
+  onPick?: (lat: number, lon: number) => void;
+  /** A click on a saved area. */
+  onArea?: (id: string) => void;
 }
 
 export interface PlateLegend {
@@ -199,6 +212,8 @@ export class MapController {
   private markers: maplibregl.Marker[] = [];
   private placeMarkers = new Map<string, maplibregl.Marker[]>();
   private popup: maplibregl.Popup | null = null;
+  private pickMarker: maplibregl.Marker | null = null;
+  handlers: MapHandlers = {};
   private lastBounds: LatLngBounds | null = null;
   private styleReady = false;
   private pending = false;
@@ -244,6 +259,7 @@ export class MapController {
     for (const sid of this.tries.keys()) tileReporters.delete(sid);
     for (const s of this.slots.values()) s.dispose?.();
     this.markers.forEach(m => m.remove());
+    this.pickMarker?.remove();
     for (const list of this.placeMarkers.values()) list.forEach(m => m.remove());
     this.map.remove();
   }
@@ -394,6 +410,7 @@ export class MapController {
     want('image', () => this.resultImage(st.vis.image ? st.image : null, st.vis.opacity));
     want('boundary', () => this.boundaryLayer(st.vis.boundary ? st.boundary : null));
     want('features', () => this.features(st.vis.features ? st.geojson : null, st.vis.features && !st.geojson ? st.bounds : null));
+    want('areas', () => this.areasLayer(st.vis.areas ? (st.areas ?? null) : null));
     want('draw', () => this.drawLayer(st.draw));
 
     for (const name of [...this.slots.keys()]) if (!order.includes(name)) this.drop(name);
@@ -406,7 +423,37 @@ export class MapController {
     }
     for (const [id, s] of Object.entries(this.status)) if (s.state === 'error' && !order.some(n => n === `ov:${id}`) && id !== base.id) delete this.status[id];
     this.drawMarkers(st.draw);
+    this.updatePick(st.pick ?? null);
     this.updatePlaces();
+  }
+
+  /** Moves the view to a point (place search, place card). */
+  flyTo(lat: number, lon: number, zoom?: number) {
+    this.map.flyTo({ center: [lon, lat], zoom: zoom ?? Math.max(this.map.getZoom(), 8), duration: 1200, essential: true });
+  }
+
+  private updatePick(p: { lat: number; lon: number } | null) {
+    if (!p) {
+      this.pickMarker?.remove();
+      this.pickMarker = null;
+      return;
+    }
+    if (!this.pickMarker) {
+      const el = document.createElement('div');
+      el.className = 'pick-marker';
+      el.setAttribute('aria-hidden', 'true');
+      this.pickMarker = new maplibregl.Marker({ element: el });
+    }
+    this.pickMarker.setLngLat([p.lon, p.lat]).addTo(this.map);
+  }
+
+  private areasLayer(fc: FeatureCollection | null) {
+    if (!fc || !fc.features.length) return this.drop('areas');
+    const violet = '#c084fc';
+    this.put('areas', `areas:${this.keyOf(fc)}`, { [`${P}areas`]: { type: 'geojson', data: fc } }, [
+      { id: `${P}areas-fill`, type: 'fill', source: `${P}areas`, paint: { 'fill-color': violet, 'fill-opacity': 0.12 } },
+      { id: `${P}areas-line`, type: 'line', source: `${P}areas`, paint: { 'line-color': violet, 'line-width': 1.5 } },
+    ]);
   }
 
   private outlines(on: boolean, dark: boolean) {
@@ -898,6 +945,19 @@ export class MapController {
     if (!st) return;
     if (st.draw) {
       st.draw.onAdd([e.lngLat.lat, ((((e.lngLat.lng + 180) % 360) + 360) % 360) - 180]);
+      return;
+    }
+    if (this.handlers.onArea && this.map.getLayer(`${P}areas-fill`)) {
+      const hit = this.map.queryRenderedFeatures(e.point, { layers: [`${P}areas-fill`] })[0];
+      const id = hit?.properties?.id;
+      if (typeof id === 'string') {
+        this.handlers.onArea(id);
+        return;
+      }
+    }
+    if (this.handlers.onPick) {
+      // The place card shows the climate zone and biome too, so no separate popup.
+      this.handlers.onPick(e.lngLat.lat, ((((e.lngLat.lng + 180) % 360) + 360) % 360) - 180);
       return;
     }
     const ids = st.settings.overlays.map(o => o.id).filter(id => id === 'koppen' || id === 'biomes');

@@ -25,6 +25,8 @@ interface Props {
   onOutput: (out: ToolOutput | null) => void;
   boundary: Boundary | null;
   target: { lat: number; lon: number; name: string };
+  /** Open the fetch/search panel at once (the place card sent a location). */
+  openFetch?: boolean;
 }
 
 const VARIANTS = {
@@ -76,7 +78,7 @@ type Loaded = { kind: 'table'; file: StoredFile<TableMeta>; job: TableJob; note?
 
 const MAX_MB = 500;
 
-export default function DataTool({ variant, onOutput, boundary, target }: Props) {
+export default function DataTool({ variant, onOutput, boundary, target, openFetch = false }: Props) {
   const notify = useToast();
   const v = VARIANTS[variant];
   const job = useJob();
@@ -225,13 +227,13 @@ export default function DataTool({ variant, onOutput, boundary, target }: Props)
       )}
       {variant === 'satellite' && (
         <Suspense fallback={<div className="loading-block">Loading…</div>}>
-          <SentinelSearchPanel target={target} boundary={boundary} onRaster={loadLiveRaster} />
+          <SentinelSearchPanel target={target} boundary={boundary} onRaster={loadLiveRaster} defaultOpen={openFetch} />
           <StackPanel onOutput={onOutput} boundary={boundary} />
         </Suspense>
       )}
       {variant === 'weather' && (
         <Suspense fallback={<div className="loading-block">Loading…</div>}>
-          <LiveDataPanel target={target} onTable={loadTable} />
+          <LiveDataPanel target={target} onTable={loadTable} defaultOpen={openFetch} />
         </Suspense>
       )}
     </div>
