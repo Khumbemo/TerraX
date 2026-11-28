@@ -1,3 +1,4 @@
+import type { MultiPolygon, Polygon } from 'geojson';
 // Types shared by the UI (results come from the TerraX API, see lib/api.ts).
 
 export interface HistogramBin {
@@ -32,4 +33,6 @@ export interface ReportRecord {
   content: string;
   /** PNG figures (result map and charts) captured when the report was saved. */
   figures?: { title: string; dataUrl: string; width: number; height: number }[];
+  /** Where the result lies (WGS84), for the map's "My areas"; reports saved before this existed have none. */
+  footprint?: Polygon | MultiPolygon;
 }

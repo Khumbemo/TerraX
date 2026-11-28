@@ -1,5 +1,5 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { FeatureCollection } from 'geojson';
 import { mapDef, resolveBase } from '../lib/basemaps';
 import { request, type ResultImage } from '../lib/api';
@@ -21,6 +21,16 @@ interface Props {
   image?: ResultImage | null;
   boundary?: Boundary | null;
   draw?: DrawState | null;
+  /** Footprints of saved reports ("My areas"). */
+  areas?: FeatureCollection | null;
+  /** The point whose place card is open (a marker is shown there). */
+  pick?: { lat: number; lon: number } | null;
+  onPick?: (lat: number, lon: number) => void;
+  onArea?: (id: string) => void;
+  /** Fly here whenever `n` changes (place search, card). */
+  focus?: { lat: number; lon: number; zoom?: number; n: number } | null;
+  /** Drawn over the map: the search box and the place card. */
+  children?: ReactNode;
 }
 
 interface LegendItem {
@@ -67,13 +77,13 @@ function Ramp({ ramp }: { ramp: NonNullable<ResultImage['ramp']> }) {
 
 const START_ZOOM = 10;
 
-export default function MapPanel({ target, bounds, geojson, image = null, boundary = null, draw = null }: Props) {
+export default function MapPanel({ target, bounds, geojson, image = null, boundary = null, draw = null, areas = null, pick = null, onPick, onArea, focus = null, children }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const ctl = useRef<MapController | null>(null);
   const { theme, map: mapSettings } = usePrefs();
   const [status, setStatus] = useState<Record<string, LayerStatus>>({});
   const [panelOpen, setPanelOpen] = useState(false);
-  const [vis, setVis] = useState<LayerVis>({ tiles: true, outlines: true, image: true, features: true, boundary: true, opacity: 0.75 });
+  const [vis, setVis] = useState<LayerVis>({ tiles: true, outlines: true, image: true, features: true, boundary: true, areas: true, opacity: 0.75 });
   const [dismissed, setDismissed] = useState('');
   const [legends, setLegends] = useState<Legends | null>(null);
   const [engineError, setEngineError] = useState<string | null>(null);
@@ -99,8 +109,18 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
   }, []);
 
   useEffect(() => {
-    ctl.current?.update({ settings: mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion });
-  }, [mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion]);
+    ctl.current?.update({ settings: mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion, areas, pick });
+  }, [mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion, areas, pick]);
+
+  useEffect(() => {
+    if (ctl.current) ctl.current.handlers = { onPick, onArea };
+  }, [onPick, onArea]);
+
+  useEffect(() => {
+    if (focus) ctl.current?.flyTo(focus.lat, focus.lon, focus.zoom);
+    // Only a new request (n) moves the map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.n]);
 
   useEffect(() => {
     if (classLayers.length && !legends) loadLegends().then(setLegends).catch(() => undefined);
@@ -143,6 +163,7 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
           </button>
         </div>
       )}
+      {children}
       <div className="map-layers">
         <button type="button" className="map-layers-toggle" aria-expanded={panelOpen} aria-controls="map-layers-panel" onClick={() => setPanelOpen(o => !o)}>
           Layers
@@ -180,6 +201,11 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
                 <input type="checkbox" checked={vis.boundary} onChange={() => toggle('boundary')} /> Analysis boundary
               </label>
             )}
+            {areas && areas.features.length > 0 && (
+              <label className="check">
+                <input id="layer-areas" type="checkbox" checked={vis.areas} onChange={() => toggle('areas')} /> My areas ({areas.features.length} saved report{areas.features.length === 1 ? '' : 's'})
+              </label>
+            )}
             {image && image.legend.length > 0 && (
               <div className="map-legend">
                 {image.legend.map(l => (
@@ -193,7 +219,7 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
             {classLayers.includes('koppen') && legends && <ClassLegend title="Köppen–Geiger climate zones" items={legends.koppen.map(k => ({ label: `${k.code} ${k.name}`, color: k.color }))} />}
             {classLayers.includes('biomes') && legends && <ClassLegend title="Biomes (RESOLVE 2017)" items={legends.biomes.map(b => ({ label: b.name, color: b.color }))} />}
             {showPlates && <ClassLegend title="Plate boundaries (Bird 2003)" items={Object.values(PLATE_CLASSES).map(c => ({ label: c.name, color: c.color, dashed: Boolean(c.dash) }))} />}
-            {(classLayers.length > 0 || showPlates) && <p className="field-hint">Click the map to read the climate zone or biome; hover a plate boundary for its type and speed.</p>}
+            {(classLayers.length > 0 || showPlates) && <p className="field-hint">Click the map to read the climate zone, biome and more; hover a plate boundary for its type and speed.</p>}
             {image && <p className="field-hint">The overlay is stretched over the raster’s bounding box, not reprojected, so it is approximate at the edges.</p>}
           </div>
         )}

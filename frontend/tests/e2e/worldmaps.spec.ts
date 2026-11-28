@@ -63,10 +63,9 @@ test('climate zone and biome under a click', async ({ page }) => {
   // The map opens on the target (Kohima, 25.67° N 94.11° E).
   const box = (await page.locator('.map-container').boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  const popup = page.locator('.class-popup');
-  await expect(popup).toContainText('Climate (Köppen–Geiger)');
-  await expect(popup).toContainText('Cwa · Temperate, dry winter, hot summer');
-  await expect(popup).toContainText('Biome: Tropical & subtropical moist broadleaf forests');
+  // The place card reads the same maps (and more) wherever the map is clicked.
+  await expect(page.locator('#place-koppen')).toContainText('Cwa · Temperate, dry winter, hot summer');
+  await expect(page.locator('#place-biome')).toContainText('Tropical & subtropical moist broadleaf forests');
   expect(errors).toEqual([]);
 });
 

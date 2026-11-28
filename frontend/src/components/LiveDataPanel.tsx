@@ -6,6 +6,8 @@ interface Props {
   target: { lat: number; lon: number; name: string };
   /** The fetched series, stored on the server as a CSV upload. */
   onTable: (file: StoredFile, note: string) => void;
+  /** Start opened (the map's place card chose this location). */
+  defaultOpen?: boolean;
 }
 
 // The variables the server accepts (services/live.py).
@@ -31,7 +33,7 @@ type Source = 'open-meteo' | 'power';
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-export default function LiveDataPanel({ target, onTable }: Props) {
+export default function LiveDataPanel({ target, onTable, defaultOpen = false }: Props) {
   const notify = useToast();
   const [source, setSource] = useState<Source>('open-meteo');
   const [lat, setLat] = useState(String(target.lat));
@@ -59,7 +61,7 @@ export default function LiveDataPanel({ target, onTable }: Props) {
   };
 
   return (
-    <details className="sub-panel live-panel">
+    <details className="sub-panel live-panel" open={defaultOpen || undefined}>
       <summary className="eyebrow">Fetch data for a location (the server downloads it)</summary>
       <div className="param-row">
         <label className="inline-select">
@@ -101,7 +103,7 @@ export default function LiveDataPanel({ target, onTable }: Props) {
       </fieldset>
       <div className="button-row">
         <span className="field-hint">
-          Default location: {target.name} (change it in Settings). Values are gridded model estimates, not station measurements.
+          Location: {target.name}. Values are gridded model estimates, not station measurements.
         </span>
         <button type="button" id="live-fetch" className="btn btn-primary push-right" disabled={busy} onClick={fetchData}>
           {busy ? 'Fetching…' : 'Fetch daily data'}

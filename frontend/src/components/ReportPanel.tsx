@@ -1,3 +1,4 @@
+import { reportFootprint } from '../lib/areas';
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -32,6 +33,7 @@ function composeReport(output: ToolOutput, operator: string, ai: { text: string;
     source: ai ? 'ai' : 'local',
     model: ai?.model,
     content: parts.join('\n'),
+    footprint: reportFootprint(output) ?? undefined,
   };
 }
 

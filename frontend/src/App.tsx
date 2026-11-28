@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ChatPanel, { type ChatReply } from './components/ChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import LiveTelemetryDock from './components/LiveTelemetryDock';
@@ -43,6 +43,9 @@ const SettingsModal = lazy(() => import('./components/SettingsModal'));
 const Tour = lazy(() => import('./components/Tour'));
 const AccountDialog = lazy(() => import('./components/AccountDialog'));
 import SpaceBackground from './components/SpaceBackground';
+import PlaceSearch from './components/PlaceSearch';
+import PlaceCard from './components/PlaceCard';
+import { areasFromReports } from './lib/areas';
 
 const AI_MODE_TEXT: Record<AiMode, string> = {
   'own-key': 'AI on: using your API key(s) from this browser',
@@ -72,6 +75,10 @@ export default function App() {
   const [output, setOutput] = useState<ToolOutput | null>(null);
   const [boundary, setBoundaryState] = useState<Boundary | null>(() => getJSON('boundary', null));
   const [drawPts, setDrawPts] = useState<[number, number][] | null>(null);
+  // The map's place card and search: the clicked point, where to fly, and a point handed to a tool from the card.
+  const [pick, setPick] = useState<{ lat: number; lon: number } | null>(null);
+  const [focus, setFocus] = useState<{ lat: number; lon: number; zoom?: number; n: number } | null>(null);
+  const [toolPlace, setToolPlace] = useState<Target | null>(null);
 
   const setBoundary = (b: Boundary | null) => {
     setBoundaryState(b);
@@ -131,7 +138,18 @@ export default function App() {
     setDrawPts(null);
     setOutput(null);
     setView('explore');
+    setToolPlace(null);
   };
+
+  /** From the place card: open a tool with its location set to the clicked point. */
+  const openToolAt = (id: ToolId, place: Target) => {
+    openTool(id);
+    // 5 decimals is about 1 m: enough, and no floating-point tails in the tool's fields.
+    setToolPlace({ ...place, lat: Number(place.lat.toFixed(5)), lon: Number(place.lon.toFixed(5)) });
+    setPick(null);
+  };
+  const flyTo = (lat: number, lon: number, zoom?: number) => setFocus(f => ({ lat, lon, zoom, n: (f?.n ?? 0) + 1 }));
+  const areas = useMemo(() => areasFromReports(reports), [reports]);
 
   const persistReports = (next: ReportRecord[]) => {
     setReports(next);
@@ -385,9 +403,43 @@ export default function App() {
                   image={output?.map?.image ?? null}
                   boundary={boundary}
                   draw={draw}
-                />
+                  areas={areas}
+                  pick={pick}
+                  focus={focus}
+                  onPick={(lat, lon) => setPick({ lat, lon })}
+                  onArea={id => {
+                    setOpenReportId(id);
+                    setView('reports');
+                  }}
+                >
+                  {!drawPts && (
+                    <PlaceSearch
+                      onSelect={h => {
+                        flyTo(h.lat, h.lon, h.zoom);
+                        setPick(h.kind === 'country' ? null : { lat: h.lat, lon: h.lon });
+                      }}
+                    />
+                  )}
+                </MapPanel>
                 </Suspense>
               </ErrorBoundary>
+              {pick && !drawPts && (
+                <PlaceCard
+                  at={pick}
+                  onClose={() => setPick(null)}
+                  onWeather={(lat, lon, name) => openToolAt('weather', { lat, lon, name })}
+                  onSatellite={(lat, lon, name) => openToolAt('satellite', { lat, lon, name })}
+                  onTarget={(lat, lon, name) => {
+                    updateTarget({ lat, lon, name });
+                    notify(`Telemetry target set to ${name}.`, 'success');
+                  }}
+                  onBoundary={(lat, lon) => {
+                    openTool('survey');
+                    setPick(null);
+                    setDrawPts([[lat, lon]]);
+                  }}
+                />
+              )}
 
               {!tool || !info ? (
                 <ToolHub onOpen={openTool} />
@@ -424,7 +476,7 @@ export default function App() {
                       {tool === 'carbon' && <CarbonTool onOutput={setOutput} />}
                       {tool === 'residential' && <ResidentialPlotTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'survey' && <SurveyTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} drawPoints={drawPts} onDraw={setDrawPts} />}
-                      {(tool === 'weather' || tool === 'satellite') && <DataTool key={tool} variant={tool} onOutput={setOutput} boundary={boundary} target={target} />}
+                      {(tool === 'weather' || tool === 'satellite') && <DataTool key={`${tool}:${toolPlace?.lat ?? ''},${toolPlace?.lon ?? ''}`} variant={tool} onOutput={setOutput} boundary={boundary} target={toolPlace ?? target} openFetch={toolPlace != null} />}
                       {tool === 'landcover' && <LandCoverTool onOutput={setOutput} boundary={boundary} />}
                       {tool === 'terrain' && <TerrainTool onOutput={setOutput} boundary={boundary} onBoundary={setBoundary} />}
                       {tool === 'photo' && <PhotoTool onOutput={setOutput} />}

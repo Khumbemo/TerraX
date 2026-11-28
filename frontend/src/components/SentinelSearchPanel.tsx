@@ -29,6 +29,8 @@ interface Props {
   /** A scene window or a median composite, stored on the server. Sentinel-2: blue, green, red, NIR, then SCL (scene) or the
    *  clear-observation count (composite). Landsat: blue, green, red, NIR, SWIR1, SWIR2, then QA_PIXEL or the count. */
   onRaster: (file: StoredFile<RasterMeta>, notes: string[], kind: 'scene' | 'composite', mission: Mission) => void;
+  /** Start opened (the map's place card chose this location). */
+  defaultOpen?: boolean;
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -47,7 +49,7 @@ export function boundaryBbox(b: Boundary): [number, number, number, number] {
   return [minX, minY, maxX, maxY];
 }
 
-export default function SentinelSearchPanel({ target, boundary, onRaster }: Props) {
+export default function SentinelSearchPanel({ target, boundary, onRaster, defaultOpen = false }: Props) {
   const notify = useToast();
   const now = new Date();
   const [start, setStart] = useState(iso(new Date(now.getTime() - 120 * 86_400_000)));
@@ -108,7 +110,7 @@ export default function SentinelSearchPanel({ target, boundary, onRaster }: Prop
     });
 
   return (
-    <details className="sub-panel live-panel">
+    <details className="sub-panel live-panel" open={defaultOpen || undefined}>
       <summary className="eyebrow">Search Sentinel-2 or Landsat scenes (the server downloads them)</summary>
       <div className="mode-switch" role="radiogroup" aria-label="Satellite">
         {(Object.keys(MISSIONS) as Mission[]).map(k => (

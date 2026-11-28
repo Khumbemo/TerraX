@@ -71,6 +71,30 @@ When TerraX opens, a short animation plays once per browser tab before the start
 
 ## Maps
 
+### What you can do on the front-page map
+
+These work offline, from data bundled with TerraX.
+
+- **Click anywhere** for a place card. It shows:
+  - the coordinates in decimal degrees, degrees-minutes-seconds and UTM;
+  - the country;
+  - the two nearest named places, with distance and compass direction;
+  - the Köppen–Geiger climate zone and the biome;
+  - today's sunrise, sunset and day length, or polar day or night.
+
+  Its buttons open **Weather history here** or **Satellite images here** with that point filled in, start a **boundary** there in Land survey, or **set it as the telemetry target**.
+- **Search** a place, a country or coordinates. Place names come from Natural Earth's 7,342 populated places and work without accents. Duplicate names show their country. Coordinates can be typed as decimal degrees or degrees-minutes-seconds with N/S/E/W.
+- **My areas:** reports saved from now on keep the outline of their result (or the raster's footprint) and appear on the map in violet. Click one to open its report. Turn them off under **Layers**.
+
+**Sources and accuracy:**
+- **Places:** Natural Earth 1:10m (public domain). It lists important places, so in remote areas the nearest one can be far away.
+- **Distances:** the haversine formula on the IUGG mean Earth radius, 6,371.0088 km. Tests check them against WGS84 ellipsoid geodesics (pyproj): within 0.5 %, and bearings within 1°.
+- **Climate zone and biome:** Beck et al. 2018 and RESOLVE 2017, both at about 10 km.
+- **UTM:** standard 6° zones, without the Norway and Svalbard exceptions.
+- **Sun times:** the NOAA equations, shown in UTC.
+
+### Base maps and overlays
+
 The map is MapLibre GL. Under **Settings → Map**, or with **Layers** on the map, you pick one base map and any number of overlays, each with its own opacity.
 
 - **Online maps:** OpenStreetMap, CARTO, OpenFreeMap vector styles, Esri, NASA GIBS, EOX Sentinel-2 cloudless, Stadia, MapTiler, a custom XYZ or WMS service, and Protomaps (a local `.pmtiles` file or a URL).

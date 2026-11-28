@@ -61,6 +61,14 @@ def graticule() -> dict[str, Any]:
     return wm.graticule()
 
 
+@router.get("/place")
+def place(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-540, le=540)) -> dict[str, Any]:
+    """Everything TerraX knows offline about a point: coordinates, nearest places, climate zone, biome and the sun today."""
+    from ..services.place import place_report
+
+    return place_report(lat, lon)
+
+
 @router.get("/identify")
 def identify(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-540, le=540)) -> dict[str, Any]:
     return wm.identify(lat, lon)
