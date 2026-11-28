@@ -1,5 +1,5 @@
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { FeatureCollection } from 'geojson';
 import { mapDef, resolveBase } from '../lib/basemaps';
 import { request, type ResultImage } from '../lib/api';
@@ -8,8 +8,9 @@ import { onLocalPmtilesChange } from '../lib/pmtiles-store';
 import { usePrefs } from '../lib/prefs';
 import { fmt } from '../lib/stats';
 import type { Boundary } from '../lib/zonal';
+import { DEFAULT_LIVE, DEPTH_CLASSES, FRP_CLASSES, QUAKE_LEVEL_LABELS, QUAKE_WINDOW_LABELS, fireCollection, viewKey, type EarthStatus, type FireView, type LiveLayers, type QuakeFeed, type WeatherGrid } from '../lib/earth';
 import MapChooser from './MapChooser';
-import { MapController, PLATE_CLASSES, type DrawState, type LayerStatus, type LayerVis } from './map/MapController';
+import { MapController, PLATE_CLASSES, type DrawState, type LayerStatus, type LayerVis, type LiveData, type MapView } from './map/MapController';
 
 interface Props {
   target: { lat: number; lon: number; name: string };
@@ -76,6 +77,49 @@ function Ramp({ ramp }: { ramp: NonNullable<ResultImage['ramp']> }) {
 }
 
 const START_ZOOM = 10;
+const LIVE_KEY = 'terrax.liveLayers';
+const QUAKE_REFRESH_MS = 60_000; // the USGS feeds are updated every minute
+const FIRE_REFRESH_MS = 600_000;
+const WEATHER_REFRESH_MS = 900_000; // Open-Meteo's current conditions are 15-minutely
+
+function loadLive(): LiveLayers {
+  try {
+    const v = JSON.parse(localStorage.getItem(LIVE_KEY) ?? 'null');
+    return v && typeof v === 'object' ? { ...DEFAULT_LIVE, ...v } : DEFAULT_LIVE;
+  } catch {
+    return DEFAULT_LIVE;
+  }
+}
+
+type Loaded<T> = { data: T | null; error: string | null; loading: boolean };
+const idle = <T,>(): Loaded<T> => ({ data: null, error: null, loading: false });
+
+/** Fetches `url` (null: nothing), again every `every` ms while it stays the same; keeps the last data on a failed refresh. */
+function usePolled<T>(url: string | null, every: number): Loaded<T> {
+  const [st, setSt] = useState<Loaded<T>>(idle);
+  useEffect(() => {
+    if (!url) {
+      setSt(idle());
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      setSt(s => ({ ...s, loading: true }));
+      request<T>(url)
+        .then(data => alive && setSt({ data, error: null, loading: false }))
+        .catch(err => alive && setSt(s => ({ data: s.data, error: err instanceof Error ? err.message : String(err), loading: false })));
+    };
+    // A new view keeps the points already shown until the new ones arrive.
+    setSt(s => ({ ...s, error: null }));
+    load();
+    const t = window.setInterval(load, every);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [url, every]);
+  return st;
+}
 
 export default function MapPanel({ target, bounds, geojson, image = null, boundary = null, draw = null, areas = null, pick = null, onPick, onArea, focus = null, children }: Props) {
   const el = useRef<HTMLDivElement>(null);
@@ -88,6 +132,39 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
   const [legends, setLegends] = useState<Legends | null>(null);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [pmtilesVersion, setPmtilesVersion] = useState(0);
+  const [live, setLive] = useState<LiveLayers>(loadLive);
+  const [view, setView] = useState<MapView | null>(null);
+  const [earth, setEarth] = useState<EarthStatus | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIVE_KEY, JSON.stringify(live));
+    } catch {
+      /* private mode: the choice lasts for this visit */
+    }
+  }, [live]);
+  useEffect(() => {
+    if ((panelOpen || live.fires) && !earth)
+      request<EarthStatus>('/api/live/earth/status')
+        .then(setEarth)
+        .catch(() => undefined);
+  }, [panelOpen, live.fires, earth]);
+  const vk = view ? viewKey(view) : null;
+  const quakes = usePolled<QuakeFeed>(live.quakes ? `/api/live/earth/quakes?feed=${encodeURIComponent(live.quakeFeed)}` : null, QUAKE_REFRESH_MS);
+  const firesOn = live.fires && earth?.fires.available === true;
+  const fires = usePolled<FireView>(firesOn && vk ? `/api/live/earth/fires?source=${encodeURIComponent(live.fireSource)}&days=${live.fireDays}&${vk}` : null, FIRE_REFRESH_MS);
+  const weather = usePolled<WeatherGrid>(live.weather && vk ? `/api/live/earth/weather?${vk}` : null, WEATHER_REFRESH_MS);
+  const fireFc = useMemo(() => (fires.data ? fireCollection(fires.data.rows) : null), [fires.data]);
+  const fireLabel = earth?.fires.sources[live.fireSource] ?? live.fireSource;
+  const liveData = useMemo<LiveData>(
+    () => ({
+      quakes: live.quakes && quakes.data ? ({ type: 'FeatureCollection', features: quakes.data.features } as FeatureCollection) : null,
+      fires: firesOn ? fireFc : null,
+      fireLabel: `NASA FIRMS, ${fireLabel}`,
+      weather: live.weather ? (weather.data?.points ?? null) : null,
+    }),
+    [live.quakes, live.weather, quakes.data, firesOn, fireFc, fireLabel, weather.data],
+  );
+  const setL = (p: Partial<LiveLayers>) => setLive(l => ({ ...l, ...p }));
   useEffect(() => onLocalPmtilesChange(() => setPmtilesVersion(v => v + 1)), []);
   const baseDef = resolveBase(mapSettings, theme);
   const classLayers = mapSettings.overlays.map(o => o.id).filter(id => id === 'koppen' || id === 'biomes');
@@ -109,11 +186,11 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
   }, []);
 
   useEffect(() => {
-    ctl.current?.update({ settings: mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion, areas, pick });
-  }, [mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion, areas, pick]);
+    ctl.current?.update({ settings: mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion, areas, pick, live: liveData });
+  }, [mapSettings, theme, vis, bounds, geojson, image, boundary, draw, pmtilesVersion, areas, pick, liveData]);
 
   useEffect(() => {
-    if (ctl.current) ctl.current.handlers = { onPick, onArea };
+    if (ctl.current) ctl.current.handlers = { onPick, onArea, onView: setView };
   }, [onPick, onArea]);
 
   useEffect(() => {
@@ -206,6 +283,87 @@ export default function MapPanel({ target, bounds, geojson, image = null, bounda
                 <input id="layer-areas" type="checkbox" checked={vis.areas} onChange={() => toggle('areas')} /> My areas ({areas.features.length} saved report{areas.features.length === 1 ? '' : 's'})
               </label>
             )}
+            <fieldset className="live-layers" aria-label="Live Earth">
+              <legend>Live Earth</legend>
+              <label className="check">
+                <input id="layer-quakes" type="checkbox" checked={live.quakes} onChange={() => setL({ quakes: !live.quakes })} /> Earthquakes (USGS)
+              </label>
+              {live.quakes && (
+                <div className="live-opts">
+                  <select aria-label="Earthquake magnitudes" value={live.quakeFeed.split('_')[0]} onChange={e => setL({ quakeFeed: `${e.target.value}_${live.quakeFeed.split('_')[1]}` })}>
+                    {Object.entries(QUAKE_LEVEL_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                  <select aria-label="Earthquake period" value={live.quakeFeed.split('_')[1]} onChange={e => setL({ quakeFeed: `${live.quakeFeed.split('_')[0]}_${e.target.value}` })}>
+                    {Object.entries(QUAKE_WINDOW_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="field-hint" id="quake-status">
+                    {quakes.error
+                      ? `Not loading: ${quakes.error}`
+                      : quakes.data
+                        ? `${quakes.data.count} event${quakes.data.count === 1 ? '' : 's'}${quakes.data.generated ? `, feed of ${new Date(quakes.data.generated).toISOString().slice(11, 16)} UTC` : ''}${quakes.data.stale ? ' (an older copy: the USGS did not answer)' : ''}. Size: magnitude; colour: depth.`
+                        : 'Loading…'}
+                  </p>
+                  <ClassLegend title="Depth" items={DEPTH_CLASSES.map(c => ({ label: c.label, color: c.color }))} />
+                </div>
+              )}
+              <label className="check">
+                <input id="layer-fires" type="checkbox" checked={live.fires} onChange={() => setL({ fires: !live.fires })} /> Active fires (NASA FIRMS)
+              </label>
+              {live.fires && (
+                <div className="live-opts">
+                  {earth && !earth.fires.available ? (
+                    <p className="field-hint" id="fire-status">
+                      This server has no FIRMS MAP_KEY yet. An administrator can add one (free from NASA FIRMS) in Admin → Site settings.
+                    </p>
+                  ) : (
+                    <>
+                      <select aria-label="Fire satellite" value={live.fireSource} onChange={e => setL({ fireSource: e.target.value })}>
+                        {Object.entries(earth?.fires.sources ?? { [live.fireSource]: live.fireSource }).map(([k, v]) => (
+                          <option key={k} value={k}>
+                            {v}
+                          </option>
+                        ))}
+                      </select>
+                      <select aria-label="Fire days" value={live.fireDays} onChange={e => setL({ fireDays: Number(e.target.value) })}>
+                        {Array.from({ length: earth?.fires.maxDays ?? 5 }, (_, i) => i + 1).map(d => (
+                          <option key={d} value={d}>
+                            {d === 1 ? 'Today (UTC)' : `Last ${d} days (UTC)`}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="field-hint" id="fire-status">
+                        {fires.error
+                          ? `Not loading: ${fires.error}`
+                          : fires.data
+                            ? `${fires.data.total.toLocaleString()} detection${fires.data.total === 1 ? '' : 's'} in view${fires.data.total > fires.data.rows.length ? ` (the ${fires.data.rows.length.toLocaleString()} strongest shown; zoom in for all)` : ''}${fires.data.stale ? ' (an older copy: FIRMS did not answer)' : ''}. Colour: fire radiative power.`
+                            : 'Loading…'}
+                      </p>
+                      <ClassLegend title="Fire radiative power" items={FRP_CLASSES.map(c => ({ label: c.label, color: c.color }))} />
+                    </>
+                  )}
+                </div>
+              )}
+              <label className="check">
+                <input id="layer-weather" type="checkbox" checked={live.weather} onChange={() => setL({ weather: !live.weather })} /> Today’s weather (Open-Meteo)
+              </label>
+              {live.weather && (
+                <p className="field-hint" id="weather-status">
+                  {weather.error
+                    ? `Not loading: ${weather.error}`
+                    : weather.data
+                      ? `${weather.data.points.length} forecast points, every ${weather.data.step}°${weather.data.error ? ` (some missing: ${weather.data.error})` : ''}. Click one for today’s range, rain and wind.`
+                      : 'Loading…'}
+                </p>
+              )}
+            </fieldset>
             {image && image.legend.length > 0 && (
               <div className="map-legend">
                 {image.legend.map(l => (

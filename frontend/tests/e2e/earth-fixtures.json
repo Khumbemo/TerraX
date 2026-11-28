@@ -1,0 +1,372 @@
+{
+ "_note": "Output of backend/terrax/services/earth.py on the real recordings in backend/tests/fixtures/earth (regenerate with the snippet in tests/e2e/earth.spec.ts).",
+ "quakes": {
+  "generated": 1795850618000,
+  "title": "USGS Magnitude 2.5+ Earthquakes, Past Day",
+  "count": 4,
+  "features": [
+   {
+    "type": "Feature",
+    "id": "us6000ue2m",
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      -103.8251,
+      31.9967
+     ]
+    },
+    "properties": {
+     "id": "us6000ue2m",
+     "mag": 2.7,
+     "magType": "ml",
+     "place": "34 km SE of Malaga, New Mexico",
+     "time": 1795849848993,
+     "depthKm": 8.254,
+     "alert": null,
+     "tsunami": false,
+     "sig": 112,
+     "status": "reviewed",
+     "type": "earthquake",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000ue2m"
+    }
+   },
+   {
+    "type": "Feature",
+    "id": "pr71540173",
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      -66.9663333333333,
+      17.8646666666667
+     ]
+    },
+    "properties": {
+     "id": "pr71540173",
+     "mag": 3.31,
+     "magType": "md",
+     "place": "13 km SSW of Guánica, Puerto Rico",
+     "time": 1795766205290,
+     "depthKm": 7.76,
+     "alert": null,
+     "tsunami": false,
+     "sig": 169,
+     "status": "reviewed",
+     "type": "earthquake",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/pr71540173"
+    }
+   },
+   {
+    "type": "Feature",
+    "id": "aka2026xnvqjt",
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      -150.163,
+      61.333
+     ]
+    },
+    "properties": {
+     "id": "aka2026xnvqjt",
+     "mag": 4.0,
+     "magType": "ml",
+     "place": "10 km WSW of Point MacKenzie, Alaska",
+     "time": 1795846302401,
+     "depthKm": 39.5,
+     "alert": "green",
+     "tsunami": true,
+     "sig": 656,
+     "status": "reviewed",
+     "type": "earthquake",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/aka2026xnvqjt"
+    }
+   },
+   {
+    "type": "Feature",
+    "id": "us6000udvv",
+    "geometry": {
+     "type": "Point",
+     "coordinates": [
+      -177.9493,
+      -20.0627
+     ]
+    },
+    "properties": {
+     "id": "us6000udvv",
+     "mag": 4.1,
+     "magType": "mb",
+     "place": "Fiji region",
+     "time": 1795773788388,
+     "depthKm": 554.031,
+     "alert": null,
+     "tsunami": false,
+     "sig": 259,
+     "status": "reviewed",
+     "type": "earthquake",
+     "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000udvv"
+    }
+   }
+  ]
+ },
+ "fires": {
+  "source": "VIIRS_NOAA20_NRT",
+  "days": 1,
+  "fetched": "2026-11-28T07:30:00Z",
+  "stale": false,
+  "total": 20,
+  "rows": [
+   [
+    29.24614,
+    -1.51695,
+    0.6,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    29.25002,
+    -1.51756,
+    0.61,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    29.24905,
+    -1.52187,
+    20.48,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.06559,
+    -4.48286,
+    0.75,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.04434,
+    -4.50879,
+    3.72,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.04844,
+    -4.50949,
+    3.72,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.00513,
+    -4.85957,
+    0.94,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.00926,
+    -4.86027,
+    0.71,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.01342,
+    -4.86097,
+    0.71,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.00602,
+    -4.85515,
+    1.29,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.01019,
+    -4.85589,
+    0.51,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    12.01428,
+    -4.85661,
+    0.51,
+    "nominal",
+    "2026-11-27T00:00Z",
+    "N"
+   ],
+   [
+    19.69234,
+    29.23193,
+    13.2,
+    "high",
+    "2026-11-27T01:32Z",
+    "N"
+   ],
+   [
+    19.76781,
+    28.91144,
+    32.69,
+    "high",
+    "2026-11-27T01:32Z",
+    "N"
+   ],
+   [
+    19.77068,
+    28.91375,
+    36.52,
+    "high",
+    "2026-11-27T01:32Z",
+    "N"
+   ],
+   [
+    172.6071,
+    -43.53996,
+    1.12,
+    "low",
+    "2026-11-27T02:19Z",
+    "D"
+   ],
+   [
+    160.27052,
+    -9.48183,
+    4.8,
+    "low",
+    "2026-11-27T02:28Z",
+    "D"
+   ],
+   [
+    160.26558,
+    -9.48248,
+    4.8,
+    "low",
+    "2026-11-27T02:28Z",
+    "D"
+   ],
+   [
+    140.67725,
+    35.94269,
+    6.8,
+    "nominal",
+    "2026-11-27T02:42Z",
+    "D"
+   ],
+   [
+    169.02138,
+    -46.43851,
+    3.43,
+    "nominal",
+    "2026-11-27T02:17Z",
+    "D"
+   ]
+  ]
+ },
+ "weather": {
+  "step": 0.5,
+  "points": [
+   {
+    "lat": 52.52,
+    "lon": 13.41,
+    "gridLat": 52.512604,
+    "gridLon": 13.419517,
+    "modelElevation": 38.0,
+    "timezone": "Europe/Berlin",
+    "time": "2026-11-28T08:15",
+    "temperature": -0.1,
+    "code": 2,
+    "text": "Partly cloudy",
+    "isDay": true,
+    "windSpeed": 12.3,
+    "windDirection": 97.0,
+    "date": "2026-11-28",
+    "dayCode": 3,
+    "dayText": "Overcast",
+    "tMax": 1.3,
+    "tMin": -2.4,
+    "precipitation": 0.0,
+    "precipitationProbability": 0.0,
+    "units": {
+     "temperature": "°C",
+     "wind": "km/h",
+     "precipitation": "mm"
+    }
+   },
+   {
+    "lat": -33.87,
+    "lon": 151.21,
+    "gridLat": -33.848858,
+    "gridLon": 151.19551,
+    "modelElevation": 69.0,
+    "timezone": "Australia/Sydney",
+    "time": "2026-11-28T18:15",
+    "temperature": 22.7,
+    "code": 3,
+    "text": "Overcast",
+    "isDay": true,
+    "windSpeed": 20.9,
+    "windDirection": 25.0,
+    "date": "2026-11-28",
+    "dayCode": 95,
+    "dayText": "Thunderstorm",
+    "tMax": 26.4,
+    "tMin": 20.6,
+    "precipitation": 13.9,
+    "precipitationProbability": 100.0,
+    "units": {
+     "temperature": "°C",
+     "wind": "km/h",
+     "precipitation": "mm"
+    }
+   },
+   {
+    "lat": 0.0,
+    "lon": -30.0,
+    "gridLat": 0.035149384,
+    "gridLon": -30.0,
+    "modelElevation": 0.0,
+    "timezone": "Etc/GMT+2",
+    "time": "2026-11-28T05:15",
+    "temperature": 26.7,
+    "code": 3,
+    "text": "Overcast",
+    "isDay": false,
+    "windSpeed": 25.5,
+    "windDirection": 139.0,
+    "date": "2026-11-28",
+    "dayCode": 51,
+    "dayText": "Light drizzle",
+    "tMax": 27.3,
+    "tMin": 26.5,
+    "precipitation": 0.6,
+    "precipitationProbability": 35.0,
+    "units": {
+     "temperature": "°C",
+     "wind": "km/h",
+     "precipitation": "mm"
+    }
+   }
+  ],
+  "error": null
+ },
+ "elevation": {
+  "lat": 52.52,
+  "lon": 13.41,
+  "elevation": 38.0,
+  "source": "Copernicus DEM GLO-90 via Open-Meteo"
+ }
+}

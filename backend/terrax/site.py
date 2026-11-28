@@ -7,6 +7,9 @@ Each one overrides its environment default while it is set, and goes back to it 
 * ``maintenance`` and ``maintenanceMessage``: while on, new analyses are refused for everyone but administrators.
 * ``contactName``, ``contactEmail``, ``contactPhone``, ``supportEmail``, ``supportUrl``: who runs this server and where to ask, shown in
   Settings → About. They are entered by an administrator; nothing is preset.
+* ``firmsMapKey``: the NASA FIRMS MAP_KEY for the map's active-fire layer (free, sent by e-mail from
+  https://firms.modaps.eosdis.nasa.gov/api/map_key/). It is a secret: the server uses it, and the Admin tab only ever
+  sees its last four characters (see ``masked``).
 
 Values are read from the database at most every few seconds per process, so a change reaches every worker quickly.
 """
@@ -39,7 +42,10 @@ KEYS: dict[str, tuple[str, int]] = {
     "supportEmail": ("email", 254),
     "supportUrl": ("url", 300),
     "contactPhone": ("phone", 80),
+    "firmsMapKey": ("secret", 64),
 }
+#: Settings whose value never leaves the server.
+SECRETS = frozenset(k for k, (kind, _) in KEYS.items() if kind == "secret")
 
 CACHE_SECONDS = 5.0
 _cache: tuple[float, dict[str, Any]] | None = None
@@ -70,6 +76,10 @@ def clean(key: str, value: Any) -> Any:
         raise ValueError(f"“{v}” is not an e-mail address.")
     if kind == "phone" and not (_PHONE.match(v) and all(len(re.sub(r"\D", "", n)) >= 6 for n in re.split(r"[,/]", v) if n.strip())):
         raise ValueError("Write phone numbers with digits (and +, spaces, dashes or brackets), separated by commas.")
+    if kind == "secret" and key == "firmsMapKey":
+        from .services.earth import check_map_key
+
+        return check_map_key(v)
     if kind == "url" and not _URL.match(v):
         raise ValueError("The support link must start with https:// (or http://).")
     return v
@@ -92,6 +102,8 @@ def stored() -> dict[str, Any]:
 def update(changes: dict[str, Any], by: str) -> dict[str, Any]:
     """Applies changes (None clears a setting) after checking every value; returns the stored settings."""
     global _cache
+    # The Admin tab gets a secret back masked ({"set": true, ...}); sending that again leaves the secret as it is.
+    changes = {k: v for k, v in changes.items() if not (k in SECRETS and isinstance(v, dict))}
     cleaned = {k: clean(k, v) for k, v in changes.items()}
     now = time.time()
     with db.connect() as c:
@@ -102,6 +114,21 @@ def update(changes: dict[str, Any], by: str) -> dict[str, Any]:
     with _lock:
         _cache = None
     return stored()
+
+
+def masked(values: dict[str, Any]) -> dict[str, Any]:
+    """Settings as the Admin tab may see them: a secret becomes {"set": True, "last4": "…"}."""
+    out = dict(values)
+    for k in SECRETS & out.keys():
+        v = str(out[k])
+        out[k] = {"set": True, "last4": v[-4:]}
+    return out
+
+
+def firms_map_key() -> str | None:
+    """The FIRMS MAP_KEY an administrator saved, else TERRAX_FIRMS_MAP_KEY, else None."""
+    v = stored().get("firmsMapKey") or settings().firms_map_key
+    return str(v) if v else None
 
 
 def signup() -> str:

@@ -106,6 +106,8 @@ class Settings:
     auth_mode: str = field(default_factory=lambda: os.environ.get("TERRAX_AUTH", "optional").strip().lower())
     #: Who may create an account: "open" (anyone) or "closed" (only an admin, from the admin panel or the CLI).
     signup: str = field(default_factory=lambda: os.environ.get("TERRAX_SIGNUP", "open").strip().lower())
+    #: NASA FIRMS MAP_KEY for the active-fire map layer; an administrator can set one in Admin → Site settings instead.
+    firms_map_key: str = field(default_factory=lambda: os.environ.get("TERRAX_FIRMS_MAP_KEY", "").strip())
     #: An admin account created (or reset to this password) at start-up, so a fresh server can be signed in to.
     admin_email: str = field(default_factory=lambda: os.environ.get("TERRAX_ADMIN_EMAIL", "").strip().lower())
     admin_password: str = field(default_factory=lambda: os.environ.get("TERRAX_ADMIN_PASSWORD", ""))

@@ -10,6 +10,7 @@ import { apiUrl, request, type ResultImage } from '../../lib/api';
 import type { LatLngBounds } from '../../lib/geo';
 import { getLocalPmtiles, loadLocalPmtiles } from '../../lib/pmtiles-store';
 import type { Boundary } from '../../lib/zonal';
+import { DEPTH_CLASSES, FRP_CLASSES, fireHtml, quakeHtml, weatherGlyph, weatherHtml, type QuakeProps, type WeatherPoint } from '../../lib/earth';
 
 export type LayerStatus = { state: 'loading' | 'ok' | 'error'; message?: string };
 
@@ -47,6 +48,24 @@ export interface MapState {
   areas?: FeatureCollection | null;
   /** The point whose place card is open. */
   pick?: { lat: number; lon: number } | null;
+  /** Live Earth layers (lib/earth.ts): null hides one. */
+  live?: LiveData;
+}
+
+export interface LiveData {
+  quakes: FeatureCollection | null;
+  fires: FeatureCollection | null;
+  /** Label of the fire source, for the popup. */
+  fireLabel: string;
+  weather: WeatherPoint[] | null;
+}
+
+export interface MapView {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  zoom: number;
 }
 
 export interface MapHandlers {
@@ -54,6 +73,8 @@ export interface MapHandlers {
   onPick?: (lat: number, lon: number) => void;
   /** A click on a saved area. */
   onArea?: (id: string) => void;
+  /** The view after it moved (and once at the start). */
+  onView?: (v: MapView) => void;
 }
 
 export interface PlateLegend {
@@ -213,6 +234,8 @@ export class MapController {
   private placeMarkers = new Map<string, maplibregl.Marker[]>();
   private popup: maplibregl.Popup | null = null;
   private pickMarker: maplibregl.Marker | null = null;
+  private weatherMarkers: maplibregl.Marker[] = [];
+  private weatherKey: WeatherPoint[] | null = null;
   handlers: MapHandlers = {};
   private lastBounds: LatLngBounds | null = null;
   private styleReady = false;
@@ -247,6 +270,7 @@ export class MapController {
     });
     this.map.on('click', e => this.onClick(e));
     this.map.on('moveend', () => this.onMove());
+    this.map.on('load', () => this.emitView());
     this.map.on('error', e => this.onError(e as unknown as { sourceId?: string; error?: Error }));
     this.map.on('sourcedata', e => {
       const ev = e as unknown as { sourceId?: string; tile?: unknown };
@@ -260,6 +284,7 @@ export class MapController {
     for (const s of this.slots.values()) s.dispose?.();
     this.markers.forEach(m => m.remove());
     this.pickMarker?.remove();
+    this.weatherMarkers.forEach(m => m.remove());
     for (const list of this.placeMarkers.values()) list.forEach(m => m.remove());
     this.map.remove();
   }
@@ -411,6 +436,8 @@ export class MapController {
     want('boundary', () => this.boundaryLayer(st.vis.boundary ? st.boundary : null));
     want('features', () => this.features(st.vis.features ? st.geojson : null, st.vis.features && !st.geojson ? st.bounds : null));
     want('areas', () => this.areasLayer(st.vis.areas ? (st.areas ?? null) : null));
+    want('fires', () => this.firesLayer(st.live?.fires ?? null));
+    want('quakes', () => this.quakesLayer(st.live?.quakes ?? null));
     want('draw', () => this.drawLayer(st.draw));
 
     for (const name of [...this.slots.keys()]) if (!order.includes(name)) this.drop(name);
@@ -424,7 +451,92 @@ export class MapController {
     for (const [id, s] of Object.entries(this.status)) if (s.state === 'error' && !order.some(n => n === `ov:${id}`) && id !== base.id) delete this.status[id];
     this.drawMarkers(st.draw);
     this.updatePick(st.pick ?? null);
+    this.updateWeather(st.live?.weather ?? null);
     this.updatePlaces();
+  }
+
+  // ── Live Earth layers ────────────────────────────────────────────────────
+
+  private emitView() {
+    if (!this.handlers.onView || this.destroyed) return;
+    const b = this.map.getBounds();
+    this.handlers.onView({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth(), zoom: this.map.getZoom() });
+  }
+
+  private quakesLayer(fc: FeatureCollection | null) {
+    if (!fc) return this.drop('quakes');
+    const sid = `${P}quakes`;
+    const color: unknown[] = ['step', ['coalesce', ['get', 'depthKm'], 0], DEPTH_CLASSES[0].color];
+    DEPTH_CLASSES.slice(1).forEach((c, i) => color.push(DEPTH_CLASSES[i].max, c.color));
+    const key = `quakes:${this.keyOf(fc)}`;
+    const src = this.map.getSource(sid) as GeoJSONSource | undefined;
+    if (src && this.slots.get('quakes')) {
+      // New data for the same layer: swap it in place (no flicker).
+      src.setData(fc);
+      this.slots.get('quakes')!.key = key;
+      return;
+    }
+    this.put('quakes', key, { [sid]: { type: 'geojson', data: fc, attribution: '<a href="https://earthquake.usgs.gov/earthquakes/feed/" target="_blank" rel="noopener">USGS earthquakes</a>' } }, [
+      {
+        id: `${P}quakes-circle`,
+        type: 'circle',
+        source: sid,
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['coalesce', ['get', 'mag'], 0], 0, 2, 3, 4, 5, 8, 7, 16, 9, 26],
+          'circle-color': color as never,
+          'circle-opacity': 0.75,
+          'circle-stroke-color': '#0f172a',
+          'circle-stroke-width': 1,
+        },
+      },
+    ]);
+  }
+
+  private firesLayer(fc: FeatureCollection | null) {
+    if (!fc) return this.drop('fires');
+    const sid = `${P}fires`;
+    const color: unknown[] = ['step', ['get', 'frp'], FRP_CLASSES[0].color];
+    FRP_CLASSES.slice(1).forEach((c, i) => color.push(FRP_CLASSES[i].max, c.color));
+    const key = `fires:${this.keyOf(fc)}`;
+    const src = this.map.getSource(sid) as GeoJSONSource | undefined;
+    if (src && this.slots.get('fires')) {
+      src.setData(fc);
+      this.slots.get('fires')!.key = key;
+      return;
+    }
+    this.put('fires', key, { [sid]: { type: 'geojson', data: fc, attribution: '<a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener">NASA FIRMS</a>' } }, [
+      {
+        id: `${P}fires-circle`,
+        type: 'circle',
+        source: sid,
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 1.5, 5, 2.5, 9, 4.5, 13, 7],
+          'circle-color': color as never,
+          'circle-opacity': 0.85,
+        },
+      },
+    ]);
+  }
+
+  /** Today's weather as small HTML markers (a few dozen at most), so no glyph server is needed. */
+  private updateWeather(points: WeatherPoint[] | null) {
+    if (points === this.weatherKey) return;
+    this.weatherKey = points;
+    this.weatherMarkers.forEach(m => m.remove());
+    this.weatherMarkers = [];
+    for (const p of points ?? []) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'wx-marker';
+      el.title = `${p.text ?? 'Weather'}: ${p.temperature ?? '—'} ${p.units.temperature ?? '°C'}`;
+      el.setAttribute('aria-label', el.title);
+      el.innerHTML = `<span class="wx-glyph" aria-hidden="true">${weatherGlyph(p.code, p.isDay)}</span><span class="num">${p.temperature === null ? '—' : Math.round(p.temperature)}°</span>`;
+      el.addEventListener('click', ev => {
+        ev.stopPropagation();
+        this.showPopup([p.lon, p.lat], `${weatherHtml(p)}<div class="muted"><a href="https://open-meteo.com/" target="_blank" rel="noopener">Weather data by Open-Meteo.com</a></div>`, 'weather');
+      });
+      this.weatherMarkers.push(new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(this.map));
+    }
   }
 
   /** Moves the view to a point (place search, place card). */
@@ -763,6 +875,7 @@ export class MapController {
 
   /** Loads the 1:10m Natural Earth cells for the view once zoomed in. */
   private onMove() {
+    this.emitView();
     this.updatePlaces();
     if (this.map.getZoom() < DETAIL_ZOOM) return;
     const names = [...this.slots.entries()].filter(([, s]) => s.sources.some(id => id.endsWith('-fine-land') || id.endsWith('-fine-rivers') || id.endsWith('-fine-borders'))).map(([n]) => n);
@@ -946,6 +1059,30 @@ export class MapController {
     if (st.draw) {
       st.draw.onAdd([e.lngLat.lat, ((((e.lngLat.lng + 180) % 360) + 360) % 360) - 180]);
       return;
+    }
+    // Live points first: a small box around the click, since they are only a few pixels wide.
+    const box: [maplibregl.PointLike, maplibregl.PointLike] = [
+      [e.point.x - 5, e.point.y - 5],
+      [e.point.x + 5, e.point.y + 5],
+    ];
+    if (this.map.getLayer(`${P}quakes-circle`)) {
+      const hit = this.map.queryRenderedFeatures(box, { layers: [`${P}quakes-circle`] });
+      if (hit.length) {
+        // The strongest under the cursor (they are drawn strongest on top).
+        const top = hit.reduce((a, b) => ((b.properties?.mag ?? -9) > (a.properties?.mag ?? -9) ? b : a));
+        const g = top.geometry as unknown as { coordinates: [number, number] };
+        this.showPopup(g.coordinates, quakeHtml(top.properties as unknown as QuakeProps), 'quake');
+        return;
+      }
+    }
+    if (this.map.getLayer(`${P}fires-circle`)) {
+      const hit = this.map.queryRenderedFeatures(box, { layers: [`${P}fires-circle`] })[0];
+      if (hit) {
+        const g = hit.geometry as unknown as { coordinates: [number, number] };
+        const more = this.map.queryRenderedFeatures(box, { layers: [`${P}fires-circle`] }).length - 1;
+        this.showPopup(g.coordinates, fireHtml(hit.properties as never, st.live?.fireLabel ?? 'NASA FIRMS') + (more > 0 ? `<div class="muted">and ${more} more here; zoom in</div>` : ''), 'fire');
+        return;
+      }
     }
     if (this.handlers.onArea && this.map.getLayer(`${P}areas-fill`)) {
       const hit = this.map.queryRenderedFeatures(e.point, { layers: [`${P}areas-fill`] })[0];

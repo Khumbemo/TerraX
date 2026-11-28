@@ -170,7 +170,7 @@ def get_settings() -> dict[str, Any]:
     from .. import site
     from ..config import settings
 
-    return {"settings": site.stored(), "defaults": {"signup": settings().signup}}
+    return {"settings": site.masked(site.stored()), "defaults": {"signup": settings().signup, "firmsMapKey": bool(settings().firms_map_key)}}
 
 
 @router.put("/settings")
@@ -183,7 +183,41 @@ def put_settings(changes: dict[str, Any], request: Request, p: Principal = Depen
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     audit.record("admin.settings_changed", request, detail={k: ("set" if v not in (None, "") else "cleared") for k, v in changes.items()})
-    return {"settings": out}
+    return {"settings": site.masked(out)}
+
+
+@router.post("/settings/firms-check")
+def firms_check(body: dict[str, Any]) -> dict[str, Any]:
+    """Asks FIRMS how many transactions a MAP_KEY has left (the typed key, else the saved one); the key is not stored."""
+    import json
+
+    import httpx
+
+    from .. import site
+    from ..services import earth
+    from ..services.live import USER_AGENT
+
+    typed = body.get("key")
+    key = typed.strip() if isinstance(typed, str) and typed.strip() else site.firms_map_key()
+    if not key:
+        raise HTTPException(400, "Enter a MAP_KEY first.")
+    try:
+        url = earth.firms_status_url(key)
+    except ValueError as err:
+        raise HTTPException(400, str(err)) from err
+    try:
+        with httpx.Client(timeout=20, headers={"User-Agent": USER_AGENT}) as c:
+            r = c.get(url)
+    except httpx.HTTPError as err:
+        raise HTTPException(502, f"Could not reach FIRMS: {type(err).__name__}") from None
+    try:
+        j = json.loads(r.text)
+    except ValueError:
+        j = None
+    # Documented reply: {"transaction_limit", "current_transactions", "transaction_interval"}; otherwise plain text.
+    if isinstance(j, dict) and "transaction_limit" in j:
+        return {"ok": True, "limit": j.get("transaction_limit"), "used": j.get("current_transactions"), "interval": j.get("transaction_interval")}
+    return {"ok": False, "message": (r.text.strip().splitlines() or [f"HTTP {r.status_code}"])[0][:200]}
 
 
 @router.get("/system")

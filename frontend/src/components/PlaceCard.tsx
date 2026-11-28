@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FeatureCollection, Geometry } from 'geojson';
 import { request } from '../lib/api';
 import { usePrefs } from '../lib/prefs';
-import { lengthM } from '../lib/units';
+import { elevationM, lengthM } from '../lib/units';
 
 /** What the server knows about a point (services/place.py). */
 export interface PlaceInfo {
@@ -49,12 +49,18 @@ export default function PlaceCard({ at, onClose, onWeather, onSatellite, onTarge
   const [info, setInfo] = useState<PlaceInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [country, setCountry] = useState<string | null | undefined>(undefined);
+  // Ground height comes from an outside service (Open-Meteo), so it loads on its own and the card never waits for it.
+  const [elev, setElev] = useState<{ value: number | null; error?: string } | undefined>(undefined);
 
   useEffect(() => {
     let alive = true;
     setInfo(null);
     setError(null);
     setCountry(undefined);
+    setElev(undefined);
+    request<{ elevation: number | null }>(`/api/live/earth/elevation?lat=${at.lat.toFixed(5)}&lon=${at.lon.toFixed(5)}`)
+      .then(r => alive && setElev({ value: r.elevation }))
+      .catch(err => alive && setElev({ value: null, error: err instanceof Error ? err.message : 'unavailable' }));
     request<PlaceInfo>(`/api/maps/place?lat=${at.lat.toFixed(5)}&lon=${at.lon.toFixed(5)}`)
       .then(r => alive && setInfo(r))
       .catch(err => alive && setError(err instanceof Error ? err.message : 'Could not read this place.'));
@@ -102,6 +108,21 @@ export default function PlaceCard({ at, onClose, onWeather, onSatellite, onTarge
                 </button>
                 <div className="muted num">{info.dms}</div>
                 {info.utm && <div className="muted num">UTM {info.utm.label}</div>}
+              </dd>
+            </div>
+            <div className="place-fact">
+              <dt>Elevation</dt>
+              <dd id="place-elevation">
+                {elev === undefined ? (
+                  <span className="muted">Reading…</span>
+                ) : elev.error ? (
+                  <span className="muted">Not available ({elev.error})</span>
+                ) : (
+                  <>
+                    <span className="num">{elevationM(elev.value, units)}</span>
+                    {elev.value === 0 && <div className="muted">0 is also what the model gives over the sea.</div>}
+                  </>
+                )}
               </dd>
             </div>
             <div className="place-fact">
@@ -169,7 +190,15 @@ export default function PlaceCard({ at, onClose, onWeather, onSatellite, onTarge
           </div>
           <p className="field-hint place-sources">
             Places: Natural Earth (public domain). Climate: Beck et al. 2018. Biome: RESOLVE 2017. Both maps are at about 10 km, so near a boundary the class can differ from the
-            ground. Sun times: NOAA solar equations, in UTC.
+            ground. Sun times: NOAA solar equations, in UTC. Elevation: Copernicus DEM GLO-90 (90 m) of the EU Copernicus programme,{' '}
+            <a href="https://doi.org/10.5270/ESA-c5d3d65" target="_blank" rel="noopener noreferrer">
+              doi:10.5270/ESA-c5d3d65
+            </a>
+            , through{' '}
+            <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">
+              Open-Meteo
+            </a>
+            .
           </p>
         </>
       )}

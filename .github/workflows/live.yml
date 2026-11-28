@@ -12,6 +12,8 @@ on:
       - backend/terrax/tools/sentinel.py
       - backend/terrax/api/live.py
       - backend/tests/test_live.py
+      - backend/terrax/services/earth.py
+      - backend/tests/test_earth_live.py
       - .github/workflows/live.yml
 
 permissions:
@@ -37,3 +39,10 @@ jobs:
         env:
           TERRAX_LIVE: '1'
         run: pytest -p no:warnings tests/test_live.py -v
+      # USGS, Open-Meteo and FIRMS. The FIRMS Area API test runs only if the repository has a FIRMS_MAP_KEY secret.
+      - name: Earthquakes, fires, weather and elevation, live
+        if: success() || failure()  # independent of the catalogues above
+        env:
+          TERRAX_LIVE: '1'
+          TERRAX_FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+        run: pytest -p no:warnings tests/test_earth_live.py -v -rs

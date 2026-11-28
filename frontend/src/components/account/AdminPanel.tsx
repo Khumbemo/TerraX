@@ -48,6 +48,8 @@ interface SiteSettings {
   contactPhone?: string;
   supportEmail?: string;
   supportUrl?: string;
+  /** Never the key itself: the server sends whether one is saved and its last four characters. */
+  firmsMapKey?: { set: boolean; last4: string };
 }
 
 interface SystemInfo {
@@ -119,6 +121,9 @@ export default function AdminPanel() {
   const [jobFilter, setJobFilter] = useState({ state: '', tool: '' });
   const [backups, setBackups] = useState<{ backups: Backup[]; everyHours: number; keep: number } | null>(null);
   const [working, setWorking] = useState('');
+  const [firmsKey, setFirmsKey] = useState('');
+  const [firmsEnvKey, setFirmsEnvKey] = useState(false);
+  const [firmsCheck, setFirmsCheck] = useState<string | null>(null);
   const fail = useCallback((err: unknown) => notify(err instanceof Error ? err.message : 'That did not work.', 'error'), [notify]);
 
   const load = useCallback(() => {
@@ -126,10 +131,11 @@ export default function AdminPanel() {
     request<{ users: AdminUser[] }>(`/api/admin/users${userQuery.trim() ? `?q=${encodeURIComponent(userQuery.trim())}` : ''}`).then(r => setUsers(r.users), fail);
   }, [fail, userQuery]);
   const loadSite = useCallback(() => {
-    request<{ settings: SiteSettings; defaults: { signup: string } }>('/api/admin/settings').then(r => {
+    request<{ settings: SiteSettings; defaults: { signup: string; firmsMapKey?: boolean } }>('/api/admin/settings').then(r => {
       setSite(r.settings);
       setSiteDraft(r.settings);
       setSignupDefault(r.defaults.signup);
+      setFirmsEnvKey(Boolean(r.defaults.firmsMapKey));
     }, fail);
   }, [fail]);
   const loadSystem = useCallback(() => {
@@ -166,6 +172,31 @@ export default function AdminPanel() {
       loadAudit();
     } catch (err) {
       fail(err);
+    }
+  };
+  const saveFirmsKey = async (value: string | null) => {
+    try {
+      const r = await request<{ settings: SiteSettings }>('/api/admin/settings', { method: 'PUT', json: { firmsMapKey: value } });
+      setSite(r.settings);
+      setSiteDraft(d => ({ ...d, firmsMapKey: r.settings.firmsMapKey }));
+      setFirmsKey('');
+      setFirmsCheck(null);
+      notify(value ? 'MAP_KEY saved: the map’s fire layer can be turned on.' : 'MAP_KEY removed.', 'success');
+      loadAudit();
+    } catch (err) {
+      fail(err);
+    }
+  };
+  const checkFirmsKey = async () => {
+    setFirmsCheck('Asking FIRMS…');
+    try {
+      const r = await request<{ ok: boolean; limit?: number; used?: number; interval?: string; message?: string }>('/api/admin/settings/firms-check', {
+        method: 'POST',
+        json: { key: firmsKey.trim() || null },
+      });
+      setFirmsCheck(r.ok ? `FIRMS accepts the key: ${r.used ?? '?'} of ${r.limit ?? '?'} transactions used in the current ${r.interval ?? 'interval'}.` : `FIRMS says: ${r.message}`);
+    } catch (err) {
+      setFirmsCheck(err instanceof Error ? err.message : 'The check did not work.');
     }
   };
   const action = async (name: string, path: string, done: (r: Record<string, number | string>) => string) => {
@@ -492,6 +523,44 @@ export default function AdminPanel() {
             <span>Support or help page (https://…)</span>
             <input id="admin-site-support-url" type="url" maxLength={300} value={siteDraft.supportUrl ?? ''} onChange={e => setDraft({ supportUrl: e.target.value })} />
           </label>
+          <h3>Live map data</h3>
+          <p className="field-hint">
+            Earthquakes (USGS), today’s weather and elevation (Open-Meteo) need no key. Active fires come from NASA FIRMS, which needs a free MAP_KEY:{' '}
+            <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener noreferrer">
+              request one
+            </a>{' '}
+            and it is sent by e-mail. FIRMS allows 5000 transactions per 10 minutes per key; each TerraX server process asks at most once per satellite and period every 10 minutes
+            and shares the answer with every viewer.
+          </p>
+          <p id="admin-firms-state" className="muted">
+            {site.firmsMapKey?.set
+              ? `A MAP_KEY is saved (ending in ${site.firmsMapKey.last4}).`
+              : firmsEnvKey
+                ? 'The server’s TERRAX_FIRMS_MAP_KEY is used (none saved here).'
+                : 'No MAP_KEY yet: the fire layer is off for everyone.'}
+          </p>
+          <label className="input-group">
+            <span>{site.firmsMapKey?.set ? 'Replace the MAP_KEY' : 'NASA FIRMS MAP_KEY'}</span>
+            <input id="admin-firms-key" type="password" autoComplete="off" spellCheck={false} maxLength={64} value={firmsKey} onChange={e => setFirmsKey(e.target.value)} />
+          </label>
+          <div className="button-row">
+            <button type="button" id="admin-firms-save" className="btn" disabled={!firmsKey.trim()} onClick={() => saveFirmsKey(firmsKey.trim())}>
+              Save MAP_KEY
+            </button>
+            <button type="button" id="admin-firms-check" className="btn" disabled={!firmsKey.trim() && !site.firmsMapKey?.set && !firmsEnvKey} onClick={checkFirmsKey}>
+              Check with FIRMS
+            </button>
+            {site.firmsMapKey?.set && (
+              <button type="button" id="admin-firms-remove" className="btn" onClick={() => saveFirmsKey(null)}>
+                Remove
+              </button>
+            )}
+          </div>
+          {firmsCheck && (
+            <p id="admin-firms-check-result" className="field-hint" role="status">
+              {firmsCheck}
+            </p>
+          )}
           <div className="button-row">
             <button type="button" id="admin-site-save" className="btn btn-primary" onClick={saveSite}>
               Save site settings
